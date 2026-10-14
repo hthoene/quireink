@@ -14,9 +14,10 @@ use quireink_fs::DirStorage;
 use quireink_graphics::Framebuffer;
 use quireink_platform::{
     ButtonState, DeviceInfo, DisplayInfo, InputCaps, InputEvent, Instant, Mounted, PixelFormat,
-    Point, PointerEvent, PointerPhase, PointerTool, Rotation,
+    Point, PointerEvent, PointerPhase, PointerTool, RefreshMode, Rotation,
 };
 
+use crate::epd::Epd;
 use crate::plugin::AndroidPlugin;
 use crate::{access, keys, pixels};
 
@@ -30,6 +31,8 @@ struct Running {
     restart: bool,
     /// The library is the shared `Books` folder.
     books_folder: bool,
+    /// The strongest refresh requested since the last frame was shown.
+    refresh: Option<RefreshMode>,
 }
 
 #[unsafe(no_mangle)]
@@ -41,6 +44,7 @@ fn android_main(app: AndroidApp) {
     );
     let start = StdInstant::now();
     let now = move || Instant(start.elapsed().as_millis() as u64);
+    let mut epd = Epd::detect(&app);
     let mut running: Option<Running> = None;
     let mut window: Option<NativeWindow> = None;
     let mut quit = false;
@@ -62,6 +66,10 @@ fn android_main(app: AndroidApp) {
                             running = start_kernel(&app, window, now());
                         }
                         if let Some(running) = &running {
+                            // A new or returning window: start clean.
+                            if let Some(epd) = epd.as_mut() {
+                                epd.set(RefreshMode::Full);
+                            }
                             present(window, &running.frame);
                         }
                     }
@@ -79,6 +87,12 @@ fn android_main(app: AndroidApp) {
                         && access::granted(&app)
                     {
                         running.restart = true;
+                    }
+                }
+                MainEvent::Pause => {
+                    // Other apps get the device's own refresh setting.
+                    if let Some(epd) = epd.as_mut() {
+                        epd.reset();
                     }
                 }
                 MainEvent::TerminateWindow { .. } => window = None,
@@ -114,6 +128,9 @@ fn android_main(app: AndroidApp) {
             changed |= apply(state, effects);
         }
         if changed && let Some(window) = &window {
+            if let (Some(epd), Some(mode)) = (epd.as_mut(), state.refresh.take()) {
+                epd.set(mode);
+            }
             present(window, &state.frame);
         }
         for warning in state.kernel.take_warnings() {
@@ -128,6 +145,9 @@ fn android_main(app: AndroidApp) {
             drop(running.take());
             running = start_kernel(&app, window, now());
             if let Some(running) = &running {
+                if let Some(epd) = epd.as_mut() {
+                    epd.set(RefreshMode::Full);
+                }
                 present(window, &running.frame);
             }
         }
@@ -213,6 +233,7 @@ fn start_kernel(app: &AndroidApp, window: &NativeWindow, now: Instant) -> Option
         wake_at: None,
         restart: false,
         books_folder,
+        refresh: None,
     };
     apply(&mut running, effects);
     Some(running)
@@ -257,6 +278,9 @@ fn install_samples(app: &AndroidApp, root: &Path) {
 fn apply(state: &mut Running, effects: Effects) -> bool {
     state.wake_at = effects.wake_at();
     state.restart |= effects.restart();
+    if let Some((_, mode)) = effects.refresh() {
+        state.refresh = Some(state.refresh.map_or(mode, |m| m.max(mode)));
+    }
     if effects.refresh().is_none() {
         return false;
     }

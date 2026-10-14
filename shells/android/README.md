@@ -43,12 +43,15 @@ USB debugging*.
   menu, or swipe. Long-press for more options.
 - **Buttons:** page keys and volume keys turn pages; Back goes back.
 - **Language:** the system language, unless one is chosen in the settings.
+- **E-ink (Onyx Boox):** QuireInk chooses the waveform for every frame:
+  a flashing full refresh every few pages (*Settings → Display*) and on
+  new screens, clean partial refreshes for page turns and fast ones for
+  menus. Boox's own per-app refresh setting applies again when QuireInk is
+  in the background.
 
 ## Limitations
 
 These are planned:
 
-- E-ink refresh modes are left to the device. Boox's optimization settings
-  for the app apply; Onyx's SDK will map QuireInk's refresh requests later.
 - Rendering is grayscale, also on colour panels.
 - There is no frontlight control yet.

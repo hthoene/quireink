@@ -10,8 +10,8 @@
 //! with the bundled sample books. Settings and caches always stay in the
 //! app's folder.
 //!
-//! E-ink refresh modes are left to the device for now; vendor SDKs (e.g.
-//! Onyx's for Boox) will map QuireInk's refresh requests later.
+//! On Onyx Boox devices, QuireInk's refresh requests choose the e-ink
+//! waveform (see `epd`); elsewhere the device refreshes on its own.
 
 pub mod keys;
 pub mod pixels;
@@ -20,5 +20,7 @@ pub mod pixels;
 mod access;
 #[cfg(target_os = "android")]
 mod app;
+#[cfg(target_os = "android")]
+mod epd;
 #[cfg(target_os = "android")]
 mod plugin;
