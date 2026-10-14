@@ -6,18 +6,21 @@
 //!
 //! Works with buttons only (up/down or left/right move the selection,
 //! page buttons scroll, confirm opens, back goes to the parent folder) and
-//! with touch (tap a row).
+//! with touch (tap a row). Only the visible page of a folder is held in
+//! memory, so folders of any size work on small devices.
 
 #![no_std]
 
 extern crate alloc;
 
+mod listing;
+
 use alloc::borrow::Cow;
 use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::{String, ToString};
-use alloc::vec::Vec;
 
+use listing::{Entry, Listing};
 use quireink_sdk::builtin::{actions, events, params, slots};
 use quireink_sdk::ui::{self, ListChange, ListView, UiStyle};
 use quireink_sdk::{
@@ -67,17 +70,16 @@ impl Plugin for Files {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct Entry {
-    name: String,
-    is_dir: bool,
-}
-
 #[derive(Debug)]
 struct Browser {
     root: String,
     dir: String,
-    entries: Vec<Entry>,
+    /// Number of entries in the folder.
+    len: usize,
+    /// Index of the first entry of `page`.
+    first: usize,
+    /// The entries of the visible page.
+    page: alloc::vec::Vec<Entry>,
     style: UiStyle,
     header: Rect,
     list: ListView,
@@ -99,7 +101,9 @@ impl Browser {
         let mut browser = Self {
             root,
             dir,
-            entries: Vec::new(),
+            len: 0,
+            first: 0,
+            page: alloc::vec::Vec::new(),
             list: ListView::new(area, style.row),
             style,
             header,
@@ -108,26 +112,43 @@ impl Browser {
         browser
     }
 
+    fn listing<'a>(dir: &'a str, env: &'a Env<'_>) -> Listing<'a> {
+        Listing {
+            storage: env.storage,
+            formats: env.formats,
+            dir,
+        }
+    }
+
+    /// Shows the first page of the current folder.
     fn load(&mut self, env: &Env<'_>) {
-        let mut entries = Vec::new();
-        let _ = env.storage.list(&self.dir, &mut |entry| {
-            if entry.name.starts_with('.') {
-                return;
-            }
-            if entry.is_dir || env.formats.supports(entry.name) {
-                entries.push(Entry {
-                    name: entry.name.to_string(),
-                    is_dir: entry.is_dir,
-                });
-            }
-        });
-        entries.sort_by(|a, b| {
-            b.is_dir
-                .cmp(&a.is_dir)
-                .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
-        });
-        self.entries = entries;
+        let listing = Self::listing(&self.dir, env);
+        self.len = listing.count();
         self.list.focus = 0;
+        self.first = 0;
+        self.page = listing.after(None, self.list.rows());
+    }
+
+    /// Loads the page the focus is on, if it is not loaded.
+    fn show_focus(&mut self, env: &Env<'_>) {
+        let rows = self.list.rows();
+        let first = self.list.page() * rows;
+        if first == self.first && !self.page.is_empty() {
+            return;
+        }
+        let listing = Self::listing(&self.dir, env);
+        self.page = if first == self.first + rows {
+            listing.after(self.page.last(), rows)
+        } else if first + rows == self.first {
+            listing.before(self.page.first(), rows)
+        } else {
+            listing.page(self.list.page(), rows, self.len)
+        };
+        self.first = first;
+    }
+
+    fn entry(&self, index: usize) -> Option<&Entry> {
+        self.page.get(index.checked_sub(self.first)?)
     }
 
     fn path_of(&self, entry: &Entry) -> String {
@@ -138,7 +159,11 @@ impl Browser {
         }
     }
 
-    fn moved(change: ListChange, cx: &mut Cx<'_, '_>) {
+    fn moved(&mut self, change: ListChange, cx: &mut Cx<'_, '_>) {
+        if change == ListChange::Page {
+            let env = *cx.env();
+            self.show_focus(&env);
+        }
         if change != ListChange::None {
             cx.request_redraw();
             cx.request_refresh(if change == ListChange::Page {
@@ -150,7 +175,7 @@ impl Browser {
     }
 
     fn open(&mut self, index: usize, cx: &mut Cx<'_, '_>) {
-        let Some(entry) = self.entries.get(index).cloned() else {
+        let Some(entry) = self.entry(index).cloned() else {
             return;
         };
         let path = self.path_of(&entry);
@@ -172,18 +197,22 @@ impl Browser {
         if self.dir == self.root || self.dir.is_empty() {
             return false;
         }
-        let child = self.dir.rsplit('/').next().unwrap_or_default().to_string();
+        let child = Entry {
+            name: self.dir.rsplit('/').next().unwrap_or_default().to_string(),
+            is_dir: true,
+        };
         self.dir = self
             .dir
             .rsplit_once('/')
             .map_or(String::new(), |(parent, _)| parent.to_string());
         let env = *cx.env();
-        self.load(&env);
-        self.list.focus = self
-            .entries
-            .iter()
-            .position(|e| e.is_dir && e.name == child)
-            .unwrap_or(0);
+        let listing = Self::listing(&self.dir, &env);
+        self.len = listing.count();
+        let (first, page) = listing.page_of(&child, self.list.rows());
+        self.list.focus = (first + page.iter().position(|e| *e == child).unwrap_or(0))
+            .min(self.len.saturating_sub(1));
+        self.first = first;
+        self.page = page;
         cx.request_redraw();
         true
     }
@@ -192,7 +221,7 @@ impl Browser {
 impl Screen for Browser {
     fn draw(&mut self, canvas: &mut Canvas<'_>, env: &Env<'_>) {
         let style = self.style;
-        let len = self.entries.len();
+        let len = self.len;
         let title = if self.dir == self.root {
             env.i18n.tr("files.title").to_string()
         } else {
@@ -209,7 +238,7 @@ impl Screen for Browser {
         });
         ui::draw_header(canvas, env, &style, self.header, &title, note.as_deref());
 
-        if self.entries.is_empty() {
+        if self.len == 0 {
             let message = format!(
                 "{}\n{}",
                 env.i18n
@@ -222,10 +251,12 @@ impl Screen for Browser {
         let Some(font) = style.font(env) else {
             return;
         };
-        let entries = &self.entries;
+        let (first, page) = (self.first, &self.page);
         self.list
             .draw(canvas, &style, len, |canvas, index, rect, focused| {
-                let entry = &entries[index];
+                let Some(entry) = index.checked_sub(first).and_then(|i| page.get(i)) else {
+                    return;
+                };
                 let color = if focused { Color::WHITE } else { Color::BLACK };
                 let name = if entry.is_dir {
                     format!("{}/", entry.name)
@@ -261,17 +292,23 @@ impl Screen for Browser {
     }
 
     fn on_action(&mut self, action: &Id, cx: &mut Cx<'_, '_>) -> Handled {
-        let len = self.entries.len();
+        let len = self.len;
         let rows = self.list.rows() as isize;
         let a = action;
-        if *a == actions::UP || *a == actions::LEFT || *a == actions::PREVIOUS {
-            Self::moved(self.list.move_focus(-1, len), cx);
+        let delta = if *a == actions::UP || *a == actions::LEFT || *a == actions::PREVIOUS {
+            Some(-1)
         } else if *a == actions::DOWN || *a == actions::RIGHT || *a == actions::NEXT {
-            Self::moved(self.list.move_focus(1, len), cx);
+            Some(1)
         } else if *a == actions::NEXT_PAGE {
-            Self::moved(self.list.move_focus(rows, len), cx);
+            Some(rows)
         } else if *a == actions::PREV_PAGE {
-            Self::moved(self.list.move_focus(-rows, len), cx);
+            Some(-rows)
+        } else {
+            None
+        };
+        if let Some(delta) = delta {
+            let change = self.list.move_focus(delta, len);
+            self.moved(change, cx);
         } else if *a == actions::CONFIRM {
             self.open(self.list.focus, cx);
         } else if *a == actions::BACK {
@@ -290,7 +327,7 @@ impl Screen for Browser {
         if gesture.kind != GestureKind::Tap {
             return Handled::No;
         }
-        match self.list.hit(gesture.start, self.entries.len()) {
+        match self.list.hit(gesture.start, self.len) {
             Some(index) => {
                 self.list.focus = index;
                 self.open(index, cx);
@@ -307,7 +344,8 @@ impl Screen for Browser {
             let dir = self.dir.clone();
             let focus = self.list.focus;
             *self = Self::new(&env, &Params::new().with(params::PATH, dir));
-            self.list.focus = focus.min(self.entries.len().saturating_sub(1));
+            self.list.focus = focus.min(self.len.saturating_sub(1));
+            self.show_focus(&env);
             cx.request_redraw();
         }
     }
