@@ -151,7 +151,8 @@ pub fn wrap_lines_hyphenated(
 
 /// The last hyphenation point of the word at `word_start` that fits on the
 /// line: `(byte offset, line width with the hyphen)`. Only words made of
-/// letters are hyphenated; punctuation around them stays attached.
+/// letters with at least one lowercase letter are hyphenated; punctuation
+/// around them stays attached.
 #[allow(clippy::too_many_arguments)]
 fn hyphen_break(
     text: &str,
@@ -170,7 +171,9 @@ fn hyphen_break(
     let first = word.find(char::is_alphabetic)?;
     let (last, c) = word.char_indices().rev().find(|(_, c)| c.is_alphabetic())?;
     let core = &word[first..last + c.len_utf8()];
-    if !core.chars().all(char::is_alphabetic) {
+    // Words in capitals (abbreviations, headings set in capitals) are
+    // not hyphenated.
+    if !core.chars().all(char::is_alphabetic) || !core.chars().any(char::is_lowercase) {
         return None;
     }
     let hyphen = advance('-');
@@ -301,6 +304,9 @@ mod tests {
                 ("xy", 2.0, false)
             ]
         );
+        // Words in capitals are not hyphenated.
+        let caps = wrap_lines_hyphenated("ab ABCDEFGHI", |_| 9.0, |_| 1.0, Some(&hyphenate));
+        assert!(caps.iter().all(|l| !l.hyphen));
         // Without hyphenation the word moves to the next line.
         assert_eq!(lines(text, 9.0), vec!["ab", "abcdefghi", ", xy"]);
     }
