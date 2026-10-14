@@ -16,8 +16,10 @@
 
 extern crate alloc;
 
+mod annotations;
 mod index;
 mod screen;
+mod selection;
 mod toc;
 
 use alloc::borrow::Cow;
@@ -37,6 +39,22 @@ pub const PLUGIN: Id = Id::new_static("reader");
 pub const SCREEN: Id = Id::new_static("reader.screen");
 /// The table of contents screen; parameters `path`, `section`, `offset`.
 pub const TOC_SCREEN: Id = Id::new_static("reader.toc");
+/// The bookmarks and highlights of a book; parameter `path`.
+pub const ANNOTATIONS_SCREEN: Id = Id::new_static("reader.annotations");
+/// The actions offered for selected text, as a menu: plugins add their own
+/// with `Registrar::add_menu_entry`, users reorder them in `[menus]`.
+pub const SELECTION_MENU: Id = Id::new_static("reader.selection");
+/// Emitted when a plugin's action is chosen for selected text, with the
+/// parameters `action` (the action's id), `text`, `language`, `path`,
+/// `section` and `offset` (the start) and `end-section` and `end-offset`.
+/// The plugin whose action it is reacts; e.g. a "Share" or "Translate"
+/// action needs no more than a menu entry and a subscription.
+pub const TEXT_CHOSEN: Id = Id::new_static("reader.text-chosen");
+/// Parameters of [`TEXT_CHOSEN`].
+pub const ACTION: &str = "action";
+pub const TEXT: &str = "text";
+pub const END_SECTION: &str = "end-section";
+pub const END_OFFSET: &str = "end-offset";
 /// Asks the reader to show a position. Parameters: `path` (the book),
 /// `section` and `offset`. Emitted by the table of contents; bookmark or
 /// search plugins can use it too.
@@ -74,9 +92,20 @@ pub mod actions {
     pub const TOGGLE_JUSTIFY: Id = Id::new_static("reader.toggle-justify");
     /// Opens the table of contents.
     pub const TOC: Id = Id::new_static("reader.show-toc");
-    /// Chooses a word on the page with the buttons and looks it up (touch:
-    /// long-press the word).
-    pub const LOOKUP: Id = Id::new_static("reader.lookup-word");
+    /// Selects text with the buttons to look it up or highlight it
+    /// (touch: long-press a word).
+    pub const SELECT: Id = Id::new_static("reader.select-text");
+    /// Sets or removes the bookmark of the page.
+    pub const TOGGLE_BOOKMARK: Id = Id::new_static("reader.toggle-bookmark");
+    /// Lists the book's bookmarks and highlights.
+    pub const ANNOTATIONS: Id = Id::new_static("reader.show-annotations");
+    /// Items of the selection menu that the reader handles itself.
+    pub const LOOK_UP: Id = Id::new_static("reader.selection.look-up");
+    /// Highlights the selected text, or removes highlights in it.
+    pub const HIGHLIGHT: Id = Id::new_static("reader.selection.highlight");
+    /// Moves the end of the selection with the buttons.
+    pub const EXTEND: Id = Id::new_static("reader.selection.extend");
+    pub const CANCEL: Id = Id::new_static("reader.selection.cancel");
 }
 
 /// The reader plugin.
@@ -113,11 +142,41 @@ impl Plugin for Reader {
             title: Cow::Borrowed("reader.toc"),
             handler: None,
         })?;
-        r.add_action(quireink_sdk::ActionSpec {
-            id: actions::LOOKUP,
-            title: Cow::Borrowed("reader.lookup"),
-            handler: None,
+        r.add_screen(ScreenSpec {
+            id: ANNOTATIONS_SCREEN,
+            title: Cow::Borrowed("reader.annotations"),
+            factory: Box::new(|env, params| {
+                Box::new(annotations::AnnotationsScreen::open(env, params))
+            }),
         })?;
+        for (id, title) in [
+            (actions::SELECT, "reader.select"),
+            (actions::TOGGLE_BOOKMARK, "reader.toggle-bookmark"),
+            (actions::ANNOTATIONS, "reader.annotations"),
+            (actions::LOOK_UP, "reader.select.look-up"),
+            (actions::HIGHLIGHT, "reader.select.highlight"),
+            (actions::EXTEND, "reader.select.extend"),
+            (actions::CANCEL, "reader.select.cancel"),
+        ] {
+            r.add_action(quireink_sdk::ActionSpec {
+                id,
+                title: Cow::Borrowed(title),
+                handler: None,
+            })?;
+        }
+        // The bar for selected text; plugins add to it.
+        for (item, order) in [
+            (actions::LOOK_UP, 10),
+            (actions::HIGHLIGHT, 20),
+            (actions::EXTEND, 80),
+            (actions::CANCEL, 90),
+        ] {
+            r.add_menu_entry(quireink_sdk::MenuEntry {
+                menu: SELECTION_MENU,
+                item,
+                order,
+            })?;
+        }
 
         let int = |id, key: &'static str, (min, max, default), unit: &'static str| {
             SettingSpec::new(
@@ -210,7 +269,9 @@ impl Plugin for Reader {
         // Settings in the menu show their state and change in place.
         for (item, order) in [
             (actions::TOC, 5),
-            (actions::LOOKUP, 7),
+            (actions::TOGGLE_BOOKMARK, 6),
+            (actions::ANNOTATIONS, 7),
+            (actions::SELECT, 8),
             (settings::FONT_SIZE, 10),
             (settings::JUSTIFY, 30),
             (core_settings::NIGHT_MODE, 40),

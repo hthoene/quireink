@@ -83,6 +83,12 @@ pub struct PageLine {
     pub word_spacing: f32,
     /// The faces of `text`, in order and covering all of it.
     pub runs: Vec<LineRun>,
+    /// The section the line is from.
+    pub section: u32,
+    /// Where each word of `text` (separated by spaces) starts and ends in
+    /// the section's source, for positions that outlast the layout (e.g.
+    /// highlights).
+    pub words: Vec<(u32, u32)>,
 }
 
 /// An image at its position and size on the page.
@@ -112,6 +118,23 @@ impl Page {
     pub fn is_past_end(&self) -> bool {
         self.lines.is_empty() && self.images.is_empty()
     }
+}
+
+/// Source offsets of the words in `range` of a block's text.
+fn word_sources(block: &Block, range: core::ops::Range<usize>) -> Vec<(u32, u32)> {
+    let text = &block.text[range.clone()];
+    let mut words = Vec::new();
+    let mut at = range.start;
+    for word in text.split(' ') {
+        // The end after the last character: the offset of the text after
+        // the word may lie past the block's end.
+        if let Some((last, c)) = word.char_indices().last() {
+            let end = block.source_offset(at + last) + c.len_utf8() as u32;
+            words.push((block.source_offset(at), end));
+        }
+        at += word.len() + 1;
+    }
+    words
 }
 
 /// The face of a block's text at byte `index`.
@@ -309,12 +332,15 @@ pub fn layout_page(
                 line_text.push('-');
             }
             let range = from + line.range.start..from + line.range.end;
+            let words = word_sources(&block, range.clone());
             page.lines.push(PageLine {
                 x,
                 baseline: y + ascent,
                 text: line_text,
                 word_spacing,
                 runs: line_runs(&block, base, range, usize::from(line.hyphen)),
+                section: at.section,
+                words,
             });
             y += line_height;
         }
@@ -507,6 +533,21 @@ mod tests {
         };
         let page = layout(&doc, 0, 100.0, &style);
         assert_eq!(page.lines[0].word_spacing, 1.0);
+    }
+
+    #[test]
+    fn words_know_where_they_come_from() {
+        // Second line of the second block: "cc dd" at 3..8 of "aa bb cc dd".
+        let doc = Text::new(
+            "x
+aa bb cc dd
+",
+        );
+        let page = layout(&doc, 0, 100.0, &STYLE);
+        assert_eq!(texts(&page), vec!["x", "aa bb cc", "dd"]);
+        assert_eq!(page.lines[1].words, [(2, 4), (5, 7), (8, 10)]);
+        assert_eq!(page.lines[2].words, [(11, 13)]);
+        assert_eq!(page.lines[2].section, 0);
     }
 
     #[test]

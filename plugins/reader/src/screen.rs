@@ -11,7 +11,9 @@ use quireink_sdk::{
     Point, Rect, RefreshMode, Screen,
 };
 
+use crate::annotations::{self, Annotation, Kind, Mark};
 use crate::index::PageIndex;
+use crate::selection::{self, Item, Mode, Selection};
 use crate::settings::{FONT_SIZE, HYPHENATE, INDENT, JUSTIFY, LINE_SPACING, MARGIN};
 use crate::{PLUGIN, state_path};
 
@@ -186,13 +188,18 @@ struct Book {
     index: Option<PageIndex>,
     /// Where background pagination continues.
     indexing: Option<Locator>,
+    /// Where the bookmarks and highlights are.
+    marks: Vec<Mark>,
 }
 
-/// A word on the page, with its box on the screen.
+/// A word on the page, with its box on the screen and its place in the
+/// book.
 #[derive(Debug, Clone, PartialEq)]
-struct WordBox {
-    area: Rect,
-    text: String,
+pub(crate) struct WordBox {
+    pub area: Rect,
+    pub text: String,
+    pub start: Locator,
+    pub end: Locator,
 }
 
 impl WordBox {
@@ -202,114 +209,247 @@ impl WordBox {
     }
 }
 
+/// The data folder of the book at `path`.
+pub(crate) fn book_dir(path: &str) -> String {
+    format!(
+        "{}/books/{:016x}",
+        Env::plugin_dir(PLUGIN.as_str()),
+        fnv(path)
+    )
+}
+
 /// Shows a book page by page.
 pub(crate) struct ReaderScreen {
     book: Result<Book, String>,
-    /// The word chosen with buttons to look up, as an index into the
-    /// page's words.
-    selected: Option<usize>,
+    /// Text chosen on the page (see `selection`).
+    selection: Option<Selection>,
 }
 
 impl ReaderScreen {
     pub(crate) fn open(env: &Env<'_>, params: &Params) -> Self {
         Self {
             book: Book::open(env, params),
-            selected: None,
+            selection: None,
         }
     }
 
-    /// Opens the lookup slot (e.g. the dictionary) for `word`.
-    fn look_up(book: &Book, word: &WordBox, cx: &mut Cx<'_, '_>) {
-        let text = word.lookup_text();
-        if text.is_empty() {
+    /// The bar's items for the current selection.
+    fn items(&self, env: &Env<'_>, words: &[WordBox]) -> Vec<Item> {
+        let highlighted = match (&self.book, self.selection) {
+            (Ok(book), Some(selection)) => {
+                let (lo, hi) = selection.range();
+                words.get(lo).zip(words.get(hi)).is_some_and(|(a, b)| {
+                    book.marks
+                        .iter()
+                        .any(|m| m.kind == Kind::Highlight && m.overlaps(a.start, b.end))
+                })
+            }
+            _ => false,
+        };
+        selection::items(env, highlighted)
+    }
+
+    /// Changes the selection and redraws what it covered and covers.
+    fn set_selection(&mut self, to: Option<Selection>, cx: &mut Cx<'_, '_>) {
+        let bar_before = self.selection.is_some_and(|s| s.mode == Mode::Bar);
+        let bar_after = to.is_some_and(|s| s.mode == Mode::Bar);
+        self.selection = to;
+        // Fast refreshes are black and white: they would hide the gray of
+        // highlights.
+        let highlights = self.book.as_ref().is_ok_and(|book| {
+            book.marks
+                .iter()
+                .any(|m| m.kind == Kind::Highlight && m.overlaps(book.page.start, book.page.end))
+        });
+        cx.request_redraw();
+        cx.request_refresh(if bar_before != bar_after || highlights {
+            RefreshMode::Partial
+        } else {
+            RefreshMode::Fast
+        });
+    }
+
+    /// Does what a bar item stands for. Items of other plugins are
+    /// announced with the selected text (event [`crate::TEXT_CHOSEN`]).
+    fn activate(&mut self, item: &Id, cx: &mut Cx<'_, '_>) {
+        let env = *cx.env();
+        let (Ok(book), Some(selection)) = (&mut self.book, self.selection) else {
+            return;
+        };
+        let words = book.words(&env);
+        let (lo, hi) = selection.range();
+        let (Some(first), Some(last)) = (words.get(lo), words.get(hi)) else {
+            self.set_selection(None, cx);
+            return;
+        };
+        let (start, end) = (first.start, last.end);
+        let text = words[lo..=hi]
+            .iter()
+            .map(|w| w.text.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+        if *item == crate::actions::LOOK_UP {
+            let phrase = text.trim_matches(|c: char| !c.is_alphanumeric());
+            if !phrase.is_empty() {
+                cx.command(Command::OpenSlot(
+                    slots::LOOKUP,
+                    Params::new()
+                        .with(params::WORD, phrase.to_string())
+                        .with(params::LANGUAGE, book.language.clone()),
+                ));
+            }
             return;
         }
-        cx.command(Command::OpenSlot(
-            slots::LOOKUP,
-            Params::new()
-                .with(params::WORD, text.to_string())
-                .with(params::LANGUAGE, book.language.clone()),
-        ));
-    }
-
-    /// Moves the selection to word `to`, redrawing both highlights.
-    fn select(&mut self, words: &[WordBox], to: Option<usize>, cx: &mut Cx<'_, '_>) {
-        for index in [self.selected, to].into_iter().flatten() {
-            if let Some(word) = words.get(index) {
-                cx.request_redraw_area(highlight(word.area));
-            }
+        if *item == crate::actions::EXTEND {
+            let to = Selection {
+                mode: Mode::Extending,
+                focus: None,
+                ..selection
+            };
+            self.set_selection(Some(to), cx);
+            return;
         }
-        self.selected = to;
-        cx.request_refresh(RefreshMode::Fast);
+        if *item == crate::actions::HIGHLIGHT {
+            let highlight = |m: &Mark| m.kind == Kind::Highlight && m.overlaps(start, end);
+            // On highlighted text the item removes the highlight.
+            if !annotations::remove(env.storage, &book.dir, highlight) {
+                let annotation = Annotation {
+                    mark: Mark {
+                        kind: Kind::Highlight,
+                        start,
+                        end,
+                    },
+                    percent: (book.document.progress(start) * 100.0 + 0.5) as u8,
+                    text: annotations::snippet(&text),
+                };
+                annotations::add(env.storage, &book.dir, annotation);
+            }
+            book.marks = annotations::marks(env.storage, &book.dir);
+        } else if *item != crate::actions::CANCEL {
+            cx.command(Command::Emit(
+                crate::TEXT_CHOSEN,
+                crate::toc::locator_params(&book.path, start)
+                    .with(crate::ACTION, item.as_str().to_string())
+                    .with(crate::TEXT, text)
+                    .with(params::LANGUAGE, book.language.clone())
+                    .with(crate::END_SECTION, format!("{}", end.section))
+                    .with(crate::END_OFFSET, format!("{}", end.offset)),
+            ));
+        }
+        self.set_selection(None, cx);
+        cx.request_refresh(RefreshMode::Partial);
     }
 
-    /// Buttons while a word is selected: move, look up, or stop.
-    fn on_selection(&mut self, action: &Id, index: usize, cx: &mut Cx<'_, '_>) -> Handled {
+    /// Buttons while text is selected.
+    fn on_selection(&mut self, action: &Id, selection: Selection, cx: &mut Cx<'_, '_>) -> Handled {
         let env = *cx.env();
         let Ok(book) = &self.book else {
             return Handled::No;
         };
         let words = book.words(&env);
         if words.is_empty() {
-            self.selected = None;
+            self.set_selection(None, cx);
             return Handled::No;
         }
-        let last = words.len() - 1;
         let a = action;
-        let to = if [actions::LEFT, actions::PREVIOUS, actions::PREV_PAGE].contains(a) {
-            index.saturating_sub(1)
-        } else if [actions::RIGHT, actions::NEXT, actions::NEXT_PAGE].contains(a) {
-            (index + 1).min(last)
-        } else if *a == actions::UP {
-            nearest_on_line(&words, index, false)
-        } else if *a == actions::DOWN {
-            nearest_on_line(&words, index, true)
-        } else if *a == actions::CONFIRM {
-            if let Some(word) = words.get(index) {
-                Self::look_up(book, word, cx);
+        if *a == actions::BACK || *a == actions::MENU {
+            self.set_selection(None, cx);
+            return Handled::Yes;
+        }
+        match selection.mode {
+            Mode::Choosing | Mode::Extending => {
+                if *a == actions::CONFIRM {
+                    let to = Selection {
+                        mode: Mode::Bar,
+                        focus: Some(0),
+                        ..selection
+                    };
+                    self.set_selection(Some(to), cx);
+                } else if let Some(cursor) = selection.moved(a, &words) {
+                    let anchor = if selection.mode == Mode::Choosing {
+                        cursor
+                    } else {
+                        selection.anchor
+                    };
+                    let to = Selection {
+                        anchor,
+                        cursor,
+                        ..selection
+                    };
+                    self.set_selection(Some(to), cx);
+                } else {
+                    return Handled::No;
+                }
             }
-            return Handled::Yes;
-        } else if *a == actions::BACK || *a == actions::MENU {
-            self.select(&words, None, cx);
-            return Handled::Yes;
-        } else {
-            return Handled::No;
-        };
-        if to != index {
-            self.select(&words, Some(to), cx);
+            Mode::Bar => {
+                let items = self.items(&env, &words);
+                let focus = selection.focus.unwrap_or(0);
+                if *a == actions::CONFIRM {
+                    if let Some(item) = items.get(focus) {
+                        self.activate(&item.id.clone(), cx);
+                    }
+                } else if [
+                    actions::LEFT,
+                    actions::UP,
+                    actions::PREVIOUS,
+                    actions::PREV_PAGE,
+                ]
+                .contains(a)
+                {
+                    let to = Selection {
+                        focus: Some(focus.saturating_sub(1)),
+                        ..selection
+                    };
+                    self.set_selection(Some(to), cx);
+                } else if [
+                    actions::RIGHT,
+                    actions::DOWN,
+                    actions::NEXT,
+                    actions::NEXT_PAGE,
+                ]
+                .contains(a)
+                {
+                    let to = Selection {
+                        focus: Some((focus + 1).min(items.len() - 1)),
+                        ..selection
+                    };
+                    self.set_selection(Some(to), cx);
+                } else {
+                    return Handled::No;
+                }
+            }
         }
         Handled::Yes
     }
-}
 
-/// The area redrawn around a highlighted word.
-fn highlight(area: Rect) -> Rect {
-    Rect::new(
-        area.x.saturating_sub(6),
-        area.y.saturating_sub(6),
-        area.width + 12,
-        area.height + 12,
-    )
-}
-
-/// The word on the line above (or below) word `index` nearest to it.
-fn nearest_on_line(words: &[WordBox], index: usize, below: bool) -> usize {
-    let current = &words[index].area;
-    let center = |r: &Rect| i32::from(r.x) + i32::from(r.width) / 2;
-    let line = words
-        .iter()
-        .map(|w| w.area.y)
-        .filter(|&y| if below { y > current.y } else { y < current.y })
-        .min_by_key(|&y| y.abs_diff(current.y));
-    let Some(line) = line else {
-        return index;
-    };
-    words
-        .iter()
-        .enumerate()
-        .filter(|(_, w)| w.area.y == line)
-        .min_by_key(|(_, w)| center(&w.area).abs_diff(center(current)))
-        .map_or(index, |(i, _)| i)
+    /// Sets or removes the bookmark of the page.
+    fn toggle_bookmark(&mut self, cx: &mut Cx<'_, '_>) {
+        let env = *cx.env();
+        let Ok(book) = &mut self.book else {
+            return;
+        };
+        let (start, end) = (book.page.start, book.page.end);
+        let on_page = |m: &Mark| m.kind == Kind::Bookmark && m.start >= start && m.start < end;
+        if !annotations::remove(env.storage, &book.dir, on_page) {
+            let text: Vec<&str> = book.page.lines.iter().map(|l| l.text.as_str()).collect();
+            annotations::add(
+                env.storage,
+                &book.dir,
+                Annotation {
+                    mark: Mark {
+                        kind: Kind::Bookmark,
+                        start,
+                        end: start,
+                    },
+                    percent: (book.percent() + 0.5) as u8,
+                    text: annotations::snippet(&text.join(" ")),
+                },
+            );
+        }
+        book.marks = annotations::marks(env.storage, &book.dir);
+        cx.request_redraw_area(book.ribbon_area(&env));
+        cx.request_refresh(RefreshMode::Fast);
+    }
 }
 
 impl Book {
@@ -331,11 +471,8 @@ impl Book {
             .clone()
             .unwrap_or_else(|| env.i18n.language().to_string());
         let typography = Typography::new(env, &font, &language);
-        let dir = format!(
-            "{}/books/{:016x}",
-            Env::plugin_dir(PLUGIN.as_str()),
-            fnv(path)
-        );
+        let dir = book_dir(path);
+        let marks = annotations::marks(env.storage, &dir);
         let title = document
             .metadata()
             .title
@@ -353,6 +490,7 @@ impl Book {
             document,
             language,
             typography,
+            marks,
         };
         let start = book.saved_position(env).unwrap_or(Locator::START);
         book.page = match book.layout(env, start).map_err(error)? {
@@ -613,6 +751,8 @@ impl Book {
             let mut x = t.x + line.x;
             // Inside a word that continues in the next run (e.g. bold).
             let mut joined = false;
+            // The next of the line's words.
+            let mut ordinal = 0;
             for run in &line.runs {
                 let font = faces.font(run.face);
                 let size = faces.size(run.face);
@@ -633,10 +773,16 @@ impl Book {
                             last.text.push_str(part);
                             last.area.width = (x + width) as u16 - last.area.x;
                         }
-                        _ => words.push(WordBox {
-                            area: Rect::new(x as u16, top as u16, width as u16, height as u16),
-                            text: part.to_string(),
-                        }),
+                        _ => {
+                            let (start, end) = line.words.get(ordinal).copied().unwrap_or_default();
+                            ordinal += 1;
+                            words.push(WordBox {
+                                area: Rect::new(x as u16, top as u16, width as u16, height as u16),
+                                text: part.to_string(),
+                                start: Locator::new(line.section, start),
+                                end: Locator::new(line.section, end),
+                            });
+                        }
                     }
                     x += width;
                     joined = true;
@@ -646,17 +792,74 @@ impl Book {
         words
     }
 
-    /// The word at `point`, if any.
-    fn word_at(&self, env: &Env<'_>, point: Point) -> Option<WordBox> {
-        self.words(env).into_iter().find(|word| {
-            let area = word.area;
-            // A little slack between words and lines.
-            let slack = 4;
-            point.x >= i32::from(area.x) - slack
-                && point.x < area.right() as i32 + slack
-                && point.y >= i32::from(area.y)
-                && point.y < area.bottom() as i32
-        })
+    /// Whether the page has a bookmark.
+    fn bookmarked(&self) -> bool {
+        let (start, end) = (self.page.start, self.page.end);
+        self.marks
+            .iter()
+            .any(|m| m.kind == Kind::Bookmark && m.start >= start && m.start < end)
+    }
+
+    /// Where the bookmark ribbon is: in the top margin, on the right.
+    fn ribbon_area(&self, env: &Env<'_>) -> Rect {
+        let t = &self.typography;
+        let width = env.metrics.mm(3) as u16;
+        let height = (t.y * 0.8) as u16;
+        let x = (t.x + t.width) as u16 - width;
+        Rect::new(x, 0, width, height.max(width))
+    }
+
+    /// A ribbon with a notch, like a bookmark in a book.
+    fn draw_ribbon(&self, canvas: &mut Canvas<'_>, env: &Env<'_>) {
+        let r = self.ribbon_area(env);
+        let notch = u32::from(r.width) / 2;
+        let body = u32::from(r.height).saturating_sub(notch);
+        canvas.fill_rect(
+            i32::from(r.x),
+            i32::from(r.y),
+            u32::from(r.width),
+            body,
+            Color::BLACK,
+        );
+        // Both sides of the notch narrow towards the bottom.
+        for row in 0..notch {
+            let side = notch - row;
+            let y = i32::from(r.y) + (body + row) as i32;
+            canvas.fill_rect(i32::from(r.x), y, side, 1, Color::BLACK);
+            canvas.fill_rect(
+                i32::from(r.x) + (u32::from(r.width) - side) as i32,
+                y,
+                side,
+                1,
+                Color::BLACK,
+            );
+        }
+    }
+
+    /// Highlights behind the text: light gray, one shape per line.
+    fn draw_highlights(&self, canvas: &mut Canvas<'_>, words: &[WordBox]) {
+        let highlights: Vec<&Mark> = self
+            .marks
+            .iter()
+            .filter(|m| m.kind == Kind::Highlight && m.overlaps(self.page.start, self.page.end))
+            .collect();
+        if highlights.is_empty() {
+            return;
+        }
+        let boxes = selection::line_boxes(words, |i| {
+            highlights
+                .iter()
+                .any(|m| m.overlaps(words[i].start, words[i].end))
+        });
+        for b in boxes {
+            canvas.fill_rect(
+                i32::from(b.x) - 2,
+                i32::from(b.y),
+                u32::from(b.width) + 4,
+                u32::from(b.height),
+                Color::gray(205),
+            );
+        }
     }
 
     fn draw_status(&self, canvas: &mut Canvas<'_>, env: &Env<'_>) {
@@ -689,28 +892,41 @@ impl Book {
 
 impl Screen for ReaderScreen {
     fn draw(&mut self, canvas: &mut Canvas<'_>, env: &Env<'_>) {
-        match &self.book {
-            Ok(book) => {
-                book.draw_page(canvas, env);
-                book.draw_status(canvas, env);
-                // The word chosen for looking up.
-                if let Some(word) = self
-                    .selected
-                    .and_then(|i| book.words(env).into_iter().nth(i))
-                {
-                    let r = highlight(word.area);
-                    let line = env.metrics.tenth_mm(4).max(2);
-                    canvas.stroke_rect(
-                        i32::from(r.x) + 2,
-                        i32::from(r.y) + 2,
-                        u32::from(r.width) - 4,
-                        u32::from(r.height) - 4,
-                        line,
-                        Color::BLACK,
-                    );
-                }
-            }
-            Err(message) => draw_message(canvas, env, message),
+        let book = match &self.book {
+            Ok(book) => book,
+            Err(message) => return draw_message(canvas, env, message),
+        };
+        // Word boxes are measured only when something is drawn on words.
+        let has_highlights = book.marks.iter().any(|m| m.kind == Kind::Highlight);
+        let words = if has_highlights || self.selection.is_some() {
+            book.words(env)
+        } else {
+            Vec::new()
+        };
+        book.draw_highlights(canvas, &words);
+        book.draw_page(canvas, env);
+        book.draw_status(canvas, env);
+        if book.bookmarked() {
+            book.draw_ribbon(canvas, env);
+        }
+        let Some(selection) = self.selection else {
+            return;
+        };
+        let (lo, hi) = selection.range();
+        let line = env.metrics.tenth_mm(4).max(2);
+        for b in selection::line_boxes(&words, |i| (lo..=hi).contains(&i)) {
+            canvas.stroke_rect(
+                i32::from(b.x) - 4,
+                i32::from(b.y) - 2,
+                u32::from(b.width) + 8,
+                u32::from(b.height) + 4,
+                line,
+                Color::BLACK,
+            );
+        }
+        if selection.mode == Mode::Bar {
+            let items = self.items(env, &words);
+            selection::draw_bar(canvas, env, &items, selection.focus);
         }
     }
 
@@ -737,17 +953,21 @@ impl Screen for ReaderScreen {
     }
 
     fn on_action(&mut self, action: &Id, cx: &mut Cx<'_, '_>) -> Handled {
-        if let Some(index) = self.selected {
-            return self.on_selection(action, index, cx);
+        if let Some(selection) = self.selection {
+            return self.on_selection(action, selection, cx);
         }
-        if *action == crate::actions::LOOKUP {
-            // Choose a word with the buttons, starting at the first one.
+        if *action == crate::actions::SELECT {
+            // Choose text with the buttons, starting at the first word.
             let env = *cx.env();
             if let Ok(book) = &self.book {
                 let words = book.words(&env);
                 let first = words.iter().position(|w| !w.lookup_text().is_empty());
-                self.select(&words, first, cx);
+                self.set_selection(first.map(Selection::choosing), cx);
             }
+            return Handled::Yes;
+        }
+        if *action == crate::actions::TOGGLE_BOOKMARK {
+            self.toggle_bookmark(cx);
             return Handled::Yes;
         }
         let Ok(book) = &mut self.book else {
@@ -769,6 +989,12 @@ impl Screen for ReaderScreen {
                 crate::toc::locator_params(&book.path, book.page.start),
             ));
             Handled::Yes
+        } else if *action == crate::actions::ANNOTATIONS {
+            cx.command(Command::OpenScreen(
+                crate::ANNOTATIONS_SCREEN,
+                Params::new().with(params::PATH, book.path.clone()),
+            ));
+            Handled::Yes
         } else if *action == actions::MENU || *action == actions::CONFIRM {
             cx.command(Command::OpenSlot(
                 slots::MENU,
@@ -780,29 +1006,46 @@ impl Screen for ReaderScreen {
         }
     }
 
-    /// A long press looks up the word under the finger.
+    /// A long press selects the word under the finger; while text is
+    /// selected, taps extend the selection or choose an item of the bar.
     fn on_gesture(&mut self, gesture: Gesture, cx: &mut Cx<'_, '_>) -> Handled {
+        let env = *cx.env();
         let Ok(book) = &self.book else {
             return Handled::No;
         };
-        let env = *cx.env();
-        match gesture.kind {
-            GestureKind::LongPress => match book.word_at(&env, gesture.start) {
+        let words = book.words(&env);
+        let at = |point: Point| {
+            words.iter().position(|word| {
+                let area = word.area;
+                // A little slack between words and lines.
+                let slack = 4;
+                point.x >= i32::from(area.x) - slack
+                    && point.x < area.right() as i32 + slack
+                    && point.y >= i32::from(area.y)
+                    && point.y < area.bottom() as i32
+            })
+        };
+        match (gesture.kind, self.selection) {
+            (GestureKind::LongPress, _) => match at(gesture.start) {
                 Some(word) => {
-                    Self::look_up(book, &word, cx);
+                    self.set_selection(Some(Selection::touched(word)), cx);
                     Handled::Yes
                 }
                 None => Handled::No,
             },
-            // While choosing a word with buttons, a tap looks up the word
-            // tapped, or stops choosing.
-            GestureKind::Tap if self.selected.is_some() => {
-                match book.word_at(&env, gesture.start) {
-                    Some(word) => Self::look_up(book, &word, cx),
-                    None => {
-                        let words = book.words(&env);
-                        self.select(&words, None, cx);
-                    }
+            (GestureKind::Tap, Some(selection)) => {
+                let items = self.items(&env, &words);
+                if let Some(item) = selection::item_at(&env, &items, gesture.start) {
+                    self.activate(&item.id, cx);
+                } else if let Some(word) = at(gesture.start) {
+                    let to = Selection {
+                        cursor: word,
+                        mode: Mode::Bar,
+                        ..selection
+                    };
+                    self.set_selection(Some(to), cx);
+                } else {
+                    self.set_selection(None, cx);
                 }
                 Handled::Yes
             }
@@ -818,15 +1061,15 @@ impl Screen for ReaderScreen {
             && params.get(params::PATH) == Some(book.path.as_str())
             && let Some(at) = crate::toc::locator_of(params)
         {
-            // Another page: no word stays chosen.
-            self.selected = None;
+            // Another page: no text stays selected.
+            self.selection = None;
             book.show(cx, at, true);
             return;
         }
         let id = params.get(params::ID).unwrap_or_default();
         let affects_layout = id.starts_with("reader.") && id != crate::settings::OPEN_LAST.as_str();
         if *event == events::SETTING_CHANGED && affects_layout {
-            self.selected = None;
+            self.selection = None;
             let env = *cx.env();
             book.relayout(&env);
             cx.request_redraw();
