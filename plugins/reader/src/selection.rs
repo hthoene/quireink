@@ -212,31 +212,27 @@ pub(crate) fn draw_bar(
         line,
         Color::BLACK,
     );
-    let Some(font) = style.font(env) else {
-        return;
-    };
     let areas = item_areas(env, &style, items);
     for (index, (item, &area)) in items.iter().zip(&areas).enumerate() {
-        let focused = focus == Some(index);
-        if focused {
-            ui::fill(canvas, area, Color::BLACK);
-        } else if index > 0 {
-            // A thin divider between items.
-            let h = area.height / 2;
-            canvas.fill_rect(
-                i32::from(area.x),
-                i32::from(area.y + h / 2),
-                style.line.max(1),
-                u32::from(h),
-                Color::gray(150),
-            );
-        }
+        // Buttons as everywhere; the whole part stays the target of taps.
+        let h = ui::button_height(area);
+        let pad = (style.gap / 4) as u16 + ui::button_border(&style) as u16 * 3;
+        let button = Rect::new(
+            area.x + pad,
+            area.y + (area.height - h) / 2,
+            area.width.saturating_sub(2 * pad),
+            h,
+        );
         let label = env.i18n.tr(&item.title);
-        let label = ui::fit(&font, style.small, label, f32::from(area.width) - 8.0);
-        let x =
-            f32::from(area.x) + (f32::from(area.width) - font.measure(style.small, &label)) / 2.0;
-        let color = if focused { Color::WHITE } else { Color::BLACK };
-        ui::draw_label(canvas, &font, style.small, x, area, &label, color);
+        ui::draw_button(
+            canvas,
+            env,
+            &style,
+            button,
+            label,
+            false,
+            focus == Some(index),
+        );
     }
 }
 

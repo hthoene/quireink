@@ -405,29 +405,23 @@ impl KeyboardScreen {
         let style = self.style;
         let key = self.rows[row][index].0;
         let area = self.key_area(row, index);
-        let inset = (style.gap / 4).max(1) as u16;
+        // Buttons as everywhere, with room for the focus frame.
+        let h = ui::button_height(area);
+        let pad = ui::button_border(&style) as u16 * 3;
         let r = Rect::new(
-            area.x + inset,
-            area.y + inset,
-            area.width.saturating_sub(inset * 2),
-            area.height.saturating_sub(inset * 2),
+            area.x + pad,
+            area.y + (area.height - h) / 2,
+            area.width.saturating_sub(2 * pad),
+            h,
         );
         let focused = self.focus == Some((row, index));
         let active = key == Key::Shift && self.shift;
-        let (back, ink) = if focused || active {
-            (Color::BLACK, Color::WHITE)
-        } else {
-            (Color::WHITE, Color::BLACK)
+        let label = match key {
+            Key::Shift | Key::Delete | Key::Space => String::new(),
+            _ => self.label(env, key),
         };
-        ui::fill(canvas, r, back);
-        canvas.stroke_rect(
-            i32::from(r.x),
-            i32::from(r.y),
-            u32::from(r.width),
-            u32::from(r.height),
-            style.line.max(1),
-            Color::BLACK,
-        );
+        ui::draw_button(canvas, env, &style, r, &label, active, focused);
+        let ink = if active { Color::WHITE } else { Color::BLACK };
         let size = (style.text * 0.6) as i32;
         let (cx, cy) = (
             i32::from(r.x) + i32::from(r.width) / 2,
@@ -443,21 +437,7 @@ impl KeyboardScreen {
                 canvas.fill_rect(cx - w / 2, cy, t as u32, (size / 3 + t) as u32, ink);
                 canvas.fill_rect(cx + w / 2 - t, cy, t as u32, (size / 3 + t) as u32, ink);
             }
-            _ => {
-                let Some(font) = style.font(env) else {
-                    return;
-                };
-                let label = self.label(env, key);
-                let text_size = if matches!(key, Key::Char(_)) {
-                    style.text
-                } else {
-                    style.small
-                };
-                let label = ui::fit(&font, text_size, &label, f32::from(r.width) - 4.0);
-                let x =
-                    f32::from(r.x) + (f32::from(r.width) - font.measure(text_size, &label)) / 2.0;
-                ui::draw_label(canvas, &font, text_size, x, r, &label, ink);
-            }
+            _ => {}
         }
     }
 }
