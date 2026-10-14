@@ -37,6 +37,8 @@ OPTIONS:
     --library <dir>       Folder emulating the device storage
                           (default: samples/library)
     --screenshot-dir <d>  Where F12 saves screenshots (default: out)
+    --heap-budget <KiB>   Override the profile's heap budget (`none` = unlimited)
+    --trace-alloc <bytes> Print every kernel allocation of at least this size
     -h, --help            Show this help
 
 KEYS (if the device has the button):
@@ -58,6 +60,8 @@ struct Options {
     screenshot: Option<PathBuf>,
     screenshot_dir: Option<PathBuf>,
     library: Option<PathBuf>,
+    /// `Some(None)` removes the budget.
+    heap_budget: Option<Option<usize>>,
 }
 
 fn main() -> ExitCode {
@@ -86,6 +90,9 @@ fn run() -> Result<(), String> {
         .map_err(|e| format!("library {}: {e}", library.display()))?;
     let mut device = Device::new(profile, user_config(&options)?, storage, options.headless)
         .map_err(|e| format!("{}: {e}", profile.device.id))?;
+    if let Some(limit) = options.heap_budget {
+        budget::set_limit(limit);
+    }
 
     if options.headless {
         device.start();
@@ -168,6 +175,25 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Option<Options>,
             "--library" => options.library = Some(PathBuf::from(value("--library")?)),
             "--screenshot-dir" => {
                 options.screenshot_dir = Some(PathBuf::from(value("--screenshot-dir")?));
+            }
+            "--trace-alloc" => {
+                let bytes = value("--trace-alloc")?;
+                budget::trace(
+                    bytes
+                        .parse()
+                        .map_err(|_| format!("--trace-alloc expects bytes, got `{bytes}`"))?,
+                );
+            }
+            "--heap-budget" => {
+                let budget = value("--heap-budget")?;
+                options.heap_budget = Some(if budget == "none" {
+                    None
+                } else {
+                    let kib: usize = budget.parse().map_err(|_| {
+                        format!("--heap-budget expects KiB or `none`, got `{budget}`")
+                    })?;
+                    Some(kib * 1024)
+                });
             }
             other => return Err(format!("unknown argument `{other}` (see --help)")),
         }

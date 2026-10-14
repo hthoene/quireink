@@ -1146,6 +1146,7 @@ dependencies = [
  "quireink-plugin-diagnostics",
  "quireink-plugin-files",
  "quireink-plugin-fonts-default",
+ "quireink-plugin-format-epub",
  "quireink-plugin-format-txt",
  "quireink-plugin-home",
  "quireink-plugin-menu",
@@ -1214,6 +1215,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "quireink-plugin-format-epub"
+version = "0.1.0"
+dependencies = [
+ "quireink-i18n",
+ "quireink-sdk",
+ "quireink-zip",
+]
+
+[[package]]
 name = "quireink-plugin-format-txt"
 version = "0.1.0"
 dependencies = [
@@ -1264,6 +1274,8 @@ dependencies = [
  "quireink-layout",
  "quireink-platform",
  "quireink-text",
+ "quireink-xml",
+ "quireink-zip",
 ]
 
 [[package]]
@@ -1273,6 +1285,18 @@ dependencies = [
  "quireink-graphics",
  "quireink-platform",
  "skrifa",
+]
+
+[[package]]
+name = "quireink-xml"
+version = "0.1.0"
+
+[[package]]
+name = "quireink-zip"
+version = "0.1.0"
+dependencies = [
+ "miniz_oxide 0.8.9",
+ "quireink-platform",
 ]
 
 [[package]]

@@ -19,6 +19,8 @@ quireink-config.workspace = true
 quireink-text.workspace = true
 quireink-document.workspace = true
 quireink-layout.workspace = true
+quireink-xml.workspace = true
+quireink-zip.workspace = true
 
 [features]
 default = []

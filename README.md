@@ -3,9 +3,10 @@
 **A lean, fast and endlessly customizable e-reader for e-ink devices — from a
 380 KB microcontroller to Linux and Android e-readers, from one codebase.**
 
-> **Status: early development.** Plain text books can be read in the
-> emulator — with menus, a settings screen, page index, saved reading
-> position and reopening of the last book. EPUB comes next. See the [project plan](docs/PLANNING.md)
+> **Status: early development.** EPUB and plain text books can be read in
+> the emulator — with a table of contents, menus, a settings screen, page
+> index, saved reading position and reopening of the last book. See the
+> [project plan](docs/PLANNING.md)
 > and the [roadmap](docs/PLANNING.md#12-roadmap).
 
 ## Why QuireInk?
@@ -86,11 +87,14 @@ Settings changed in the UI are saved to `quireink.ini` in the library
 folder — the same file you can edit by hand.
 
 The emulator uses `samples/library` as the device storage; two
-public-domain books are included. Put your own `.txt` files into
+public-domain books are included as EPUB and TXT. Put your own `.epub` and
+`.txt` files into
 `samples/library/books` or point `--library` at any folder.
 
 The emulator enforces each device's heap budget on the kernel, so memory
-problems show up on the desktop before they show up on hardware. Headless
+problems show up on the desktop before they show up on hardware
+(`--heap-budget none` shows the real peak, `--trace-alloc 1024` lists the
+large allocations behind it). Headless
 runs produce screenshots for tests and bug reports:
 
 ```bash
@@ -108,9 +112,11 @@ cargo run -p quireink-emulator -- --headless --profile boox-go-7 --set core.lang
 | `crates/quireink-text` | Fonts (runtime outlines or bitmap packs), rasterizer, glyph cache, line breaking |
 | `crates/quireink-document` | Format-independent document model: locators, blocks, offset maps |
 | `crates/quireink-layout` | Deterministic page layout usable by any reader plugin |
+| `crates/quireink-zip` | Streaming ZIP reader with small, bounded memory use |
+| `crates/quireink-xml` | Incremental XML/XHTML tokenizer |
 | `crates/quireink-sdk` | **The plugin SDK** — the only API plugins use |
 | `crates/quireink-core` | The kernel: plugin host, registries, input routing, refresh policy |
-| `plugins/` | First-party plugins: home screen, reader, file browser, menu, settings, TXT format, default fonts, diagnostics |
+| `plugins/` | First-party plugins: home screen, reader, file browser, menu, settings, EPUB and TXT formats, default fonts, diagnostics |
 | `tools/fontgen` | Converts fonts into bitmap font packs for small devices |
 | `shells/desktop` | Desktop emulator with device profiles |
 | `samples/` | Emulator library with public-domain books |

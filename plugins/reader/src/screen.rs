@@ -451,6 +451,12 @@ impl Screen for ReaderScreen {
                 book.show(cx, start, false);
             }
             Handled::Yes
+        } else if *action == crate::actions::TOC {
+            cx.command(Command::OpenScreen(
+                crate::TOC_SCREEN,
+                crate::toc::locator_params(&book.path, book.page.start),
+            ));
+            Handled::Yes
         } else if *action == actions::MENU || *action == actions::CONFIRM {
             cx.command(Command::OpenSlot(
                 slots::MENU,
@@ -466,6 +472,13 @@ impl Screen for ReaderScreen {
         let Ok(book) = &mut self.book else {
             return;
         };
+        if *event == crate::GOTO
+            && params.get(params::PATH) == Some(book.path.as_str())
+            && let Some(at) = crate::toc::locator_of(params)
+        {
+            book.show(cx, at, true);
+            return;
+        }
         let id = params.get(params::ID).unwrap_or_default();
         let affects_layout = id.starts_with("reader.") && id != crate::settings::OPEN_LAST.as_str();
         if *event == events::SETTING_CHANGED && affects_layout {

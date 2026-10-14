@@ -16,6 +16,7 @@ superseded by a new record that links back.
 | [0008](0008-fonts-outlines-and-bitmap-packs.md) | Fonts: runtime outlines and bitmap packs | Accepted |
 | [0009](0009-documents-formats-and-storage.md) | Documents, formats and local storage | Accepted |
 | [0010](0010-overlays-menus-and-settings-ui.md) | Overlays, menus and the generated settings UI | Accepted |
+| [0011](0011-epub-streaming-conversion.md) | EPUB: streaming conversion into a block cache | Accepted |
 
 ## Template
 

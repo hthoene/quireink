@@ -43,6 +43,7 @@ impl Device {
                 .glyph_cache(profile.glyph_cache)
                 .plugin(quireink_plugin_fonts_default::DefaultFonts)
                 .plugin(quireink_plugin_format_txt::TxtFormat)
+                .plugin(quireink_plugin_format_epub::EpubFormat)
                 .plugin(quireink_plugin_reader::Reader)
                 .plugin(quireink_plugin_files::Files)
                 .plugin(quireink_plugin_home::Home)

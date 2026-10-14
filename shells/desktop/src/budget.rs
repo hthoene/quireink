@@ -20,6 +20,8 @@ static LIVE: AtomicUsize = AtomicUsize::new(0);
 static PEAK: AtomicUsize = AtomicUsize::new(0);
 static LIMIT: AtomicUsize = AtomicUsize::new(usize::MAX);
 static FAILED: AtomicUsize = AtomicUsize::new(0);
+/// Allocations of at least this many bytes are printed.
+static TRACE: AtomicUsize = AtomicUsize::new(usize::MAX);
 
 thread_local! {
     static TRACKING: Cell<bool> = const { Cell::new(false) };
@@ -51,6 +53,16 @@ unsafe impl GlobalAlloc for BudgetAllocator {
         if !ptr.is_null() {
             let live = LIVE.fetch_add(charge, Ordering::Relaxed) + charge;
             PEAK.fetch_max(live, Ordering::Relaxed);
+            if layout.size() >= TRACE.load(Ordering::Relaxed) {
+                // Untracked, so printing does not count against the budget.
+                let tracking = TRACKING.with(|t| t.replace(false));
+                eprintln!(
+                    "alloc {:>7} B, heap {:>6.1} KiB",
+                    layout.size(),
+                    live as f64 / 1024.0
+                );
+                TRACKING.with(|t| t.set(tracking));
+            }
         }
         ptr
     }
@@ -88,6 +100,12 @@ pub fn track<R>(f: impl FnOnce() -> R) -> R {
 /// Sets the heap budget; `None` removes it.
 pub fn set_limit(limit: Option<usize>) {
     LIMIT.store(limit.unwrap_or(usize::MAX), Ordering::Relaxed);
+}
+
+/// Prints every tracked allocation of at least `bytes` to stderr, to find
+/// what makes up a peak.
+pub fn trace(bytes: usize) {
+    TRACE.store(bytes, Ordering::Relaxed);
 }
 
 /// Current heap usage of the kernel and its plugins.

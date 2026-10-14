@@ -235,7 +235,18 @@ impl Screen for Browser {
                         .rsplit_once('.')
                         .map_or(entry.name.clone(), |(stem, _)| stem.to_string())
                 };
-                let width = f32::from(rect.width) - 2.0 * style.margin as f32;
+                let mut width = f32::from(rect.width) - 2.0 * style.margin as f32;
+                // The format, small and right-aligned, tells same-named
+                // books apart (e.g. TXT and EPUB editions).
+                if !entry.is_dir
+                    && let Some((_, extension)) = entry.name.rsplit_once('.')
+                {
+                    let tag = extension.to_uppercase();
+                    let tag_width = font.measure(style.small, &tag);
+                    let x = f32::from(rect.width) - style.margin as f32 - tag_width;
+                    ui::draw_label(canvas, &font, style.small, x, rect, &tag, color);
+                    width -= tag_width + style.margin as f32;
+                }
                 let name = ui::fit(&font, style.text, &name, width);
                 ui::draw_label(
                     canvas,

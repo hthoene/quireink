@@ -174,6 +174,8 @@ pub enum DocumentError {
     Malformed(Cow<'static, str>),
     /// No format plugin can open the file.
     UnsupportedFormat,
+    /// The device has too little free memory for this document.
+    OutOfMemory,
 }
 
 impl fmt::Display for DocumentError {
@@ -182,6 +184,7 @@ impl fmt::Display for DocumentError {
             DocumentError::Storage(error) => write!(f, "storage: {error}"),
             DocumentError::Malformed(message) => write!(f, "malformed document: {message}"),
             DocumentError::UnsupportedFormat => f.write_str("unsupported format"),
+            DocumentError::OutOfMemory => f.write_str("not enough memory"),
         }
     }
 }
@@ -192,6 +195,15 @@ impl From<StorageError> for DocumentError {
     fn from(error: StorageError) -> Self {
         DocumentError::Storage(error)
     }
+}
+
+/// An entry of a document's table of contents.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TocEntry {
+    pub title: String,
+    /// Nesting depth, 0 for top-level entries.
+    pub level: u8,
+    pub at: Locator,
 }
 
 /// An open document.
@@ -210,6 +222,12 @@ pub trait Document {
     /// Block boundaries must not depend on `at`: every position inside a
     /// block yields the same block.
     fn block_at(&self, storage: &dyn Storage, at: Locator) -> Result<Option<Block>, DocumentError>;
+
+    /// The table of contents; empty if the format or file has none.
+    fn toc(&self, storage: &dyn Storage) -> Vec<TocEntry> {
+        let _ = storage;
+        Vec::new()
+    }
 
     /// Reading progress of `at` from 0.0 to 1.0.
     fn progress(&self, at: Locator) -> f32 {

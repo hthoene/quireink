@@ -44,7 +44,8 @@ jobs:
         run: >
           cargo build --release --target ${{ matrix.target }}
           -p quireink-core -p quireink-plugin-diagnostics
-          -p quireink-plugin-format-txt -p quireink-plugin-reader -p quireink-plugin-files
+          -p quireink-plugin-format-txt -p quireink-plugin-format-epub
+          -p quireink-plugin-reader -p quireink-plugin-files
           -p quireink-plugin-fonts-default --no-default-features
 
   architecture:
@@ -85,6 +86,11 @@ jobs:
           $emu --headless --profile xteink-x4 \
             --script "confirm,right,confirm,page-forward,page-forward,page-back,wait:2000" \
             --screenshot out/xteink-x4-reading.png
+          # An EPUB within the X4 heap budget: contents, jump to chapter II.
+          $emu --headless --profile xteink-x4 \
+            --set reader.open-last=off --set slots.core.home=files.browser \
+            --script "confirm,wait:500,confirm,confirm,right,right,right,right,confirm,wait:300" \
+            --screenshot out/xteink-x4-epub-chapter.png
           $emu --headless --profile kobo-clara-bw --set core.language=de \
             --script "tap:500:480,tap:500:190,swipe:900:700:100:700,tap:100:700,long-tap:500:700" \
             --screenshot out/kobo-clara-bw-reading.png

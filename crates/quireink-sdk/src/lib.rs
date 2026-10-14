@@ -85,4 +85,14 @@ pub mod document {
 pub mod layout {
     pub use quireink_layout::*;
 }
+
+/// Streaming XML/XHTML tokenizer (see `quireink-xml`) for format plugins.
+pub mod xml {
+    pub use quireink_xml::*;
+}
+
+/// Streaming ZIP reader (see `quireink-zip`) for ZIP-based formats.
+pub mod zip {
+    pub use quireink_zip::*;
+}
 pub use quireink_text::{Font, FontError, LineMetrics};

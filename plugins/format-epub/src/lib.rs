@@ -1,0 +1,207 @@
+//! EPUB 2 and 3 support for QuireInk.
+//!
+//! - Metadata (title, authors, language) from the package document.
+//! - Reading order from the spine; table of contents from the EPUB 3
+//!   navigation document or the EPUB 2 NCX.
+//! - Chapters are converted on first use — streamed from the ZIP archive
+//!   through an XHTML tokenizer — into a compact block format stored in the
+//!   plugin's cache. Reading afterwards needs only the block at hand, so
+//!   books of any size work on small devices.
+//!
+//! Supported markup: paragraphs, headings, lists, block quotes, line
+//! breaks, preformatted text and anchors. Styles (CSS, bold, italic) and
+//! images are not rendered yet.
+
+#![no_std]
+
+extern crate alloc;
+
+mod convert;
+mod document;
+mod package;
+
+use alloc::borrow::Cow;
+use alloc::boxed::Box;
+use alloc::vec;
+
+use quireink_sdk::document::Document;
+use quireink_sdk::{
+    FormatSpec, Id, Manifest, Plugin, RegisterError, Registrar, SDK_VERSION, Version,
+};
+
+pub use document::EpubDocument;
+
+pub const PLUGIN: Id = Id::new_static("format-epub");
+pub const FORMAT: Id = Id::new_static("format-epub.epub");
+
+/// The EPUB format plugin.
+#[derive(Debug, Default)]
+pub struct EpubFormat;
+
+impl Plugin for EpubFormat {
+    fn manifest(&self) -> Manifest {
+        Manifest {
+            id: PLUGIN,
+            name: Cow::Borrowed("EPUB"),
+            version: Version::new(0, 1, 0),
+            sdk: SDK_VERSION,
+        }
+    }
+
+    fn register(&self, r: &mut dyn Registrar) -> Result<(), RegisterError> {
+        r.add_format(FormatSpec {
+            id: FORMAT,
+            title: Cow::Borrowed("format-epub.title"),
+            extensions: vec![Cow::Borrowed("epub")],
+            open: Box::new(|storage, path| {
+                EpubDocument::open(storage, path).map(|d| Box::new(d) as Box<dyn Document>)
+            }),
+        })?;
+        r.add_translations(Cow::Borrowed(include_str!("../i18n/en.ini")))?;
+        r.add_translations(Cow::Borrowed(include_str!("../i18n/de.ini")))?;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloc::string::String;
+    use alloc::vec::Vec;
+    use quireink_i18n::{Catalog, check};
+    use quireink_sdk::MemoryStorage;
+    use quireink_sdk::document::{BlockKind, Locator};
+    use quireink_sdk::zip::testing::ZipBuilder;
+
+    #[test]
+    fn translations_are_complete() {
+        let en = Catalog::parse(include_str!("../i18n/en.ini")).unwrap();
+        let de = Catalog::parse(include_str!("../i18n/de.ini")).unwrap();
+        let issues = check::compare(&en, &de);
+        assert!(issues.is_empty(), "{issues:?}");
+    }
+
+    const CONTAINER: &str = r#"<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles>
+</container>"#;
+
+    const OPF: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Die   Verwandlung</dc:title>
+    <dc:creator>Franz Kafka</dc:creator>
+    <dc:language>de</dc:language>
+  </metadata>
+  <manifest>
+    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    <item id="c1" href="text/ch1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="c2" href="text/ch%202.xhtml" media-type="application/xhtml+xml"/>
+    <item id="css" href="style.css" media-type="text/css"/>
+  </manifest>
+  <spine><itemref idref="c1"/><itemref idref="c2"/></spine>
+</package>"#;
+
+    const NAV: &str = r#"<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+<body><nav epub:type="toc"><ol>
+  <li><a href="text/ch1.xhtml">Erstes Kapitel</a>
+    <ol><li><a href="text/ch1.xhtml#later">Später</a></li></ol></li>
+  <li><a href="text/ch%202.xhtml">Zweites   Kapitel</a></li>
+</ol></nav></body></html>"#;
+
+    const CH1: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Ignored</title>
+<style>p { color: red }</style></head>
+<body>
+  <h1>I.</h1>
+  <p>Als Gregor Samsa eines Morgens aus <em>unruhigen</em>
+     Tr&#228;umen erwachte &#8212; fand er sich&nbsp;verwandelt.</p>
+  <p>Zeile eins<br/>Zeile zwei</p>
+  <ul><li>Punkt A</li><li>Punkt B</li></ul>
+  <p id="later">Später.</p>
+</body></html>"#;
+
+    fn epub(ch2: String) -> MemoryStorage {
+        let zip = ZipBuilder::new()
+            .stored("mimetype", "application/epub+zip")
+            .deflated("META-INF/container.xml", CONTAINER)
+            .deflated("OEBPS/content.opf", OPF)
+            .deflated("OEBPS/nav.xhtml", NAV)
+            .deflated("OEBPS/text/ch1.xhtml", CH1)
+            .deflated("OEBPS/text/ch 2.xhtml", ch2)
+            .build();
+        MemoryStorage::new().with("books/test.epub", zip)
+    }
+
+    fn blocks(
+        storage: &MemoryStorage,
+        doc: &EpubDocument,
+        section: u32,
+    ) -> Vec<(BlockKind, String)> {
+        let mut at = Locator::new(section, 0);
+        let mut out = Vec::new();
+        while let Some(block) = doc.block_at(storage, at).unwrap() {
+            assert!(block.end > at.offset || at.offset < block.start);
+            at = Locator::new(section, block.end);
+            out.push((block.kind, block.text));
+        }
+        out
+    }
+
+    #[test]
+    fn reads_metadata_chapters_and_toc() {
+        let ch2 = String::from("<html><body><p>Zweites.</p></body></html>");
+        let storage = epub(ch2);
+        let doc = EpubDocument::open(&storage, "books/test.epub").unwrap();
+        let metadata = doc.metadata();
+        assert_eq!(metadata.title.as_deref(), Some("Die Verwandlung"));
+        assert_eq!(metadata.authors, ["Franz Kafka"]);
+        assert_eq!(metadata.language.as_deref(), Some("de"));
+        assert_eq!(doc.sections(), 2);
+
+        let ch1 = blocks(&storage, &doc, 0);
+        let texts: Vec<&str> = ch1.iter().map(|(_, t)| t.as_str()).collect();
+        assert_eq!(
+            texts,
+            [
+                "I.",
+                "Als Gregor Samsa eines Morgens aus unruhigen Träumen erwachte — fand er sich\u{a0}verwandelt.",
+                "Zeile eins\nZeile zwei",
+                "• Punkt A",
+                "• Punkt B",
+                "Später."
+            ]
+        );
+        assert_eq!(ch1[0].0, BlockKind::Heading(1));
+        assert_eq!(blocks(&storage, &doc, 1)[0].1, "Zweites.");
+
+        let toc = doc.toc(&storage);
+        let titles: Vec<(&str, u8)> = toc.iter().map(|e| (e.title.as_str(), e.level)).collect();
+        assert_eq!(
+            titles,
+            [("Erstes Kapitel", 0), ("Später", 1), ("Zweites Kapitel", 0)]
+        );
+        assert_eq!(toc[2].at, Locator::new(1, 0));
+        // The anchor points at the block with id="later".
+        let later = doc.block_at(&storage, toc[1].at).unwrap().unwrap();
+        assert_eq!(later.text, "Später.");
+        assert!(doc.progress(toc[2].at) > 0.5);
+    }
+
+    #[test]
+    fn splits_long_paragraphs_and_reuses_the_cache() {
+        let words: Vec<String> = (0..3000).map(|i| alloc::format!("w{i}")).collect();
+        let ch2 = alloc::format!("<html><body><p>{}</p></body></html>", words.join(" "));
+        let storage = epub(ch2);
+        let doc = EpubDocument::open(&storage, "books/test.epub").unwrap();
+        let ch2 = blocks(&storage, &doc, 1);
+        assert!(ch2.len() > 3);
+        let joined: Vec<&str> = ch2.iter().flat_map(|(_, t)| t.split_whitespace()).collect();
+        assert_eq!(joined, words.iter().map(String::as_str).collect::<Vec<_>>());
+
+        // A second open uses the cached conversion.
+        let doc = EpubDocument::open(&storage, "books/test.epub").unwrap();
+        assert_eq!(blocks(&storage, &doc, 1).len(), ch2.len());
+    }
+}

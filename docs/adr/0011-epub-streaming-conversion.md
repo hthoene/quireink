@@ -1,0 +1,61 @@
+# 0011. EPUB: streaming conversion into a block cache
+
+- Status: Accepted
+- Date: 2026-10-14
+
+## Context
+
+EPUB is a ZIP archive of XHTML chapters. The ESP32-C3 profile has a heap
+budget of 192 KiB, and the 2-bit framebuffer alone takes 94 KiB of it. A
+single chapter can be larger than the remaining memory, and inflating
+deflate data needs a 32 KiB history window. Readers must jump to any
+position (ADR 0007) without re-parsing a chapter from its start for every
+page.
+
+## Decision
+
+- **Shared building blocks in the SDK.** `quireink-zip` reads the central
+  directory entry by entry and inflates entries as a stream.
+  `quireink-xml` is an incremental, allocation-light tokenizer. Both are
+  re-exported by the SDK (`sdk::zip`, `sdk::xml`), so other ZIP- or
+  XML-based format plugins (FB2, CBZ, DOCX, …) can reuse them.
+- **Inflate with the smallest window that works.** The decoder state is
+  about 10 KiB. Its window is a power of two that holds the whole entry,
+  and at most 32 KiB. Small entries such as package documents therefore
+  need only a few KiB.
+- **Chapters are converted once, on first use.** The XHTML is tokenized
+  while it is inflated and written to the plugin's cache
+  (`.quireink/plugins/format-epub/<hash>/`):
+  - `<n>.txt` holds block records (header and text);
+  - `<n>.idx` holds the offset of every block, for binary search;
+  - `<n>.anc` holds anchor ids and their offsets, for the table of contents;
+  - `<n>.end` holds the text length. It is written last and marks a
+    complete conversion.
+
+  All files are appended in small chunks. Long paragraphs are split into
+  blocks of at most 4,000 bytes.
+- **Reading needs only the block at hand.** `block_at` binary-searches the
+  index on storage and reads one record. Locators are offsets into
+  `<n>.txt`. They stay valid as long as the cache version and the book file
+  are unchanged; otherwise the cache is rebuilt (`meta.ini`).
+- **Progress without converting everything.** Progress is estimated from
+  the chapters' uncompressed sizes in the archive. Unread chapters are
+  never converted for it.
+- **Running out of memory is an error, not a crash.** Large buffers are
+  allocated fallibly, and failures surface as `DocumentError::OutOfMemory`.
+
+## Consequences
+
+- Peak memory while converting is about 10 KiB (decoder) + up to 32 KiB
+  (window) + about 8 KiB of buffers. Opening an already converted book
+  needs much less.
+- On the X4 profile, books with small chapters fit the budget (Alice in
+  Wonderland: peak 191 of 192 KiB). Chapters larger than about 16 KiB do
+  not fit while a full 2-bit framebuffer is held in RAM. Reducing the
+  resident framebuffer (1-bit planes or banded rendering) is the next
+  memory step.
+- The first opening of a chapter costs one pass over it plus writes to
+  the SD card; later page turns are cheap.
+- CSS, inline styles and images are not part of the block format yet.
+  They will extend the record header (inline runs, image references)
+  under a new cache version.

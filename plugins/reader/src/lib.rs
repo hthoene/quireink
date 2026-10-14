@@ -18,6 +18,7 @@ extern crate alloc;
 
 mod index;
 mod screen;
+mod toc;
 
 use alloc::borrow::Cow;
 use alloc::boxed::Box;
@@ -32,6 +33,12 @@ use quireink_sdk::{
 
 pub const PLUGIN: Id = Id::new_static("reader");
 pub const SCREEN: Id = Id::new_static("reader.screen");
+/// The table of contents screen; parameters `path`, `section`, `offset`.
+pub const TOC_SCREEN: Id = Id::new_static("reader.toc");
+/// Asks the reader to show a position. Parameters: `path` (the book),
+/// `section` and `offset`. Emitted by the table of contents; bookmark or
+/// search plugins can use it too.
+pub const GOTO: Id = Id::new_static("reader.goto");
 
 /// Settings of the reader.
 pub mod settings {
@@ -61,6 +68,8 @@ pub mod actions {
     pub const FONT_LARGER: Id = Id::new_static("reader.font-larger");
     pub const FONT_SMALLER: Id = Id::new_static("reader.font-smaller");
     pub const TOGGLE_JUSTIFY: Id = Id::new_static("reader.toggle-justify");
+    /// Opens the table of contents.
+    pub const TOC: Id = Id::new_static("reader.show-toc");
 }
 
 /// The reader plugin.
@@ -84,6 +93,16 @@ impl Plugin for Reader {
             factory: Box::new(|env, params| Box::new(screen::ReaderScreen::open(env, params))),
         })?;
         r.bind_slot(slots::READER, SCREEN, Priority::DEFAULT)?;
+        r.add_screen(ScreenSpec {
+            id: TOC_SCREEN,
+            title: Cow::Borrowed("reader.toc"),
+            factory: Box::new(|env, params| Box::new(toc::TocScreen::open(env, params))),
+        })?;
+        r.add_action(quireink_sdk::ActionSpec {
+            id: actions::TOC,
+            title: Cow::Borrowed("reader.toc"),
+            handler: None,
+        })?;
 
         let int = |id, title, min, max, default| SettingSpec {
             id,
@@ -154,6 +173,7 @@ impl Plugin for Reader {
             })?;
         }
         for (action, order) in [
+            (actions::TOC, 5),
             (actions::FONT_LARGER, 10),
             (actions::FONT_SMALLER, 20),
             (actions::TOGGLE_JUSTIFY, 30),

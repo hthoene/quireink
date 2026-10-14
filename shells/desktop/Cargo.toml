@@ -19,6 +19,7 @@ quireink-core = { workspace = true, features = ["color", "outline"] }
 quireink-platform.workspace = true
 quireink-plugin-diagnostics.workspace = true
 quireink-plugin-files.workspace = true
+quireink-plugin-format-epub.workspace = true
 quireink-plugin-format-txt.workspace = true
 quireink-plugin-home.workspace = true
 quireink-plugin-menu.workspace = true

@@ -408,7 +408,7 @@ fn read(storage: &dyn Storage, path: &str, from: u32, to: u32) -> Result<Vec<u8>
     let len = to.saturating_sub(from) as usize;
     let mut buf = Vec::new();
     buf.try_reserve_exact(len)
-        .map_err(|_| DocumentError::Malformed(Cow::Borrowed("not enough memory")))?;
+        .map_err(|_| DocumentError::OutOfMemory)?;
     buf.resize(len, 0);
     let mut filled = 0;
     while filled < buf.len() {
