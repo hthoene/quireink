@@ -27,6 +27,8 @@ pub enum SettingKind {
     /// One of a fixed set of values.
     Choice(Vec<Cow<'static, str>>),
     Text,
+    /// A UI language tag; settings UIs offer the installed translations.
+    Language,
 }
 
 impl SettingKind {
@@ -39,7 +41,7 @@ impl SettingKind {
                 _ => return None,
             }),
             SettingKind::Int { .. } => SettingValue::Int(text.parse().ok()?),
-            SettingKind::Choice(_) | SettingKind::Text => {
+            SettingKind::Choice(_) | SettingKind::Text | SettingKind::Language => {
                 SettingValue::Text(Cow::Owned(String::from(text)))
             }
         };
@@ -52,7 +54,22 @@ impl SettingKind {
             (SettingKind::Int { min, max }, SettingValue::Int(v)) => (min..=max).contains(&v),
             (SettingKind::Choice(options), SettingValue::Text(v)) => options.contains(v),
             (SettingKind::Text, SettingValue::Text(_)) => true,
+            (SettingKind::Language, SettingValue::Text(v)) => {
+                !v.is_empty() && v.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+            }
             _ => false,
+        }
+    }
+}
+
+impl SettingValue {
+    /// The value as written in configuration files.
+    pub fn to_config_text(&self) -> String {
+        match self {
+            SettingValue::Bool(true) => String::from("on"),
+            SettingValue::Bool(false) => String::from("off"),
+            SettingValue::Int(v) => alloc::format!("{v}"),
+            SettingValue::Text(v) => String::from(v.as_ref()),
         }
     }
 }
@@ -95,6 +112,8 @@ impl core::error::Error for SettingError {}
 pub struct Settings {
     specs: BTreeMap<Id, SettingSpec>,
     values: BTreeMap<Id, SettingValue>,
+    /// Ids in registration order, for settings UIs.
+    order: Vec<Id>,
 }
 
 impl Settings {
@@ -112,6 +131,7 @@ impl Settings {
                 message: Cow::Borrowed("default value does not match the setting kind"),
             });
         }
+        self.order.push(spec.id.clone());
         self.specs.insert(spec.id.clone(), spec);
         Ok(())
     }
@@ -162,8 +182,10 @@ impl Settings {
         }
     }
 
+    /// All settings in registration order: plugins registered first come
+    /// first, each in the order it declared its settings.
     pub fn specs(&self) -> impl Iterator<Item = &SettingSpec> {
-        self.specs.values()
+        self.order.iter().filter_map(|id| self.specs.get(id))
     }
 }
 

@@ -270,6 +270,89 @@ fn parse_unicode_escape(s: &str) -> Option<(char, usize)> {
     Some((char::from_u32(code)?, end + 2))
 }
 
+/// Returns `source` with `key` in `section` set to `value`.
+///
+/// Edits as little as possible, so hand-written files keep their comments,
+/// order and formatting: an existing entry's line is replaced, a new entry
+/// goes after the section's last entry, and a missing section is appended.
+/// Values that need it are quoted and escaped.
+pub fn set(source: &str, section: &str, key: &str, value: &str) -> String {
+    let line = alloc::format!("{key} = {}", quote(value));
+    let lines: alloc::vec::Vec<&str> = source.lines().collect();
+    let mut current = "";
+    let mut section_found = false;
+    let mut last_entry_of_section: Option<usize> = None;
+    let mut header_of_section: Option<usize> = None;
+    for (i, raw) in lines.iter().enumerate() {
+        let text = raw.trim();
+        if let Some(name) = text.strip_prefix('[').and_then(|t| t.strip_suffix(']')) {
+            current = name.trim();
+            if current == section {
+                section_found = true;
+                header_of_section = Some(i);
+            }
+            continue;
+        }
+        if current != section || text.is_empty() || text.starts_with(['#', ';']) {
+            continue;
+        }
+        if let Some((k, _)) = text.split_once('=') {
+            if k.trim() == key {
+                let mut out = alloc::vec::Vec::from(&lines[..]);
+                out[i] = &line;
+                return join(&out);
+            }
+            last_entry_of_section = Some(i);
+        }
+    }
+    if section_found {
+        let at = last_entry_of_section.or(header_of_section).unwrap_or(0) + 1;
+        let mut out = alloc::vec::Vec::from(&lines[..]);
+        out.insert(at, &line);
+        return join(&out);
+    }
+    let mut out = String::from(source);
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
+    }
+    if !out.is_empty() {
+        out.push('\n');
+    }
+    out.push_str(&alloc::format!("[{section}]\n{line}\n"));
+    out
+}
+
+fn join(lines: &[&str]) -> String {
+    let mut out = lines.join("\n");
+    out.push('\n');
+    out
+}
+
+/// Quotes a value if it would not survive unquoted (leading or trailing
+/// spaces, empty, or starting with a quote).
+fn quote(value: &str) -> Cow<'_, str> {
+    let plain = !value.is_empty()
+        && value.trim() == value
+        && !value.starts_with('"')
+        && !value.contains(['\n', '\r']);
+    if plain {
+        return Cow::Borrowed(value);
+    }
+    let mut out = String::from("\"");
+    for c in value.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
+            '\r' => {}
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    Cow::Owned(out)
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -329,5 +412,24 @@ mod tests {
     fn handles_crlf_line_endings() {
         let parsed = entries("[s]\r\nkey = value\r\n");
         assert_eq!(parsed[0].value.as_str(), "value");
+    }
+
+    #[test]
+    fn set_replaces_inserts_and_appends() {
+        let source =
+            "# My settings\n[core]\nlanguage = en  \n\n# reading\n[reader]\nfont-size = 11\n";
+        let replaced = set(source, "core", "language", "de");
+        assert_eq!(
+            replaced,
+            "# My settings\n[core]\nlanguage = de\n\n# reading\n[reader]\nfont-size = 11\n"
+        );
+        let inserted = set(source, "core", "night-mode", "on");
+        assert!(inserted.contains("language = en  \nnight-mode = on\n\n# reading"));
+        let appended = set(source, "files", "root", " my books ");
+        assert!(appended.ends_with("font-size = 11\n\n[files]\nroot = \" my books \"\n"));
+        assert_eq!(set("", "a", "b", "c"), "[a]\nb = c\n");
+        // The result parses back to the new values.
+        let entry = parse(&appended).last().unwrap().unwrap();
+        assert_eq!(entry.value.as_str(), " my books ");
     }
 }

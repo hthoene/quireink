@@ -4,8 +4,8 @@
 380 KB microcontroller to Linux and Android e-readers, from one codebase.**
 
 > **Status: early development.** Plain text books can be read in the
-> emulator — with page index, saved reading position and reopening of the
-> last book. EPUB and the full user interface come next. See the [project plan](docs/PLANNING.md)
+> emulator — with menus, a settings screen, page index, saved reading
+> position and reopening of the last book. EPUB comes next. See the [project plan](docs/PLANNING.md)
 > and the [roadmap](docs/PLANNING.md#12-roadmap).
 
 ## Why QuireInk?
@@ -43,6 +43,10 @@ long.page-forward = core.toggle-night-mode
 tap.center = none
 swipe.up = core.menu
 
+[menus]
+# Redefine any menu: which actions, in which order.
+reader.menu = reader.font-larger, reader.font-smaller, core.toggle-night-mode, core.home
+
 [plugins]
 # Switch any plugin off by its id.
 some-plugin = off
@@ -67,8 +71,13 @@ cargo run -p quireink-emulator -- --list-profiles
 ```
 
 Keys: `PageDown`/`Space` next page, `PageUp` previous page, arrow keys,
-`Enter` confirm, `Esc` back; hold a key for a long press. The mouse acts as
-the touch screen. `F2` shows refreshed regions, `F12` saves a screenshot.
+`Enter` confirm, `Esc` back, `M` menu; hold a key for a long press (holding
+`Enter` opens the menu on devices without a menu button). The mouse acts as
+the touch screen: tap the left or right edge to turn pages, the centre for
+the menu. `F2` shows refreshed regions, `F12` saves a screenshot.
+
+Settings changed in the UI are saved to `quireink.ini` in the library
+folder — the same file you can edit by hand.
 
 The emulator uses `samples/library` as the device storage; two
 public-domain books are included. Put your own `.txt` files into
@@ -95,7 +104,7 @@ cargo run -p quireink-emulator -- --headless --profile boox-go-7 --set core.lang
 | `crates/quireink-layout` | Deterministic page layout usable by any reader plugin |
 | `crates/quireink-sdk` | **The plugin SDK** — the only API plugins use |
 | `crates/quireink-core` | The kernel: plugin host, registries, input routing, refresh policy |
-| `plugins/` | First-party plugins: reader, file browser, TXT format, default fonts, diagnostics |
+| `plugins/` | First-party plugins: reader, file browser, menu, settings, TXT format, default fonts, diagnostics |
 | `tools/fontgen` | Converts fonts into bitmap font packs for small devices |
 | `shells/desktop` | Desktop emulator with device profiles |
 | `samples/` | Emulator library with public-domain books |

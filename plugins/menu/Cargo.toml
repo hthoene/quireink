@@ -1,0 +1,20 @@
+[package]
+name = "quireink-plugin-menu"
+description = "QuireInk menu overlay: shows the entries any plugin contributes to a menu"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+categories = ["no-std"]
+
+[dependencies]
+quireink-sdk.workspace = true
+
+[dev-dependencies]
+quireink-i18n.workspace = true
+
+[lints]
+workspace = true

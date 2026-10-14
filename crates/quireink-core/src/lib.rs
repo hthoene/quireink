@@ -49,10 +49,13 @@ use quireink_platform::{
     Color, DeviceInfo, FrameView, InputEvent, Instant, NoStorage, PointerEvent, PointerPhase, Rect,
     RefreshMode, Storage,
 };
-use quireink_sdk::builtin::{GLOBAL_KEYMAP_LAYER, events, settings as core_settings, slots};
+use quireink_sdk::builtin::{
+    CONFIG_FILE, GLOBAL_KEYMAP_LAYER, events, params as builtin_params, settings as core_settings,
+    slots,
+};
 use quireink_sdk::{
-    Command, Cx, Env, EventHandler, Fonts, Formats, GestureKind, Handled, Id, Manifest, Metrics,
-    Output, Params, Plugin, RegisterError, SDK_VERSION, Screen, Settings,
+    Command, Cx, Env, EventHandler, Fonts, Formats, GestureKind, Handled, Id, Manifest, Menus,
+    Metrics, Output, Params, Plugin, RegisterError, SDK_VERSION, Screen, Settings,
 };
 
 use crate::core_plugin::{CORE, CorePlugin};
@@ -222,8 +225,10 @@ impl KernelBuilder {
                 translator: Translator::new(),
                 fonts: Fonts::new(self.glyph_cache),
                 formats: Formats::new(),
+                menus: Menus::new(),
                 storage: self.storage.unwrap_or_else(|| Box::new(NoStorage)),
             },
+            pending: None,
             framebuffer,
             registry: Registry::default(),
             keymap: Keymap::default(),
@@ -239,11 +244,13 @@ impl KernelBuilder {
             now: Instant::default(),
         };
 
-        let disabled = self
-            .user_config
-            .as_deref()
-            .map(disabled_plugins)
-            .unwrap_or_default();
+        // The configuration file on the device, then the shell's overrides.
+        let stored = read_config(kernel.shared.storage.as_ref());
+        let configs: Vec<&str> = [stored.as_deref(), self.user_config.as_deref()]
+            .into_iter()
+            .flatten()
+            .collect();
+        let disabled: Vec<String> = configs.iter().flat_map(|c| disabled_plugins(c)).collect();
         let core: Box<dyn Plugin> = Box::new(CorePlugin);
         for plugin in core::iter::once(core).chain(self.plugins) {
             let manifest = plugin.manifest();
@@ -262,7 +269,13 @@ impl KernelBuilder {
                 );
             }
         }
-        if let Some(source) = &self.user_config {
+        for (id, spec) in &kernel.registry.actions {
+            kernel
+                .shared
+                .menus
+                .set_title(id.clone(), spec.title.clone());
+        }
+        for source in &configs {
             kernel.apply_user_config(source);
         }
         kernel.validate();
@@ -297,6 +310,8 @@ pub struct Kernel {
     subscriptions: Vec<(Id, EventHandler)>,
     /// When the active screen wants `on_timer`.
     screen_timer: Option<Instant>,
+    /// The part of the screen to redraw at the end of the current call.
+    pending: Option<Rect>,
     recognizer: Recognizer,
     /// Pointer ids captured by the active screen.
     captured: Vec<u8>,
@@ -508,6 +523,9 @@ impl Kernel {
             let _ = self.shared.formats.add(format);
         }
         self.subscriptions.append(&mut staging.subscriptions);
+        for entry in staging.menu_entries.drain(..) {
+            self.shared.menus.add(entry);
+        }
         Ok(())
     }
 
@@ -544,6 +562,18 @@ impl Kernel {
                         "invalid font binding".into(),
                     ),
                 },
+                "menus" => {
+                    let actions: Result<Vec<Id>, _> = value
+                        .split(',')
+                        .map(str::trim)
+                        .filter(|a| !a.is_empty())
+                        .map(Id::parse)
+                        .collect();
+                    match (Id::parse(entry.key), actions) {
+                        (Ok(menu), Ok(actions)) => self.shared.menus.customize(menu, actions),
+                        _ => self.warn(WarningSource::UserConfig, line, "invalid menu".into()),
+                    }
+                }
                 "slots" => match (Id::parse(entry.key), Id::parse(&value)) {
                     (Ok(slot), Ok(screen)) => self.registry.bind_user(slot, screen),
                     _ => self.warn(
@@ -587,12 +617,13 @@ impl Kernel {
         let mut unknown: Vec<&Id> = self
             .keymap
             .actions()
+            .chain(self.shared.menus.referenced_actions())
             .filter(|action| !self.registry.actions.contains_key(*action))
             .collect();
         unknown.sort();
         unknown.dedup();
         for action in unknown {
-            messages.push(format!("key map refers to unknown action `{action}`"));
+            messages.push(format!("unknown action `{action}` in a key map or menu"));
         }
         for message in messages {
             self.warn(WarningSource::Runtime, None, message);
@@ -646,6 +677,18 @@ impl Kernel {
                 });
             }
             Recognized::Gesture(gesture) => {
+                let overlay = self
+                    .stack
+                    .len()
+                    .checked_sub(1)
+                    .and_then(|top| self.overlay(top));
+                if let Some(region) = overlay
+                    && gesture.kind == GestureKind::Tap
+                    && !region.contains(gesture.start)
+                {
+                    self.output.commands.push(Command::Back);
+                    return;
+                }
                 if self.with_top(|screen, cx| screen.on_gesture(gesture, cx)) == Handled::Yes {
                     return;
                 }
@@ -703,20 +746,24 @@ impl Kernel {
 
     /// Runs `f` with the active screen and a context for it.
     fn with_top(&mut self, f: impl FnOnce(&mut dyn Screen, &mut Cx<'_, '_>) -> Handled) -> Handled {
-        let Some(top) = self.stack.last_mut() else {
-            return Handled::No;
-        };
-        let env = self.shared.env(self.now);
-        let mut cx = Cx::new(&env, self.framebuffer.canvas(), &mut self.output);
-        f(top.screen.as_mut(), &mut cx)
+        match self.stack.len().checked_sub(1) {
+            Some(top) => self.with_screen(top, f),
+            None => Handled::No,
+        }
     }
 
     // ---- Commands and drawing ----------------------------------------
 
     fn finish(&mut self) -> Effects {
         self.run_commands();
-        if mem::take(&mut self.output.redraw) {
-            self.draw_top();
+        if mem::take(&mut self.output.redraw)
+            && let Some(top) = self.stack.len().checked_sub(1)
+        {
+            let region = self.region_of(top);
+            self.invalidate(region);
+        }
+        if let Some(region) = self.pending.take() {
+            self.redraw(region);
         }
         let requested = self.output.refresh.take();
         let mut effects = Effects::default();
@@ -770,8 +817,7 @@ impl Kernel {
                     .position(|s| s.slot.as_ref() == Some(&slot));
                 if let Some(index) = open {
                     if index + 1 < self.stack.len() {
-                        self.stack.truncate(index + 1);
-                        self.screen_changed();
+                        self.close_above(index);
                     }
                     return;
                 }
@@ -790,15 +836,28 @@ impl Kernel {
                 for (_, handler) in self.subscriptions.iter().filter(|(id, _)| *id == event) {
                     handler(&env, &params, &mut self.output.commands);
                 }
+                for index in 0..self.stack.len() {
+                    self.with_screen(index, |screen, cx| {
+                        screen.on_event(&event, &params, cx);
+                        Handled::Yes
+                    });
+                }
             }
+            Command::RunAction(action) => self.dispatch(action),
             Command::Back => {
                 if self.stack.len() > 1 {
-                    self.stack.pop();
-                    self.screen_changed();
+                    self.close_above(self.stack.len() - 2);
                 }
             }
             Command::SetSetting(id, value) => match self.shared.settings.set(id.as_str(), value) {
-                Ok(()) => self.setting_changed(&id),
+                Ok(()) => {
+                    self.persist_setting(&id);
+                    self.setting_changed(&id);
+                    self.output.commands.push(Command::Emit(
+                        events::SETTING_CHANGED,
+                        Params::new().with(builtin_params::ID, id.as_str().to_string()),
+                    ));
+                }
                 Err(error) => {
                     self.warn(WarningSource::Runtime, None, format!("`{id}`: {error}"));
                 }
@@ -822,15 +881,107 @@ impl Kernel {
         let env = self.shared.env(self.now);
         let screen = (spec.factory)(&env, params);
         self.stack.push(ActiveScreen { id, slot, screen });
-        self.screen_changed();
+        let top = self.stack.len() - 1;
+        let overlay = self.overlay(top);
+        self.screen_changed(self.region_of(top), overlay.is_some());
     }
 
-    fn screen_changed(&mut self) {
+    /// Closes all screens above `index`.
+    fn close_above(&mut self, index: usize) {
+        let mut region: Option<Rect> = None;
+        let mut overlays_only = true;
+        for i in index + 1..self.stack.len() {
+            let r = self.region_of(i);
+            overlays_only &= self.overlay(i).is_some();
+            region = Some(region.map_or(r, |u: Rect| u.union(&r)));
+        }
+        self.stack.truncate(index + 1);
+        if let Some(region) = region {
+            self.screen_changed(region, overlays_only);
+        }
+    }
+
+    /// The region of an overlay, `None` for full screens.
+    fn overlay(&self, index: usize) -> Option<Rect> {
+        let env = self.shared.env(self.now);
+        self.stack.get(index)?.screen.region(&env)
+    }
+
+    /// The area a screen occupies.
+    fn region_of(&self, index: usize) -> Rect {
+        self.overlay(index)
+            .unwrap_or_else(|| self.framebuffer.bounds())
+    }
+
+    fn invalidate(&mut self, region: Rect) {
+        self.pending = Some(self.pending.map_or(region, |p| p.union(&region)));
+    }
+
+    /// Redraws `region`: the topmost full screen and every overlay above
+    /// it, each clipped to the region.
+    fn redraw(&mut self, region: Rect) {
+        let env = self.shared.env(self.now);
+        let regions: Vec<Option<Rect>> = self.stack.iter().map(|s| s.screen.region(&env)).collect();
+        let base = regions.iter().rposition(Option::is_none).unwrap_or(0);
+        let bounds = self.framebuffer.bounds();
+        let mut canvas = self.framebuffer.canvas();
+        let mut canvas = canvas.clipped(region);
+        canvas.clear(Color::WHITE);
+        for (active, own) in self.stack[base..].iter_mut().zip(&regions[base..]) {
+            let Some(area) = own.unwrap_or(bounds).intersection(&region) else {
+                continue;
+            };
+            active.screen.draw(&mut canvas.clipped(area), &env);
+        }
+    }
+
+    /// Runs `f` with the screen at `index` and a context for it.
+    fn with_screen(
+        &mut self,
+        index: usize,
+        f: impl FnOnce(&mut dyn Screen, &mut Cx<'_, '_>) -> Handled,
+    ) -> Handled {
+        let Some(active) = self.stack.get_mut(index) else {
+            return Handled::No;
+        };
+        let env = self.shared.env(self.now);
+        let mut cx = Cx::new(&env, self.framebuffer.canvas(), &mut self.output);
+        f(active.screen.as_mut(), &mut cx)
+    }
+
+    /// Writes a changed setting to the configuration file on the device,
+    /// keeping the rest of the file as it is.
+    fn persist_setting(&mut self, id: &Id) {
+        let Some(value) = self.shared.settings.get(id.as_str()) else {
+            return;
+        };
+        let Some((section, key)) = id.as_str().split_once('.') else {
+            return;
+        };
+        let storage = self.shared.storage.as_ref();
+        let source = read_config(storage).unwrap_or_default();
+        let updated = quireink_config::set(&source, section, key, &value.to_config_text());
+        if storage.write(CONFIG_FILE, updated.as_bytes()).is_err() {
+            self.warn(
+                WarningSource::Runtime,
+                None,
+                format!("could not save `{id}` to {CONFIG_FILE}"),
+            );
+        }
+    }
+
+    /// After the screen stack changed: redraw `region`, flashing for full
+    /// screens and refreshing quickly when only overlays changed.
+    fn screen_changed(&mut self, region: Rect, overlays_only: bool) {
         self.captured.clear();
         self.screen_timer = None;
         self.output.wake_at = None;
-        self.output.redraw = true;
-        self.output.request_refresh(RefreshMode::Full);
+        self.invalidate(region);
+        self.output.request_refresh(if overlays_only {
+            RefreshMode::Partial
+        } else {
+            RefreshMode::Full
+        });
         self.with_top(|screen, cx| {
             screen.on_show(cx);
             Handled::Yes
@@ -846,18 +997,11 @@ impl Kernel {
             self.framebuffer
                 .set_inverted(self.shared.settings.bool(id.as_str()));
         }
-        self.output.redraw = true;
-        self.output.request_refresh(RefreshMode::Full);
-    }
-
-    fn draw_top(&mut self) {
-        let Some(top) = self.stack.last_mut() else {
-            return;
-        };
-        let env = self.shared.env(self.now);
-        let mut canvas = self.framebuffer.canvas();
-        canvas.clear(Color::WHITE);
-        top.screen.draw(&mut canvas, &env);
+        if *id == core_settings::LANGUAGE || *id == core_settings::NIGHT_MODE {
+            let bounds = self.framebuffer.bounds();
+            self.invalidate(bounds);
+            self.output.request_refresh(RefreshMode::Full);
+        }
     }
 
     fn warn(&mut self, source: WarningSource, line: Option<u32>, message: String) {
@@ -867,6 +1011,12 @@ impl Kernel {
             message,
         });
     }
+}
+
+/// The configuration file on the device, if any.
+fn read_config(storage: &dyn Storage) -> Option<String> {
+    let data = quireink_sdk::read_file(storage, CONFIG_FILE, 64 * 1024).ok()?;
+    String::from_utf8(data).ok()
 }
 
 /// Plugin ids switched off in the `[plugins]` section of a user config.
@@ -885,6 +1035,7 @@ struct Shared {
     translator: Translator,
     fonts: Fonts,
     formats: Formats,
+    menus: Menus,
     storage: Box<dyn Storage>,
 }
 
@@ -898,6 +1049,7 @@ impl Shared {
             i18n: &self.translator,
             fonts: &self.fonts,
             formats: &self.formats,
+            menus: &self.menus,
             storage: self.storage.as_ref(),
         }
     }

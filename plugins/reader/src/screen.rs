@@ -3,7 +3,7 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use quireink_sdk::builtin::{actions, fonts, params};
+use quireink_sdk::builtin::{actions, events, fonts, params, slots};
 use quireink_sdk::document::{Document, DocumentError, Locator};
 use quireink_sdk::layout::{Page, Style, layout_page};
 use quireink_sdk::{
@@ -161,13 +161,32 @@ impl Book {
             }
             page => page,
         };
-        book.index = Some(PageIndex::open(
-            env.storage,
-            format!("{}/pages-{}.bin", book.dir, book.typography.key),
-        ));
+        book.index = Some(book.open_index(env));
         let state = format!("[reader]\nlast = \"{}\"\n", escape(&book.path));
         let _ = env.storage.write(&state_path(), state.as_bytes());
         Ok(book)
+    }
+
+    fn open_index(&self, env: &Env<'_>) -> PageIndex {
+        PageIndex::open(
+            env.storage,
+            format!("{}/pages-{}.bin", self.dir, self.typography.key),
+        )
+    }
+
+    /// Applies changed reading settings: new typography, the current
+    /// position laid out again, and a page index for the new layout.
+    fn relayout(&mut self, env: &Env<'_>) {
+        let Some(font) = self.font(env) else {
+            return;
+        };
+        self.typography = Typography::new(env, &font);
+        if let Ok(page) = self.layout(env, self.page.start) {
+            self.page = page;
+        }
+        self.history.clear();
+        self.index = Some(self.open_index(env));
+        self.indexing = None;
     }
 
     fn font<'a>(&self, env: &Env<'a>) -> Option<FontHandle<'a>> {
@@ -435,8 +454,29 @@ impl Screen for ReaderScreen {
                 book.show(cx, start, false);
             }
             Handled::Yes
+        } else if *action == actions::MENU {
+            cx.command(Command::OpenSlot(
+                slots::MENU,
+                Params::new().with(params::MENU, crate::MENU.as_str()),
+            ));
+            Handled::Yes
         } else {
             Handled::No
+        }
+    }
+
+    fn on_event(&mut self, event: &Id, params: &Params, cx: &mut Cx<'_, '_>) {
+        let Ok(book) = &mut self.book else {
+            return;
+        };
+        let id = params.get(params::ID).unwrap_or_default();
+        let affects_layout = id.starts_with("reader.") && id != crate::settings::OPEN_LAST.as_str();
+        if *event == events::SETTING_CHANGED && affects_layout {
+            let env = *cx.env();
+            book.relayout(&env);
+            cx.request_redraw();
+            let now = env.now;
+            cx.wake_at(now);
         }
     }
 }

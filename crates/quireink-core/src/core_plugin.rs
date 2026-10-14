@@ -6,11 +6,11 @@ use alloc::borrow::Cow;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
-use quireink_sdk::builtin::{actions, fonts, screens, settings, slots};
+use quireink_sdk::builtin::{actions, fonts, menus, params, screens, settings, slots};
 use quireink_sdk::{
-    ActionHandler, ActionSpec, Canvas, Color, Command, Cx, Env, Handled, Id, Manifest, Plugin,
-    Priority, RegisterError, Registrar, SDK_VERSION, Screen, ScreenSpec, SettingKind, SettingSpec,
-    SettingValue, SlotSpec,
+    ActionHandler, ActionSpec, Canvas, Color, Command, Cx, Env, Handled, Id, Manifest, MenuEntry,
+    Params, Plugin, Priority, RegisterError, Registrar, SDK_VERSION, Screen, ScreenSpec,
+    SettingKind, SettingSpec, SettingValue, SlotSpec,
 };
 
 pub(crate) const CORE: Id = Id::new_static("core");
@@ -37,7 +37,6 @@ impl Plugin for CorePlugin {
             (actions::LEFT, "core.action.left"),
             (actions::RIGHT, "core.action.right"),
             (actions::CONFIRM, "core.action.confirm"),
-            (actions::MENU, "core.action.menu"),
         ];
         for (id, title) in screen_actions {
             r.add_action(ActionSpec {
@@ -47,7 +46,32 @@ impl Plugin for CorePlugin {
             })?;
         }
 
-        let handled: [(Id, &'static str, ActionHandler); 3] = [
+        let open = |slot: Id| -> ActionHandler {
+            Box::new(move |_: &Env<'_>, out: &mut Vec<Command>| {
+                out.push(Command::open_slot(slot.clone()));
+            })
+        };
+        let handled: [(Id, &'static str, ActionHandler); 6] = [
+            (
+                actions::MENU,
+                "core.action.menu",
+                Box::new(|_: &Env<'_>, out: &mut Vec<Command>| {
+                    out.push(Command::OpenSlot(
+                        slots::MENU,
+                        Params::new().with(params::MENU, menus::MAIN.as_str()),
+                    ));
+                }),
+            ),
+            (
+                actions::LIBRARY,
+                "core.action.library",
+                open(slots::LIBRARY),
+            ),
+            (
+                actions::SETTINGS,
+                "core.action.settings",
+                open(slots::SETTINGS),
+            ),
             (
                 actions::BACK,
                 "core.action.back",
@@ -84,6 +108,8 @@ impl Plugin for CorePlugin {
             (slots::HOME, "core.slot.home"),
             (slots::READER, "core.slot.reader"),
             (slots::LIBRARY, "core.slot.library"),
+            (slots::MENU, "core.slot.menu"),
+            (slots::SETTINGS, "core.slot.settings"),
         ] {
             r.add_slot(SlotSpec {
                 id: id.clone(),
@@ -98,10 +124,23 @@ impl Plugin for CorePlugin {
             factory: Box::new(|_, _| Box::new(PlaceholderScreen)),
         })?;
 
+        for (action, order) in [
+            (actions::HOME, 10),
+            (actions::LIBRARY, 20),
+            (actions::SETTINGS, 30),
+            (actions::TOGGLE_NIGHT_MODE, 40),
+        ] {
+            r.add_menu_entry(MenuEntry {
+                menu: menus::MAIN,
+                action,
+                order,
+            })?;
+        }
+
         r.add_setting(SettingSpec {
             id: settings::LANGUAGE,
             title: Cow::Borrowed("core.setting.language"),
-            kind: SettingKind::Text,
+            kind: SettingKind::Language,
             default: SettingValue::Text(Cow::Borrowed(quireink_i18n::FALLBACK_LANGUAGE)),
         })?;
         r.add_setting(SettingSpec {
@@ -110,6 +149,13 @@ impl Plugin for CorePlugin {
             kind: SettingKind::Bool,
             default: SettingValue::Bool(false),
         })?;
+        r.add_setting(SettingSpec {
+            id: settings::UI_SIZE,
+            title: Cow::Borrowed("core.setting.ui-size"),
+            kind: SettingKind::Int { min: 7, max: 24 },
+            default: SettingValue::Int(11),
+        })?;
+
         r.add_setting(SettingSpec {
             id: settings::FULL_REFRESH_INTERVAL,
             title: Cow::Borrowed("core.setting.full-refresh-interval"),

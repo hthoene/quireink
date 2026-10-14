@@ -1,6 +1,6 @@
 # QuireInk — Project Plan
 
-> Status: **Draft v0.7** — living document. Decisions that are not yet final are
+> Status: **Draft v0.8** — living document. Decisions that are not yet final are
 > marked **[OPEN]**. Facts about hardware that still need verification are
 > marked **[VERIFY]**. Once a decision is final it moves into an Architecture
 > Decision Record under `docs/adr/`.
@@ -543,7 +543,7 @@ architecture (G1–G12 below).
 
 | # | Gap | Architecture change | When |
 |---|-----|--------------------|------|
-| G1 | Only full screens existed | **Layers**: popups, dialogs, menus, toasts and keyboards are partial-screen surfaces stacked above screens (also slot-bound). Without a compositing buffer, the screen below redraws only the uncovered region. | M2 |
+| G1 | Only full screens existed | **Layers**: popups, dialogs, menus, toasts and keyboards are partial-screen surfaces stacked above screens (also slot-bound). Without a compositing buffer, the screen below redraws only the uncovered region. | M2 ✅ (ADR 0010) |
 | G2 | Hardware features had no plugin API | **Platform services**: shells register services (frontlight, battery, network, HTTP server, audio/TTS, Bluetooth, USB) through the same service registry plugins use. | Storage ✅ M1 (ADR 0009) / rest M2–M6 |
 | G3 | One global settings level | **Settings scopes**: global → device → user profile → collection → book; the most specific value wins. | M3 |
 | G4 | No time, no background work | **Time + jobs**: every kernel call carries a timestamp, `WakeAt` effects drive timers (M0); screens run background steps with `Cx::wake_at` and `on_timer`, events via `Command::Emit` + `Registrar::subscribe` (M1); job progress and cancellation; network requests as effects. | M0 ✅ / M1 ✅ / M5 |
@@ -551,7 +551,7 @@ architecture (G1–G12 below).
 | G6 | Shells pre-interpreted input | **Raw input**: shells send button down/up and pointer samples; the kernel recognizes long presses and gestures; screens can capture pointers (done in M0). Gesture recognizers become contributions. | M0 ✅ / M5 |
 | G7 | Display and power were static | **Lifecycle events**: rotation/resolution changes, suspend/resume, low battery, charging, USB. | M4 |
 | G8 | Reader was one monolith | Reader split into a **layout engine** (`quireink-layout`, usable by every reader plugin) and interchangeable reader screens. | M1 ✅ |
-| G9 | Plugins could not be managed at runtime | **Plugin management service** (list, enable, disable, install, update) and config write-back. | M5 |
+| G9 | Plugins could not be managed at runtime | **Plugin management service** (list, enable, disable, install, update) and config write-back. | Config write-back ✅ M2 / rest M5 |
 | G10 | Fixed library schema | Library service with **plugin-defined metadata fields** and metadata providers; the library service itself is replaceable. | M2–M5 |
 | G11 | Widgets were pixels only | **Widget semantics** (role, label, state) for accessibility, automation and tests. | M2 |
 | G12 | Only the kernel could define extension points | **Plugin-defined extension points**: a plugin publishes a service through which others contribute; a second init phase (`activate`) runs after all plugins registered. | M5 |
@@ -694,7 +694,7 @@ If the X4 has not arrived by the end of M3, M6 (Boox) is done before M4.
 |-----------|---------|---------------|
 | **M0 Foundation** ✅ | Workspace, CI, license, ADRs, platform vocabulary, config + i18n crates, SDK 0.1 with plugin/registry/slot/action/key-map model, raw input + gesture recognition, timers, kernel, emulator with device profiles and heap cap, `diagnostics` plugin | Emulator shows the diagnostics screen contributed by a plugin; CI green on all targets |
 | **M1 Plain text** ✅ | Fonts, rasterizer, bitmap packs + `fontgen`, line breaking, storage service, document model, layout engine, TXT plugin, reader (progress, background page index, reopen last book), file browser, events, timers | ✅ A 5.3 MB TXT reads in the X4 profile within the heap budget (peak 159 KiB of 192 KiB); index of 18,844 pages built in the background |
-| **M2 UI** | Widget runtime, themes, layout files, library service, first-party plugins `ui-home`, `ui-files`, `ui-menu`, `ui-settings` | Full button-only flow in the emulator; home screen replaceable by config; snapshot tests |
+| **M2 UI** 🔶 | ✅ overlays, menus as contributions (+ `[menus]`), generated settings screen, settings saved to `quireink.ini`, screen events, `ui` building blocks, `core.ui-size`, reader menu with live re-layout, button-only and touch flows · ⬜ themes beyond `core.ui-size`, layout files + home dashboard, library service, widget semantics, on-screen keyboard, snapshot tests | Full button-only flow in the emulator ✅; home screen replaceable by config ✅; snapshot tests ⬜ |
 | **M3 EPUB** | Streaming ZIP, XML tokenizer, CSS subset, TOC, images (dithered) | Standard Ebooks / Gutenberg test corpus renders correctly |
 | **M4 Xteink X4** | ESP32 shell: display, buttons, SD, sleep, firmware backup/restore | Read an EPUB on real hardware; battery measurement |
 | **M5 Plugins v1** | SDK 0.1 published + docs, plugin manifests loaded from storage, events/filters/services complete, kosync, OPDS | Progress syncs with KOReader; a sample community plugin lives outside the repo |

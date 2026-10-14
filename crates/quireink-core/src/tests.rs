@@ -558,3 +558,190 @@ fn events_open_screens_with_params_and_timers_run() {
         ]
     );
 }
+
+/// A full screen that logs events, plus an overlay covering the lower half.
+struct OverlayPlugin {
+    log: Log,
+}
+
+struct BaseScreen {
+    log: Log,
+}
+
+impl Screen for BaseScreen {
+    fn draw(&mut self, canvas: &mut Canvas<'_>, _: &Env<'_>) {
+        let clip = canvas.clip();
+        self.log
+            .borrow_mut()
+            .push(alloc::format!("draw base {}x{}", clip.width, clip.height));
+    }
+
+    fn on_action(&mut self, _: &Id, _: &mut Cx<'_, '_>) -> Handled {
+        Handled::No
+    }
+
+    fn on_event(&mut self, event: &Id, params: &quireink_sdk::Params, _: &mut Cx<'_, '_>) {
+        self.log.borrow_mut().push(alloc::format!(
+            "event {event} {}",
+            params.get("id").unwrap_or_default()
+        ));
+    }
+}
+
+struct HalfOverlay;
+
+impl Screen for HalfOverlay {
+    fn region(&self, _: &Env<'_>) -> Option<Rect> {
+        Some(Rect::new(0, 45, 90, 45))
+    }
+
+    fn draw(&mut self, canvas: &mut Canvas<'_>, _: &Env<'_>) {
+        canvas.fill_rect(0, 45, 90, 45, Color::BLACK);
+    }
+
+    fn on_action(&mut self, _: &Id, _: &mut Cx<'_, '_>) -> Handled {
+        Handled::No
+    }
+}
+
+impl Plugin for OverlayPlugin {
+    fn manifest(&self) -> Manifest {
+        Manifest {
+            id: Id::new_static("ov"),
+            name: Cow::Borrowed("Overlay"),
+            version: Version::new(1, 0, 0),
+            sdk: SDK_VERSION,
+        }
+    }
+
+    fn register(&self, r: &mut dyn Registrar) -> Result<(), RegisterError> {
+        let log = self.log.clone();
+        r.add_screen(ScreenSpec {
+            id: Id::new_static("ov.base"),
+            title: Cow::Borrowed("base"),
+            factory: Box::new(move |_, _| Box::new(BaseScreen { log: log.clone() })),
+        })?;
+        r.bind_slot(slots::HOME, Id::new_static("ov.base"), Priority::DEFAULT)?;
+        r.add_screen(ScreenSpec {
+            id: Id::new_static("ov.half"),
+            title: Cow::Borrowed("half"),
+            factory: Box::new(|_, _| Box::new(HalfOverlay)),
+        })?;
+        r.bind_slot(slots::MENU, Id::new_static("ov.half"), Priority::DEFAULT)?;
+        for (action, order) in [(actions::TOGGLE_NIGHT_MODE, 20), (actions::HOME, 10)] {
+            r.add_menu_entry(quireink_sdk::MenuEntry {
+                menu: quireink_sdk::builtin::menus::MAIN,
+                action,
+                order,
+            })?;
+        }
+        Ok(())
+    }
+}
+
+#[test]
+fn overlays_redraw_only_their_region_and_close_on_outside_taps() {
+    let log = log();
+    let mut kernel = Kernel::builder(DEVICE)
+        .plugin(OverlayPlugin { log: log.clone() })
+        .build()
+        .unwrap();
+    kernel.start(Instant(0));
+    log.borrow_mut().clear();
+
+    // The menu action opens the overlay bound to core.menu.
+    let effects = press(&mut kernel, 100, "menu");
+    assert_eq!(kernel.active_screen().map(Id::as_str), Some("ov.half"));
+    assert_eq!(
+        effects.refresh(),
+        Some((Rect::new(0, 45, 90, 45), RefreshMode::Partial))
+    );
+    assert_eq!(*log.borrow(), ["draw base 90x45"]);
+    assert_eq!(kernel.frame().pixel(0, 60), Color::BLACK);
+    assert_eq!(kernel.frame().pixel(0, 10), Color::WHITE);
+
+    // A tap above the overlay closes it and restores the base screen.
+    log.borrow_mut().clear();
+    let effects = tap(&mut kernel, 300, 45, 10);
+    assert_eq!(kernel.active_screen().map(Id::as_str), Some("ov.base"));
+    assert_eq!(
+        effects.refresh(),
+        Some((Rect::new(0, 45, 90, 45), RefreshMode::Partial))
+    );
+    assert_eq!(*log.borrow(), ["draw base 90x45"]);
+    assert_eq!(kernel.frame().pixel(0, 60), Color::WHITE);
+}
+
+#[test]
+fn menus_follow_order_and_user_definitions() {
+    let log = log();
+    let kernel = Kernel::builder(DEVICE)
+        .plugin(OverlayPlugin { log: log.clone() })
+        .build()
+        .unwrap();
+    let env_items = |kernel: &Kernel| -> Vec<String> {
+        kernel
+            .shared
+            .menus
+            .items("core.main")
+            .iter()
+            .map(|i| i.action.to_string())
+            .collect()
+    };
+    let items = env_items(&kernel);
+    // Entries of the core plugin and this plugin, sorted by order.
+    assert_eq!(items.first().map(String::as_str), Some("core.home"));
+    assert!(items.iter().filter(|a| *a == "core.home").count() == 2);
+
+    let kernel = Kernel::builder(DEVICE)
+        .plugin(OverlayPlugin { log })
+        .user_config("[menus]\ncore.main = core.settings, core.toggle-night-mode\n")
+        .build()
+        .unwrap();
+    assert_eq!(
+        env_items(&kernel),
+        ["core.settings", "core.toggle-night-mode"]
+    );
+}
+
+#[test]
+fn changed_settings_are_saved_and_announced() {
+    let log = log();
+    let storage = quireink_sdk::MemoryStorage::new()
+        .with("quireink.ini", "# my settings\n[core]\nui-size = 12\n");
+    let mut kernel = Kernel::builder(DEVICE)
+        .storage(storage)
+        .plugin(OverlayPlugin { log: log.clone() })
+        .build()
+        .unwrap();
+    assert_eq!(kernel.settings().int("core.ui-size"), 12);
+    kernel.start(Instant(0));
+    log.borrow_mut().clear();
+
+    // Long tap in the centre runs core.toggle-night-mode.
+    let down = InputEvent::Pointer(PointerEvent {
+        id: 0,
+        phase: PointerPhase::Down,
+        point: Point::new(45, 45),
+        tool: PointerTool::Finger,
+        pressure: 1000,
+    });
+    kernel.handle(Instant(100), down);
+    kernel.tick(Instant(600));
+    assert!(kernel.settings().bool("core.night-mode"));
+    assert!(
+        log.borrow()
+            .contains(&String::from("event core.setting-changed core.night-mode"))
+    );
+
+    let mut buf = [0u8; 256];
+    let n = kernel
+        .shared
+        .storage
+        .read_at("quireink.ini", 0, &mut buf)
+        .unwrap();
+    assert_eq!(
+        core::str::from_utf8(&buf[..n]).unwrap(),
+        "# my settings\n[core]\nui-size = 12\nnight-mode = on\n"
+    );
+}

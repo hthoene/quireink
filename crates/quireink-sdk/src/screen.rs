@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 use core::fmt;
 
 use quireink_graphics::Canvas;
-use quireink_platform::{Instant, PointerEvent, RefreshMode};
+use quireink_platform::{Instant, PointerEvent, Rect, RefreshMode};
 
 use crate::command::Command;
 use crate::env::Env;
@@ -46,8 +46,18 @@ pub enum Handled {
 /// whenever a redraw is requested. Event handlers may also draw directly for
 /// small, partial updates; the kernel refreshes exactly the changed region.
 pub trait Screen {
-    /// Draws the whole screen. The canvas has been cleared to white.
+    /// Draws the screen. For full screens the canvas has been cleared to
+    /// white; overlays paint their own background. The canvas may be
+    /// clipped to the part that needs redrawing.
     fn draw(&mut self, canvas: &mut Canvas<'_>, env: &Env<'_>);
+
+    /// `None` for a full screen; `Some(region)` makes the screen an
+    /// overlay (menu, dialog, popup) drawn above the screens below it.
+    /// Tapping outside an overlay closes it.
+    fn region(&self, env: &Env<'_>) -> Option<Rect> {
+        let _ = env;
+        None
+    }
 
     /// Reacts to an action. Unhandled actions go to the action's global
     /// handler, if it has one.
@@ -74,6 +84,12 @@ pub trait Screen {
     /// start background work with [`Cx::wake_at`].
     fn on_show(&mut self, cx: &mut Cx<'_, '_>) {
         let _ = cx;
+    }
+
+    /// Called for every emitted event (after its subscribers), on every
+    /// open screen — e.g. `core.setting-changed` to re-layout.
+    fn on_event(&mut self, event: &Id, params: &Params, cx: &mut Cx<'_, '_>) {
+        let _ = (event, params, cx);
     }
 
     /// Called when a time requested with [`Cx::wake_at`] has come. Long

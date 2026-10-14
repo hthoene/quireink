@@ -20,6 +20,8 @@ quireink-platform.workspace = true
 quireink-plugin-diagnostics.workspace = true
 quireink-plugin-files.workspace = true
 quireink-plugin-format-txt.workspace = true
+quireink-plugin-menu.workspace = true
+quireink-plugin-settings.workspace = true
 quireink-plugin-reader.workspace = true
 quireink-plugin-fonts-default = { workspace = true, features = ["outline"] }
 png = "0.17"

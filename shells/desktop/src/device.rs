@@ -40,10 +40,13 @@ impl Device {
         let kernel = budget::track(|| {
             let mut builder = Kernel::builder(profile.device)
                 .storage(storage)
+                .glyph_cache(profile.glyph_cache)
                 .plugin(quireink_plugin_fonts_default::DefaultFonts)
                 .plugin(quireink_plugin_format_txt::TxtFormat)
                 .plugin(quireink_plugin_reader::Reader)
                 .plugin(quireink_plugin_files::Files)
+                .plugin(quireink_plugin_menu::Menu)
+                .plugin(quireink_plugin_settings::SettingsPlugin)
                 .plugin(quireink_plugin_diagnostics::Diagnostics);
             // Copy the configuration inside the tracked scope so that its
             // allocation and release are both accounted for.

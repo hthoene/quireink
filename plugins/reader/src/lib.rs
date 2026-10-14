@@ -24,7 +24,7 @@ use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use quireink_sdk::builtin::{events, params, slots};
+use quireink_sdk::builtin::{actions as core_actions, events, params, slots};
 use quireink_sdk::{
     Command, Env, Id, Manifest, Params, Plugin, Priority, RegisterError, Registrar, SDK_VERSION,
     ScreenSpec, SettingKind, SettingSpec, SettingValue, Version,
@@ -48,6 +48,19 @@ pub mod settings {
     pub const INDENT: Id = Id::new_static("reader.indent");
     /// Reopen the last book at start-up.
     pub const OPEN_LAST: Id = Id::new_static("reader.open-last");
+}
+
+/// The reader's menu (`core.menu` on the reader screen). Any plugin can
+/// add entries; users can redefine it in `[menus]`.
+pub const MENU: Id = Id::new_static("reader.menu");
+
+/// Actions of the reader.
+pub mod actions {
+    use quireink_sdk::Id;
+
+    pub const FONT_LARGER: Id = Id::new_static("reader.font-larger");
+    pub const FONT_SMALLER: Id = Id::new_static("reader.font-smaller");
+    pub const TOGGLE_JUSTIFY: Id = Id::new_static("reader.toggle-justify");
 }
 
 /// Events emitted by the reader; all carry the parameter `path`.
@@ -108,6 +121,61 @@ impl Plugin for Reader {
             flag(settings::OPEN_LAST, "reader.setting.open-last", true),
         ] {
             r.add_setting(setting)?;
+        }
+
+        let font_step = |step: i64| -> quireink_sdk::ActionHandler {
+            Box::new(move |env: &Env<'_>, out: &mut Vec<Command>| {
+                let size = env.settings.int(settings::FONT_SIZE.as_str()) + step;
+                out.push(Command::SetSetting(
+                    settings::FONT_SIZE,
+                    SettingValue::Int(size.clamp(6, 40)),
+                ));
+            })
+        };
+        let handlers: [(Id, &'static str, quireink_sdk::ActionHandler); 3] = [
+            (
+                actions::FONT_LARGER,
+                "reader.action.font-larger",
+                font_step(1),
+            ),
+            (
+                actions::FONT_SMALLER,
+                "reader.action.font-smaller",
+                font_step(-1),
+            ),
+            (
+                actions::TOGGLE_JUSTIFY,
+                "reader.action.toggle-justify",
+                Box::new(|env: &Env<'_>, out: &mut Vec<Command>| {
+                    let justify = env.settings.bool(settings::JUSTIFY.as_str());
+                    out.push(Command::SetSetting(
+                        settings::JUSTIFY,
+                        SettingValue::Bool(!justify),
+                    ));
+                }),
+            ),
+        ];
+        for (id, title, handler) in handlers {
+            r.add_action(quireink_sdk::ActionSpec {
+                id,
+                title: Cow::Borrowed(title),
+                handler: Some(handler),
+            })?;
+        }
+        for (action, order) in [
+            (actions::FONT_LARGER, 10),
+            (actions::FONT_SMALLER, 20),
+            (actions::TOGGLE_JUSTIFY, 30),
+            (core_actions::TOGGLE_NIGHT_MODE, 40),
+            (core_actions::LIBRARY, 50),
+            (core_actions::SETTINGS, 60),
+            (core_actions::HOME, 70),
+        ] {
+            r.add_menu_entry(quireink_sdk::MenuEntry {
+                menu: MENU,
+                action,
+                order,
+            })?;
         }
 
         r.subscribe(events::STARTED, Box::new(reopen_last_book))?;

@@ -20,6 +20,10 @@ pub mod actions {
     pub const BACK: Id = Id::new_static("core.back");
     pub const HOME: Id = Id::new_static("core.home");
     pub const TOGGLE_NIGHT_MODE: Id = Id::new_static("core.toggle-night-mode");
+    /// Opens the library slot.
+    pub const LIBRARY: Id = Id::new_static("core.library");
+    /// Opens the settings slot.
+    pub const SETTINGS: Id = Id::new_static("core.settings");
 }
 
 /// Standard slots.
@@ -33,12 +37,31 @@ pub mod slots {
     pub const READER: Id = Id::new_static("core.reader");
     /// Browses the library.
     pub const LIBRARY: Id = Id::new_static("core.library");
+    /// Shows a menu (an overlay). Opened with the parameter
+    /// [`MENU`](super::params::MENU).
+    pub const MENU: Id = Id::new_static("core.menu");
+    /// Shows and edits settings.
+    pub const SETTINGS: Id = Id::new_static("core.settings");
+}
+
+/// Standard menus. Plugins add entries with
+/// [`Registrar::add_menu_entry`](crate::Registrar::add_menu_entry); users can
+/// redefine any menu in `[menus]`.
+pub mod menus {
+    use crate::Id;
+
+    /// The menu shown when a screen has no menu of its own.
+    pub const MAIN: Id = Id::new_static("core.main");
 }
 
 /// Standard parameter names.
 pub mod params {
     /// A storage path, e.g. of the book to open.
     pub const PATH: &str = "path";
+    /// The menu to show in the menu slot.
+    pub const MENU: &str = "menu";
+    /// An id, e.g. of the setting in `core.setting-changed`.
+    pub const ID: &str = "id";
 }
 
 /// Events emitted by the kernel.
@@ -48,6 +71,8 @@ pub mod events {
     /// After the home screen has been opened at start-up. Plugins use it to
     /// e.g. reopen the last book.
     pub const STARTED: Id = Id::new_static("core.started");
+    /// After a setting changed; parameter [`ID`](super::params::ID).
+    pub const SETTING_CHANGED: Id = Id::new_static("core.setting-changed");
 }
 
 /// Standard screens.
@@ -71,7 +96,13 @@ pub mod settings {
     pub const FULL_REFRESH_INTERVAL: Id = Id::new_static("core.full-refresh-interval");
     /// Milliseconds a button or finger must be held for a long press.
     pub const LONG_PRESS_MS: Id = Id::new_static("core.long-press-ms");
+    /// Base size of user interface text in points; UI metrics scale with it.
+    pub const UI_SIZE: Id = Id::new_static("core.ui-size");
 }
+
+/// The user's configuration file on the device's storage. Settings changed
+/// in the UI are written back to it; comments and order are preserved.
+pub const CONFIG_FILE: &str = "quireink.ini";
 
 /// Font roles.
 pub mod fonts {

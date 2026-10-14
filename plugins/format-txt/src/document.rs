@@ -58,6 +58,9 @@ pub struct TxtDocument {
     end: u32,
     encoding: Encoding,
     breaks: Breaks,
+    /// Typical length of hard-wrapped lines; shorter lines end a
+    /// paragraph (poems, lists). 0 disables the rule.
+    wrap_width: usize,
     metadata: Metadata,
 }
 
@@ -79,6 +82,7 @@ impl TxtDocument {
             end: size,
             encoding,
             breaks: Breaks::Lines,
+            wrap_width: 0,
             metadata: Metadata::default(),
         };
 
@@ -92,7 +96,9 @@ impl TxtDocument {
         }
 
         let sample_end = (document.end.min(head.len() as u32)).max(document.start) as usize;
-        document.breaks = detect_breaks(&head[document.start as usize..sample_end]);
+        let sample = &head[document.start as usize..sample_end];
+        document.breaks = detect_breaks(sample);
+        document.wrap_width = typical_line_length(sample);
         if document.metadata.title.is_none() {
             let name = path.rsplit('/').next().unwrap_or(path);
             let stem = name.rsplit_once('.').map_or(name, |(stem, _)| stem);
@@ -120,6 +126,8 @@ impl TxtDocument {
         let mut paras: Vec<Para> = Vec::new();
         // The content start behaves like the line after a blank line.
         let mut prev_blank = w0 == self.start;
+        // Length of the previous line (unknown for the window's first line).
+        let mut prev_len = usize::MAX;
         let mut pos = 0usize;
         loop {
             let line_end = buf[pos..]
@@ -146,7 +154,7 @@ impl TxtDocument {
                                 partial: true,
                                 single_line: false,
                             });
-                        } else if prev_blank {
+                        } else if prev_blank || self.starts_paragraph(lead, prev_len) {
                             paras.push(Para {
                                 start: at(lead),
                                 text_end: at(trail),
@@ -159,6 +167,7 @@ impl TxtDocument {
                         }
                     }
                     prev_blank = blank;
+                    prev_len = if partial { usize::MAX } else { trail };
                 }
                 Breaks::Lines => {
                     let (start, text_end) = if blank {
@@ -179,6 +188,13 @@ impl TxtDocument {
             }
             pos = line_end + 1;
         }
+    }
+
+    /// Whether a line following a non-blank line starts a new paragraph
+    /// even without a blank line: indented lines (tables of contents,
+    /// verse) and lines after a clearly short line (poems, lists).
+    fn starts_paragraph(&self, lead: usize, prev_len: usize) -> bool {
+        lead > 0 || (self.wrap_width > 0 && prev_len < self.wrap_width * 6 / 10)
     }
 
     /// Start of the piece of a long paragraph near grid point `k`: just
@@ -443,6 +459,26 @@ fn cp1252(byte: u8) -> char {
     }
 }
 
+/// The length most hard-wrapped lines reach (75th percentile), or 0 if
+/// lines are too short to tell.
+fn typical_line_length(sample: &[u8]) -> usize {
+    let mut lengths: Vec<usize> = sample
+        .split(|&b| b == b'\n')
+        .map(|line| {
+            line.iter()
+                .rposition(|&b| !is_space(b))
+                .map_or(0, |i| i + 1)
+        })
+        .filter(|&len| len > 0)
+        .collect();
+    if lengths.len() < 8 {
+        return 0;
+    }
+    lengths.sort_unstable();
+    let typical = lengths[lengths.len() * 3 / 4];
+    if typical >= 40 { typical } else { 0 }
+}
+
 fn detect_breaks(sample: &[u8]) -> Breaks {
     let mut lines = 0usize;
     let mut blank = 0usize;
@@ -659,5 +695,28 @@ mod tests {
             .unwrap();
         assert_eq!(block.text, "café ok");
         assert_eq!(decode_utf8(&[0xff, b'a']), ('\u{fffd}', 1));
+    }
+
+    #[test]
+    fn indented_and_short_lines_start_paragraphs() {
+        let prose = "This is a hard-wrapped line of ordinary prose that reaches the width,\n\
+                     and it continues on the next line until the paragraph ends here.\n\n";
+        let text = format!(
+            "{prose}{prose}{prose}{prose}Contents\n\n CHAPTER I.  Down the Rabbit-Hole\n \
+             CHAPTER II. The Pool of Tears\n\nTwinkle, twinkle, little bat!\n\
+             How I wonder what you're at!\n\n"
+        );
+        let (storage, document) = open(text);
+        let blocks = blocks(&storage, &document);
+        let texts = texts(&blocks);
+        assert!(
+            texts.contains(&"CHAPTER I.  Down the Rabbit-Hole"),
+            "{texts:?}"
+        );
+        assert!(texts.contains(&"CHAPTER II. The Pool of Tears"));
+        assert!(texts.contains(&"Twinkle, twinkle, little bat!"));
+        assert!(texts.contains(&"How I wonder what you're at!"));
+        // Hard-wrapped prose is still joined.
+        assert_eq!(texts[0].matches("width, and it continues").count(), 1);
     }
 }

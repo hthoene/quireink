@@ -7,8 +7,8 @@ use alloc::vec::Vec;
 
 use quireink_i18n::Catalog;
 use quireink_sdk::{
-    ActionSpec, EventHandler, FontSpec, FormatSpec, Id, Priority, RegisterError, Registrar,
-    ScreenSpec, SettingSpec, SlotSpec,
+    ActionSpec, EventHandler, FontSpec, FormatSpec, Id, MenuEntry, Priority, RegisterError,
+    Registrar, ScreenSpec, SettingSpec, SlotSpec,
 };
 
 /// A candidate screen for a slot, proposed by a plugin.
@@ -72,6 +72,7 @@ pub(crate) struct Staging {
     pub(crate) font_roles: Vec<(Id, Id, Priority)>,
     pub(crate) formats: Vec<FormatSpec>,
     pub(crate) subscriptions: Vec<(Id, EventHandler)>,
+    pub(crate) menu_entries: Vec<MenuEntry>,
 }
 
 impl Staging {
@@ -201,6 +202,11 @@ impl Registrar for PluginRegistrar<'_> {
         self.check_namespace(&format.id)?;
         Self::check_unique(self.staging.formats.iter().map(|f| &f.id), &format.id)?;
         self.staging.formats.push(format);
+        Ok(())
+    }
+
+    fn add_menu_entry(&mut self, entry: MenuEntry) -> Result<(), RegisterError> {
+        self.staging.menu_entries.push(entry);
         Ok(())
     }
 

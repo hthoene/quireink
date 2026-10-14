@@ -6,6 +6,7 @@ use crate::event::EventHandler;
 use crate::fonts::FontSpec;
 use crate::formats::FormatSpec;
 use crate::id::Id;
+use crate::menus::MenuEntry;
 use crate::screen::ScreenSpec;
 use crate::settings::SettingSpec;
 use crate::version::Version;
@@ -92,6 +93,10 @@ pub trait Registrar {
     /// Proposes a font for a role such as
     /// [`builtin::fonts::UI`](crate::builtin::fonts::UI).
     fn bind_font(&mut self, role: Id, font: Id, priority: Priority) -> Result<(), RegisterError>;
+
+    /// Puts an action into a menu. Menus can be extended by any plugin and
+    /// redefined by the user.
+    fn add_menu_entry(&mut self, entry: MenuEntry) -> Result<(), RegisterError>;
 
     /// Adds a file format.
     fn add_format(&mut self, format: FormatSpec) -> Result<(), RegisterError>;

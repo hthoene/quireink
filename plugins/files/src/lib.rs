@@ -19,10 +19,11 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use quireink_sdk::builtin::{actions, fonts, params, slots};
+use quireink_sdk::builtin::{actions, events, params, slots};
+use quireink_sdk::ui::{self, ListChange, ListView, UiStyle};
 use quireink_sdk::{
     Arg, Canvas, Color, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Manifest, Params,
-    Plugin, Priority, RefreshMode, RegisterError, Registrar, SDK_VERSION, Screen, ScreenSpec,
+    Plugin, Priority, Rect, RefreshMode, RegisterError, Registrar, SDK_VERSION, Screen, ScreenSpec,
     SettingKind, SettingSpec, SettingValue, Version,
 };
 
@@ -71,25 +72,14 @@ struct Entry {
     is_dir: bool,
 }
 
-/// Row geometry, derived from the screen and the UI font.
-#[derive(Debug, Clone, Copy)]
-struct Geometry {
-    header: u32,
-    /// Space between the header and the first row.
-    gap: u32,
-    row: u32,
-    rows: usize,
-    margin: u32,
-    size: f32,
-}
-
 #[derive(Debug)]
 struct Browser {
     root: String,
     dir: String,
     entries: Vec<Entry>,
-    focus: usize,
-    geometry: Geometry,
+    style: UiStyle,
+    header: Rect,
+    list: ListView,
 }
 
 impl Browser {
@@ -100,29 +90,18 @@ impl Browser {
             .trim_matches('/')
             .to_string();
         let dir = params.get(params::PATH).unwrap_or(&root).to_string();
-        let size = env.metrics.pt(11.0);
-        let line = env
-            .fonts
-            .role(fonts::UI.as_str())
-            .map_or(size * 1.2, |f| f.line_metrics(size).line_height);
-        let header = env.metrics.mm(10);
-        let footer = env.metrics.mm(7);
-        let row = (line * 1.8) as u32;
-        let gap = env.metrics.mm(2);
-        let available = u32::from(env.device.display.height).saturating_sub(header + gap + footer);
+        let style = UiStyle::new(env);
+        let display = env.device.display;
+        let header = Rect::new(0, 0, display.width, style.header as u16);
+        let top = header.height + style.gap as u16;
+        let area = Rect::new(0, top, display.width, display.height.saturating_sub(top));
         let mut browser = Self {
             root,
             dir,
             entries: Vec::new(),
-            focus: 0,
-            geometry: Geometry {
-                header,
-                row: row.max(1),
-                rows: (available / row.max(1)).max(1) as usize,
-                gap,
-                margin: env.metrics.mm(3),
-                size,
-            },
+            list: ListView::new(area, style.row),
+            style,
+            header,
         };
         browser.load(env);
         browser
@@ -147,7 +126,7 @@ impl Browser {
                 .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
         });
         self.entries = entries;
-        self.focus = 0;
+        self.list.focus = 0;
     }
 
     fn path_of(&self, entry: &Entry) -> String {
@@ -158,25 +137,10 @@ impl Browser {
         }
     }
 
-    fn page(&self) -> usize {
-        self.focus / self.geometry.rows
-    }
-
-    fn pages(&self) -> usize {
-        self.entries.len().div_ceil(self.geometry.rows).max(1)
-    }
-
-    fn move_focus(&mut self, delta: isize, cx: &mut Cx<'_, '_>) {
-        if self.entries.is_empty() {
-            return;
-        }
-        let last = self.entries.len() as isize - 1;
-        let focus = (self.focus as isize + delta).clamp(0, last) as usize;
-        if focus != self.focus {
-            let page_changed = focus / self.geometry.rows != self.page();
-            self.focus = focus;
+    fn moved(change: ListChange, cx: &mut Cx<'_, '_>) {
+        if change != ListChange::None {
             cx.request_redraw();
-            cx.request_refresh(if page_changed {
+            cx.request_refresh(if change == ListChange::Page {
                 RefreshMode::Partial
             } else {
                 RefreshMode::Fast
@@ -214,7 +178,7 @@ impl Browser {
             .map_or(String::new(), |(parent, _)| parent.to_string());
         let env = *cx.env();
         self.load(&env);
-        self.focus = self
+        self.list.focus = self
             .entries
             .iter()
             .position(|e| e.is_dir && e.name == child)
@@ -222,132 +186,82 @@ impl Browser {
         cx.request_redraw();
         true
     }
-
-    fn row_top(&self, row: usize) -> i32 {
-        (self.geometry.header + self.geometry.gap + row as u32 * self.geometry.row) as i32
-    }
 }
 
 impl Screen for Browser {
     fn draw(&mut self, canvas: &mut Canvas<'_>, env: &Env<'_>) {
-        let Some(font) = env.fonts.role(fonts::UI.as_str()) else {
-            return;
-        };
-        let g = self.geometry;
-        let width = u32::from(env.device.display.width);
-        let height = u32::from(env.device.display.height);
-        let size = g.size;
-        let metrics = font.line_metrics(size);
-        let centred =
-            |top: i32, h: u32| top + ((h as f32 + metrics.ascent - metrics.descent) / 2.0) as i32;
-
-        // Header: library title or the current folder.
-        canvas.fill_rect(0, 0, width, g.header, Color::BLACK);
+        let style = self.style;
+        let len = self.entries.len();
         let title = if self.dir == self.root {
             env.i18n.tr("files.title").to_string()
         } else {
             self.dir.rsplit('/').next().unwrap_or_default().to_string()
         };
-        font.draw(
-            canvas,
-            size * 1.15,
-            g.margin as f32,
-            centred(0, g.header),
-            &title,
-            Color::WHITE,
-        );
-
-        if self.entries.is_empty() {
-            let message = env
-                .i18n
-                .format("files.empty", &[("dir", Arg::Str(&self.dir))]);
-            let hint = env.i18n.tr("files.hint");
-            let max = (width - 2 * g.margin) as f32;
-            let mut baseline = (height / 3) as i32;
-            for text in [message.as_str(), hint] {
-                for range in font.wrap(size, text, max) {
-                    font.draw(
-                        canvas,
-                        size,
-                        g.margin as f32,
-                        baseline,
-                        &text[range],
-                        Color::BLACK,
-                    );
-                    baseline += metrics.line_height as i32;
-                }
-                baseline += (metrics.line_height / 2.0) as i32;
-            }
-            return;
-        }
-
-        let first = self.page() * g.rows;
-        for (row, entry) in self.entries.iter().enumerate().skip(first).take(g.rows) {
-            let slot = row - first;
-            let top = self.row_top(slot);
-            let focused = row == self.focus;
-            let (background, foreground) = if focused {
-                (Color::BLACK, Color::WHITE)
-            } else {
-                (Color::WHITE, Color::BLACK)
-            };
-            if focused {
-                canvas.fill_rect(0, top, width, g.row, background);
-            } else {
-                canvas.fill_rect(
-                    g.margin as i32,
-                    top + g.row as i32 - 1,
-                    width - 2 * g.margin,
-                    1,
-                    Color::gray(180),
-                );
-            }
-            let name = if entry.is_dir {
-                format!("{}/", entry.name)
-            } else {
-                entry
-                    .name
-                    .rsplit_once('.')
-                    .map_or(entry.name.clone(), |(stem, _)| stem.to_string())
-            };
-            font.draw(
-                canvas,
-                size,
-                g.margin as f32,
-                centred(top, g.row),
-                &name,
-                foreground,
-            );
-        }
-
-        if self.pages() > 1 {
-            let label = env.i18n.format(
+        let note = (self.list.pages(len) > 1).then(|| {
+            env.i18n.format(
                 "files.page",
                 &[
-                    ("page", Arg::Int(self.page() as i64 + 1)),
-                    ("pages", Arg::Int(self.pages() as i64)),
+                    ("page", Arg::Int(self.list.page() as i64 + 1)),
+                    ("pages", Arg::Int(self.list.pages(len) as i64)),
                 ],
+            )
+        });
+        ui::draw_header(canvas, env, &style, self.header, &title, note.as_deref());
+
+        if self.entries.is_empty() {
+            let message = format!(
+                "{}\n{}",
+                env.i18n
+                    .format("files.empty", &[("dir", Arg::Str(&self.dir))]),
+                env.i18n.tr("files.hint")
             );
-            let small = env.metrics.pt(8.0);
-            let x = width as f32 - g.margin as f32 - font.measure(small, &label);
-            let baseline = height as i32 - env.metrics.mm(2) as i32;
-            font.draw(canvas, small, x, baseline, &label, Color::gray(80));
+            ui::draw_message(canvas, env, &style, self.list.area, &message);
+            return;
         }
+        let Some(font) = style.font(env) else {
+            return;
+        };
+        let entries = &self.entries;
+        self.list
+            .draw(canvas, &style, len, |canvas, index, rect, focused| {
+                let entry = &entries[index];
+                let color = if focused { Color::WHITE } else { Color::BLACK };
+                let name = if entry.is_dir {
+                    format!("{}/", entry.name)
+                } else {
+                    entry
+                        .name
+                        .rsplit_once('.')
+                        .map_or(entry.name.clone(), |(stem, _)| stem.to_string())
+                };
+                let width = f32::from(rect.width) - 2.0 * style.margin as f32;
+                let name = ui::fit(&font, style.text, &name, width);
+                ui::draw_label(
+                    canvas,
+                    &font,
+                    style.text,
+                    style.margin as f32,
+                    rect,
+                    &name,
+                    color,
+                );
+            });
     }
 
     fn on_action(&mut self, action: &Id, cx: &mut Cx<'_, '_>) -> Handled {
-        let rows = self.geometry.rows as isize;
+        let len = self.entries.len();
+        let rows = self.list.rows() as isize;
         let a = action;
         if *a == actions::UP || *a == actions::LEFT {
-            self.move_focus(-1, cx);
+            Self::moved(self.list.move_focus(-1, len), cx);
         } else if *a == actions::DOWN || *a == actions::RIGHT {
-            self.move_focus(1, cx);
+            Self::moved(self.list.move_focus(1, len), cx);
         } else if *a == actions::NEXT_PAGE {
-            self.move_focus(rows, cx);
+            Self::moved(self.list.move_focus(rows, len), cx);
         } else if *a == actions::PREV_PAGE {
-            self.move_focus(-rows, cx);
+            Self::moved(self.list.move_focus(-rows, len), cx);
         } else if *a == actions::CONFIRM {
-            self.open(self.focus, cx);
+            self.open(self.list.focus, cx);
         } else if *a == actions::BACK {
             return if self.up(cx) {
                 Handled::Yes
@@ -364,21 +278,26 @@ impl Screen for Browser {
         if gesture.kind != GestureKind::Tap {
             return Handled::No;
         }
-        let y = gesture.start.y - (self.geometry.header + self.geometry.gap) as i32;
-        if y < 0 {
-            return Handled::No;
+        match self.list.hit(gesture.start, self.entries.len()) {
+            Some(index) => {
+                self.list.focus = index;
+                self.open(index, cx);
+                Handled::Yes
+            }
+            None => Handled::No,
         }
-        let slot = (y as u32 / self.geometry.row) as usize;
-        if slot >= self.geometry.rows {
-            return Handled::No;
+    }
+
+    fn on_event(&mut self, event: &Id, _: &Params, cx: &mut Cx<'_, '_>) {
+        if *event == events::SETTING_CHANGED {
+            // The UI size or the library folder may have changed.
+            let env = *cx.env();
+            let dir = self.dir.clone();
+            let focus = self.list.focus;
+            *self = Self::new(&env, &Params::new().with(params::PATH, dir));
+            self.list.focus = focus.min(self.entries.len().saturating_sub(1));
+            cx.request_redraw();
         }
-        let index = self.page() * self.geometry.rows + slot;
-        if index >= self.entries.len() {
-            return Handled::No;
-        }
-        self.focus = index;
-        self.open(index, cx);
-        Handled::Yes
     }
 }
 

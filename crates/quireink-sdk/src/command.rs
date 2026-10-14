@@ -21,8 +21,10 @@ pub enum Command {
     SetSetting(Id, SettingValue),
     /// Redraws the current screen completely.
     Redraw(RefreshMode),
-    /// Notifies all subscribers of an event.
+    /// Notifies all subscribers of an event, then every open screen.
     Emit(Id, Params),
+    /// Runs an action as if the user had triggered it (e.g. from a menu).
+    RunAction(Id),
 }
 
 impl Command {

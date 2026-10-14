@@ -17,6 +17,10 @@ pub struct Profile {
     pub buttons: &'static [&'static str],
     /// Heap available to the kernel and plugins, if limited.
     pub heap_budget: Option<usize>,
+    /// Memory for runtime-rasterized glyphs. The emulator always renders
+    /// fonts at runtime; small devices use bitmap packs that need no cache,
+    /// so their profiles keep it small to stay comparable.
+    pub glyph_cache: usize,
     /// One-line description for `--list-profiles`.
     pub summary: &'static str,
 }
@@ -54,6 +58,7 @@ pub const PROFILES: &[Profile] = &[
         ],
         // Unverified: ESP32-C3 SRAM left after firmware, stacks and drivers.
         heap_budget: Some(192 * KIB),
+        glyph_cache: 16 * KIB,
         summary: "ESP32-C3, 4.3\" 800x480, buttons only, 192 KiB heap budget",
     },
     Profile {
@@ -76,6 +81,7 @@ pub const PROFILES: &[Profile] = &[
         },
         buttons: &[buttons::PAGE_BACK, buttons::PAGE_FORWARD, buttons::POWER],
         heap_budget: None,
+        glyph_cache: 256 * KIB,
         summary: "Android, 7\" Carta 1300 1264x1680, touch + page buttons",
     },
     Profile {
@@ -101,6 +107,7 @@ pub const PROFILES: &[Profile] = &[
         },
         buttons: &[buttons::PAGE_BACK, buttons::PAGE_FORWARD, buttons::POWER],
         heap_budget: None,
+        glyph_cache: 256 * KIB,
         summary: "Linux, 7\" Kaleido 3 colour 1264x1680, touch + page buttons",
     },
     Profile {
@@ -123,6 +130,7 @@ pub const PROFILES: &[Profile] = &[
         },
         buttons: &[buttons::POWER],
         heap_budget: None,
+        glyph_cache: 256 * KIB,
         summary: "Linux, 6.8\" 1236x1648, touch only",
     },
     Profile {
@@ -145,6 +153,7 @@ pub const PROFILES: &[Profile] = &[
         },
         buttons: &[buttons::POWER],
         heap_budget: None,
+        glyph_cache: 256 * KIB,
         summary: "Linux, 6\" 1072x1448, touch only",
     },
 ];

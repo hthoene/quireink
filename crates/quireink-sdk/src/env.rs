@@ -5,6 +5,7 @@ use quireink_platform::{DeviceInfo, Instant, Storage};
 
 use crate::fonts::Fonts;
 use crate::formats::Formats;
+use crate::menus::Menus;
 use crate::settings::Settings;
 
 /// Read-only view of the environment a plugin runs in.
@@ -18,6 +19,7 @@ pub struct Env<'a> {
     pub i18n: &'a Translator,
     pub fonts: &'a Fonts,
     pub formats: &'a Formats,
+    pub menus: &'a Menus,
     /// The device's storage. Plugins keep their own files below
     /// [`Env::plugin_dir`].
     pub storage: &'a dyn Storage,
