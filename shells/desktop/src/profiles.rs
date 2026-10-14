@@ -21,6 +21,8 @@ pub struct Profile {
     /// fonts at runtime; small devices use bitmap packs that need no cache,
     /// so their profiles keep it small to stay comparable.
     pub glyph_cache: usize,
+    /// Device-specific setting defaults, as `(id, value)`.
+    pub settings: &'static [(&'static str, &'static str)],
     /// One-line description for `--list-profiles`.
     pub summary: &'static str,
 }
@@ -59,6 +61,7 @@ pub const PROFILES: &[Profile] = &[
         // Unverified: ESP32-C3 SRAM left after firmware, stacks and drivers.
         heap_budget: Some(192 * KIB),
         glyph_cache: 16 * KIB,
+        settings: &[],
         summary: "ESP32-C3, 4.3\" 800x480, buttons only, 192 KiB heap budget",
     },
     Profile {
@@ -82,6 +85,7 @@ pub const PROFILES: &[Profile] = &[
         buttons: &[buttons::PAGE_BACK, buttons::PAGE_FORWARD, buttons::POWER],
         heap_budget: None,
         glyph_cache: 256 * KIB,
+        settings: &[],
         summary: "Android, 7\" Carta 1300 1264x1680, touch + page buttons",
     },
     Profile {
@@ -108,6 +112,7 @@ pub const PROFILES: &[Profile] = &[
         buttons: &[buttons::PAGE_BACK, buttons::PAGE_FORWARD, buttons::POWER],
         heap_budget: None,
         glyph_cache: 256 * KIB,
+        settings: &[],
         summary: "Linux, 7\" Kaleido 3 colour 1264x1680, touch + page buttons",
     },
     Profile {
@@ -131,6 +136,7 @@ pub const PROFILES: &[Profile] = &[
         buttons: &[buttons::POWER],
         heap_budget: None,
         glyph_cache: 256 * KIB,
+        settings: &[],
         summary: "Linux, 6.8\" 1236x1648, touch only",
     },
     Profile {
@@ -154,7 +160,33 @@ pub const PROFILES: &[Profile] = &[
         buttons: &[buttons::POWER],
         heap_budget: None,
         glyph_cache: 256 * KIB,
+        settings: &[],
         summary: "Linux, 6\" 1072x1448, touch only",
+    },
+    Profile {
+        device: DeviceInfo {
+            id: "two-buttons",
+            name: "Two-button e-reader",
+            display: DisplayInfo {
+                width: 600,
+                height: 800,
+                dpi: 167,
+                format: PixelFormat::Gray4,
+                rotation: Rotation::Deg0,
+                color: None,
+            },
+            input: InputCaps {
+                buttons: true,
+                touch: false,
+                pen: false,
+            },
+        },
+        buttons: &[buttons::PAGE_BACK, buttons::PAGE_FORWARD, buttons::POWER],
+        heap_budget: None,
+        glyph_cache: 64 * KIB,
+        // Only two buttons: everything works with forward and back.
+        settings: &[("core.keymap-preset", "core.two-buttons")],
+        summary: "Generic 6\" 600x800, only page buttons (also: Bluetooth page turners)",
     },
 ];
 

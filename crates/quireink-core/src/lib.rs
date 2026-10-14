@@ -50,8 +50,8 @@ use quireink_platform::{
     RefreshMode, Storage,
 };
 use quireink_sdk::builtin::{
-    CONFIG_FILE, GLOBAL_KEYMAP_LAYER, events, params as builtin_params, settings as core_settings,
-    slots,
+    CONFIG_FILE, GLOBAL_KEYMAP_LAYER, events, keymap_presets, params as builtin_params,
+    settings as core_settings, slots,
 };
 use quireink_sdk::{
     Command, Cx, Env, EventHandler, Fonts, Formats, GestureKind, Handled, Id, Manifest, Menus,
@@ -169,6 +169,7 @@ pub struct KernelBuilder {
     user_config: Option<String>,
     glyph_cache: usize,
     storage: Option<Box<dyn Storage>>,
+    setting_defaults: Vec<(String, String)>,
 }
 
 impl fmt::Debug for KernelBuilder {
@@ -207,6 +208,15 @@ impl KernelBuilder {
         self
     }
 
+    /// Changes the default of a setting for this device, e.g. the
+    /// two-button key map preset on a device with only two buttons. Users
+    /// can still override it.
+    pub fn setting_default(mut self, id: &str, value: &str) -> Self {
+        self.setting_defaults
+            .push((String::from(id), String::from(value)));
+        self
+    }
+
     /// Memory for glyphs rasterized at runtime (default 32 KiB). Bitmap font
     /// packs do not use it.
     pub fn glyph_cache(mut self, bytes: usize) -> Self {
@@ -232,6 +242,8 @@ impl KernelBuilder {
             framebuffer,
             registry: Registry::default(),
             keymap: Keymap::default(),
+            keymap_sources: Vec::new(),
+            keymap_presets: Vec::new(),
             subscriptions: Vec::new(),
             screen_timer: None,
             recognizer: Recognizer::default(),
@@ -260,12 +272,34 @@ impl KernelBuilder {
             kernel.register_plugin(plugin.as_ref(), manifest);
         }
 
-        if let Some(source) = &self.device_keymap {
-            for problem in kernel.keymap.load(source, Origin::Device, true) {
+        if let Some(source) = self.device_keymap {
+            for problem in kernel.keymap.load(&source, Origin::Device, true) {
                 kernel.warn(
                     WarningSource::DeviceKeymap,
                     Some(problem.line),
                     problem.message.into_owned(),
+                );
+            }
+            kernel.keymap_sources.push((Origin::Device, source));
+        }
+        let mut presets: Vec<Cow<'static, str>> =
+            alloc::vec![Cow::Borrowed(keymap_presets::STANDARD_NAME)];
+        presets.extend(
+            kernel
+                .keymap_presets
+                .iter()
+                .map(|(id, _)| Cow::Owned(id.as_str().to_string())),
+        );
+        kernel
+            .shared
+            .settings
+            .set_choices(core_settings::KEYMAP_PRESET.as_str(), presets);
+        for (id, value) in &self.setting_defaults {
+            if let Err(error) = kernel.shared.settings.set_default_from_text(id, value) {
+                kernel.warn(
+                    WarningSource::Runtime,
+                    None,
+                    format!("device default `{id}`: {error}"),
                 );
             }
         }
@@ -279,6 +313,7 @@ impl KernelBuilder {
             kernel.apply_user_config(source);
         }
         kernel.validate();
+        kernel.rebuild_keymap();
         let shared = &mut kernel.shared;
         shared
             .translator
@@ -307,6 +342,9 @@ pub struct Kernel {
     framebuffer: Framebuffer,
     registry: Registry,
     keymap: Keymap,
+    /// Every key map source, to rebuild the key map when the preset changes.
+    keymap_sources: Vec<(Origin, Cow<'static, str>)>,
+    keymap_presets: Vec<(Id, Cow<'static, str>)>,
     subscriptions: Vec<(Id, EventHandler)>,
     /// When the active screen wants `on_timer`.
     screen_timer: Option<Instant>,
@@ -345,6 +383,7 @@ impl Kernel {
             user_config: None,
             glyph_cache: DEFAULT_GLYPH_CACHE,
             storage: None,
+            setting_defaults: Vec::new(),
         }
     }
 
@@ -504,10 +543,12 @@ impl Kernel {
             // Cannot fail: checked above.
             let _ = self.shared.settings.define(setting);
         }
-        for source in &staging.keymaps {
+        for source in staging.keymaps.drain(..) {
             // Validated by the registrar.
-            self.keymap.load(source, Origin::Plugin, true);
+            self.keymap.load(&source, Origin::Plugin, true);
+            self.keymap_sources.push((Origin::Plugin, source));
         }
+        self.keymap_presets.append(&mut staging.keymap_presets);
         for catalog in staging.catalogs.drain(..) {
             self.shared.translator.add(catalog);
         }
@@ -595,6 +636,8 @@ impl Kernel {
                 }
             }
         }
+        self.keymap_sources
+            .push((Origin::User, Cow::Owned(source.to_string())));
         for problem in self.keymap.load(source, Origin::User, false) {
             self.warn(
                 WarningSource::UserConfig,
@@ -614,10 +657,12 @@ impl Kernel {
                 messages.push(format!("unknown screen `{screen}` for slot `{slot}`"));
             }
         }
+        let preset_actions = self.preset_actions();
         let mut unknown: Vec<&Id> = self
             .keymap
             .actions()
             .chain(self.shared.menus.referenced_actions())
+            .chain(preset_actions.iter())
             .filter(|action| !self.registry.actions.contains_key(*action))
             .collect();
         unknown.sort();
@@ -913,6 +958,36 @@ impl Kernel {
             .unwrap_or_else(|| self.framebuffer.bounds())
     }
 
+    /// Actions bound by any key map preset, for validation.
+    fn preset_actions(&self) -> Vec<Id> {
+        let mut all = Keymap::default();
+        for (_, source) in &self.keymap_presets {
+            all.load(source, Origin::Preset, true);
+        }
+        all.actions().cloned().collect()
+    }
+
+    /// Builds the key map from all sources and the selected preset.
+    /// Problems were reported when the sources were first loaded.
+    fn rebuild_keymap(&mut self) {
+        let mut keymap = Keymap::default();
+        let preset = self
+            .shared
+            .settings
+            .text(core_settings::KEYMAP_PRESET.as_str());
+        if let Some((_, source)) = self
+            .keymap_presets
+            .iter()
+            .find(|(id, _)| id.as_str() == preset)
+        {
+            keymap.load(source, Origin::Preset, true);
+        }
+        for (origin, source) in &self.keymap_sources {
+            keymap.load(source, *origin, *origin != Origin::User);
+        }
+        self.keymap = keymap;
+    }
+
     fn invalidate(&mut self, region: Rect) {
         self.pending = Some(self.pending.map_or(region, |p| p.union(&region)));
     }
@@ -996,6 +1071,9 @@ impl Kernel {
         } else if *id == core_settings::NIGHT_MODE {
             self.framebuffer
                 .set_inverted(self.shared.settings.bool(id.as_str()));
+        }
+        if *id == core_settings::KEYMAP_PRESET {
+            self.rebuild_keymap();
         }
         if *id == core_settings::LANGUAGE || *id == core_settings::NIGHT_MODE {
             let bounds = self.framebuffer.bounds();

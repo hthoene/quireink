@@ -118,6 +118,8 @@ impl InputKey {
 pub(crate) enum Origin {
     Plugin,
     Device,
+    /// The preset the user selected.
+    Preset,
     User,
 }
 

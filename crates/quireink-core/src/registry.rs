@@ -73,6 +73,7 @@ pub(crate) struct Staging {
     pub(crate) formats: Vec<FormatSpec>,
     pub(crate) subscriptions: Vec<(Id, EventHandler)>,
     pub(crate) menu_entries: Vec<MenuEntry>,
+    pub(crate) keymap_presets: Vec<(Id, Cow<'static, str>)>,
 }
 
 impl Staging {
@@ -215,17 +216,20 @@ impl Registrar for PluginRegistrar<'_> {
         Ok(())
     }
 
+    fn add_keymap_preset(
+        &mut self,
+        id: Id,
+        source: Cow<'static, str>,
+    ) -> Result<(), RegisterError> {
+        self.check_namespace(&id)?;
+        Self::check_unique(self.staging.keymap_presets.iter().map(|(i, _)| i), &id)?;
+        validate_keymap(&source)?;
+        self.staging.keymap_presets.push((id, source));
+        Ok(())
+    }
+
     fn add_keymap(&mut self, source: Cow<'static, str>) -> Result<(), RegisterError> {
-        // Validate now so errors are attributed to the plugin; the kernel
-        // loads the source again when merging.
-        let mut scratch = crate::keymap::Keymap::default();
-        let problems = scratch.load(&source, crate::keymap::Origin::Plugin, true);
-        if let Some(problem) = problems.into_iter().next() {
-            return Err(RegisterError::Parse {
-                line: problem.line,
-                message: problem.message,
-            });
-        }
+        validate_keymap(&source)?;
         self.staging.keymaps.push(source);
         Ok(())
     }
@@ -242,5 +246,18 @@ impl Registrar for PluginRegistrar<'_> {
         })?;
         self.staging.catalogs.push(catalog);
         Ok(())
+    }
+}
+
+/// Checks a key map contribution so errors are attributed to the plugin.
+fn validate_keymap(source: &str) -> Result<(), RegisterError> {
+    let mut scratch = crate::keymap::Keymap::default();
+    let problems = scratch.load(source, crate::keymap::Origin::Plugin, true);
+    match problems.into_iter().next() {
+        Some(problem) => Err(RegisterError::Parse {
+            line: problem.line,
+            message: problem.message,
+        }),
+        None => Ok(()),
     }
 }

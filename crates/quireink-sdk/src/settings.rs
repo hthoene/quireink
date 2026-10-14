@@ -136,6 +136,22 @@ impl Settings {
         Ok(())
     }
 
+    /// Replaces the options of a [`SettingKind::Choice`] setting, e.g. once
+    /// all contributions it chooses from are known.
+    pub fn set_choices(&mut self, id: &str, options: Vec<Cow<'static, str>>) {
+        if let Some(spec) = self.specs.get_mut(id) {
+            spec.kind = SettingKind::Choice(options);
+        }
+    }
+
+    /// Changes a setting's default (e.g. device-specific defaults chosen by
+    /// a shell). The user's own values still take precedence.
+    pub fn set_default_from_text(&mut self, id: &str, text: &str) -> Result<(), SettingError> {
+        let spec = self.specs.get_mut(id).ok_or(SettingError::Unknown)?;
+        spec.default = spec.kind.parse(text).ok_or(SettingError::InvalidValue)?;
+        Ok(())
+    }
+
     /// Sets a value after validating it.
     pub fn set(&mut self, id: &str, value: SettingValue) -> Result<(), SettingError> {
         let spec = self.specs.get(id).ok_or(SettingError::Unknown)?;

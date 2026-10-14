@@ -745,3 +745,63 @@ fn changed_settings_are_saved_and_announced() {
         "# my settings\n[core]\nui-size = 12\nnight-mode = on\n"
     );
 }
+
+#[test]
+fn keymap_presets_follow_device_defaults_and_switch_at_runtime() {
+    let log = log();
+    let mut kernel = Kernel::builder(DEVICE)
+        .plugin(TestPlugin::new("a", &log))
+        .setting_default("core.keymap-preset", "core.two-buttons")
+        .build()
+        .unwrap();
+    assert!(kernel.take_warnings().is_empty());
+    assert_eq!(
+        kernel.settings().text("core.keymap-preset"),
+        "core.two-buttons"
+    );
+    kernel.start(Instant(0));
+
+    // Two-button preset: forward is "next", which falls back to next page;
+    // a long press on forward confirms.
+    press(&mut kernel, 100, "page-forward");
+    kernel.handle(
+        Instant(300),
+        InputEvent::Button {
+            name: "page-forward",
+            state: ButtonState::Pressed,
+        },
+    );
+    kernel.tick(Instant(900));
+    assert_eq!(
+        *log.borrow(),
+        ["a:core.next", "a:core.next-page", "a:core.confirm"]
+    );
+
+    // Back to the standard layout: forward turns pages directly again.
+    log.borrow_mut().clear();
+    kernel.handle(
+        Instant(1000),
+        InputEvent::Button {
+            name: "page-forward",
+            state: ButtonState::Released,
+        },
+    );
+    kernel
+        .shared
+        .settings
+        .set(
+            "core.keymap-preset",
+            quireink_sdk::SettingValue::Text(Cow::Borrowed("core.standard")),
+        )
+        .unwrap();
+    kernel.rebuild_keymap();
+    press(&mut kernel, 1100, "page-forward");
+    assert_eq!(*log.borrow(), ["a:core.next-page"]);
+
+    // Unknown device defaults are reported.
+    let mut kernel = Kernel::builder(DEVICE)
+        .setting_default("core.keymap-preset", "nope.preset")
+        .build()
+        .unwrap();
+    assert_eq!(kernel.take_warnings().len(), 1);
+}

@@ -165,9 +165,9 @@ impl Screen for MenuScreen {
         let len = self.items.len();
         let rows = self.list.rows() as isize;
         let a = action;
-        if *a == actions::UP || *a == actions::LEFT {
+        if *a == actions::UP || *a == actions::LEFT || *a == actions::PREVIOUS {
             Self::moved(self.list.move_focus(-1, len), cx);
-        } else if *a == actions::DOWN || *a == actions::RIGHT {
+        } else if *a == actions::DOWN || *a == actions::RIGHT || *a == actions::NEXT {
             Self::moved(self.list.move_focus(1, len), cx);
         } else if *a == actions::NEXT_PAGE {
             Self::moved(self.list.move_focus(rows, len), cx);

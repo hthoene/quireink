@@ -76,6 +76,12 @@ Keys: `PageDown`/`Space` next page, `PageUp` previous page, arrow keys,
 the touch screen: tap the left or right edge to turn pages, the centre for
 the menu. `F2` shows refreshed regions, `F12` saves a screenshot.
 
+Devices with only two buttons (and Bluetooth page turners) can operate
+everything with the *Two buttons* layout (`core.keymap-preset`): a short
+press moves forward or back, a long press on forward confirms or opens the
+menu, a long press on back goes back. Try it with
+`--profile two-buttons`.
+
 Settings changed in the UI are saved to `quireink.ini` in the library
 folder — the same file you can edit by hand.
 

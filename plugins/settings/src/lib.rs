@@ -157,6 +157,10 @@ fn display_value(env: &Env<'_>, spec: &SettingSpec) -> String {
             .into_iter()
             .find(|(tag, _)| *tag == v.as_ref())
             .map_or(v.to_string(), |(_, name)| name.to_string()),
+        // Choices are ids; their translation is their display name.
+        Some(SettingValue::Text(v)) if matches!(spec.kind, SettingKind::Choice(_)) => {
+            env.i18n.tr(v).to_string()
+        }
         Some(SettingValue::Text(v)) => v.to_string(),
         None => String::new(),
     }
@@ -215,9 +219,21 @@ impl Screen for SettingsScreen {
         let len = self.specs.len();
         let a = action;
         if self.editing {
-            if *a == actions::LEFT || *a == actions::DOWN || *a == actions::PREV_PAGE {
+            let decrease = [
+                actions::LEFT,
+                actions::DOWN,
+                actions::PREV_PAGE,
+                actions::PREVIOUS,
+            ];
+            let increase = [
+                actions::RIGHT,
+                actions::UP,
+                actions::NEXT_PAGE,
+                actions::NEXT,
+            ];
+            if decrease.contains(a) {
                 self.change(&env, -1, cx);
-            } else if *a == actions::RIGHT || *a == actions::UP || *a == actions::NEXT_PAGE {
+            } else if increase.contains(a) {
                 self.change(&env, 1, cx);
             } else if *a == actions::CONFIRM || *a == actions::BACK {
                 self.editing = false;
@@ -229,10 +245,10 @@ impl Screen for SettingsScreen {
             return Handled::Yes;
         }
         let rows = self.list.rows() as isize;
-        if *a == actions::UP || *a == actions::LEFT {
+        if *a == actions::UP || *a == actions::LEFT || *a == actions::PREVIOUS {
             let change = self.list.move_focus(-1, len);
             self.moved(change, cx);
-        } else if *a == actions::DOWN || *a == actions::RIGHT {
+        } else if *a == actions::DOWN || *a == actions::RIGHT || *a == actions::NEXT {
             let change = self.list.move_focus(1, len);
             self.moved(change, cx);
         } else if *a == actions::NEXT_PAGE {

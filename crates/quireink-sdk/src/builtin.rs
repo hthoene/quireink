@@ -10,6 +10,12 @@ pub mod actions {
     use crate::Id;
 
     pub const NEXT_PAGE: Id = Id::new_static("core.next-page");
+    /// "Forward" in the widest sense: next list entry, increase a value
+    /// being edited; screens without such a meaning treat it as the next
+    /// page. Lets devices with very few buttons operate everything.
+    pub const NEXT: Id = Id::new_static("core.next");
+    /// The opposite of [`NEXT`].
+    pub const PREVIOUS: Id = Id::new_static("core.previous");
     pub const PREV_PAGE: Id = Id::new_static("core.prev-page");
     pub const UP: Id = Id::new_static("core.up");
     pub const DOWN: Id = Id::new_static("core.down");
@@ -98,6 +104,24 @@ pub mod settings {
     pub const LONG_PRESS_MS: Id = Id::new_static("core.long-press-ms");
     /// Base size of user interface text in points; UI metrics scale with it.
     pub const UI_SIZE: Id = Id::new_static("core.ui-size");
+    /// The active key map preset (see [`keymap_presets`](super::keymap_presets)).
+    pub const KEYMAP_PRESET: Id = Id::new_static("core.keymap-preset");
+}
+
+/// Key map presets: named sets of bindings users switch between, e.g. for
+/// devices with only two buttons. Plugins add more with
+/// [`Registrar::add_keymap_preset`](crate::Registrar::add_keymap_preset).
+pub mod keymap_presets {
+    use crate::Id;
+
+    /// No preset: the plugins' default bindings.
+    pub const STANDARD: Id = Id::new_static(STANDARD_NAME);
+    /// [`STANDARD`] as a static string, e.g. for setting values.
+    pub const STANDARD_NAME: &str = "core.standard";
+    /// Everything with "forward" and "back": short press moves, long press
+    /// on forward confirms (opens the menu while reading), long press on
+    /// back goes back.
+    pub const TWO_BUTTONS: Id = Id::new_static("core.two-buttons");
 }
 
 /// The user's configuration file on the device's storage. Settings changed

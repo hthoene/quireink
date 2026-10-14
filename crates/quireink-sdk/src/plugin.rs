@@ -86,6 +86,12 @@ pub trait Registrar {
     /// ```
     fn add_keymap(&mut self, source: Cow<'static, str>) -> Result<(), RegisterError>;
 
+    /// Adds a key map preset (same format as [`Registrar::add_keymap`]) that
+    /// users can select with the `core.keymap-preset` setting. Its title
+    /// is the translation of its id.
+    fn add_keymap_preset(&mut self, id: Id, source: Cow<'static, str>)
+    -> Result<(), RegisterError>;
+
     /// Adds a font. Bitmap packs work everywhere; scalable fonts need the
     /// `outline` feature.
     fn add_font(&mut self, font: FontSpec) -> Result<(), RegisterError>;

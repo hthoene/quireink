@@ -6,7 +6,9 @@ use alloc::borrow::Cow;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
-use quireink_sdk::builtin::{actions, fonts, menus, params, screens, settings, slots};
+use quireink_sdk::builtin::{
+    actions, fonts, keymap_presets, menus, params, screens, settings, slots,
+};
 use quireink_sdk::{
     ActionHandler, ActionSpec, Canvas, Color, Command, Cx, Env, Handled, Id, Manifest, MenuEntry,
     Params, Plugin, Priority, RegisterError, Registrar, SDK_VERSION, Screen, ScreenSpec,
@@ -51,7 +53,23 @@ impl Plugin for CorePlugin {
                 out.push(Command::open_slot(slot.clone()));
             })
         };
-        let handled: [(Id, &'static str, ActionHandler); 6] = [
+        let forward = |target: Id| -> ActionHandler {
+            Box::new(move |_: &Env<'_>, out: &mut Vec<Command>| {
+                out.push(Command::RunAction(target.clone()));
+            })
+        };
+        let handled: [(Id, &'static str, ActionHandler); 8] = [
+            // Screens without their own meaning of next/previous turn pages.
+            (
+                actions::NEXT,
+                "core.action.next",
+                forward(actions::NEXT_PAGE),
+            ),
+            (
+                actions::PREVIOUS,
+                "core.action.previous",
+                forward(actions::PREV_PAGE),
+            ),
             (
                 actions::MENU,
                 "core.action.menu",
@@ -155,6 +173,13 @@ impl Plugin for CorePlugin {
             kind: SettingKind::Int { min: 7, max: 24 },
             default: SettingValue::Int(11),
         })?;
+        r.add_setting(SettingSpec {
+            id: settings::KEYMAP_PRESET,
+            title: Cow::Borrowed("core.setting.keymap-preset"),
+            // The kernel fills in the registered presets.
+            kind: SettingKind::Choice(alloc::vec![Cow::Borrowed(keymap_presets::STANDARD_NAME)]),
+            default: SettingValue::Text(Cow::Borrowed(keymap_presets::STANDARD_NAME)),
+        })?;
 
         r.add_setting(SettingSpec {
             id: settings::FULL_REFRESH_INTERVAL,
@@ -173,6 +198,10 @@ impl Plugin for CorePlugin {
         })?;
 
         r.add_keymap(Cow::Borrowed(include_str!("../keymaps/default.ini")))?;
+        r.add_keymap_preset(
+            keymap_presets::TWO_BUTTONS,
+            Cow::Borrowed(include_str!("../keymaps/two-buttons.ini")),
+        )?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/en.ini")))?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/de.ini")))?;
         Ok(())

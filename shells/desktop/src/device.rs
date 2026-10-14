@@ -48,6 +48,9 @@ impl Device {
                 .plugin(quireink_plugin_menu::Menu)
                 .plugin(quireink_plugin_settings::SettingsPlugin)
                 .plugin(quireink_plugin_diagnostics::Diagnostics);
+            for (id, value) in profile.settings {
+                builder = builder.setting_default(id, value);
+            }
             // Copy the configuration inside the tracked scope so that its
             // allocation and release are both accounted for.
             if let Some(config) = user_config.as_deref() {

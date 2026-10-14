@@ -454,7 +454,7 @@ impl Screen for ReaderScreen {
                 book.show(cx, start, false);
             }
             Handled::Yes
-        } else if *action == actions::MENU {
+        } else if *action == actions::MENU || *action == actions::CONFIRM {
             cx.command(Command::OpenSlot(
                 slots::MENU,
                 Params::new().with(params::MENU, crate::MENU.as_str()),
