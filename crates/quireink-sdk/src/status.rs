@@ -129,8 +129,10 @@ impl StatusLine<'_> {
             .all(|list| item_ids(list).next().is_none())
     }
 
-    /// Draws the items' current values; the left part is shortened when
-    /// space runs out.
+    /// Draws the items' current values. Long texts (a chapter's title) are
+    /// shortened with "…": the right part takes at most half of the line
+    /// while others show, the centre what is left beside it, the left part
+    /// the rest.
     pub fn draw(
         &self,
         canvas: &mut Canvas<'_>,
@@ -155,12 +157,18 @@ impl StatusLine<'_> {
         };
         let x0 = f32::from(area.x);
         let x1 = x0 + f32::from(area.width);
-        let right_x = x1 - width(&right);
-        let center_w = width(&center);
+        let line = f32::from(area.width);
+        let others = !left.is_empty() || !center.is_empty();
+        let right_x = x1 - width(&right).min(if others { line / 2.0 } else { line });
+        // Room for the centre: beside the right part, leaving the left a
+        // quarter of the line if it shows anything.
+        let left_room = if left.is_empty() { 0.0 } else { line / 4.0 };
+        let center_room = (right_x - gap - x0 - left_room).max(0.0);
+        let center_w = width(&center).min(center_room);
         // Centred, unless that runs into the right part.
-        let center_x = (x0 + (f32::from(area.width) - center_w) / 2.0)
+        let center_x = (x0 + (line - center_w) / 2.0)
             .min(right_x - gap - center_w)
-            .max(x0);
+            .max(x0 + left_room);
         let left_end = if center.is_empty() { right_x } else { center_x } - gap;
         let mut draw = |values: &[StatusValue], x: f32, end: f32| {
             draw_values(canvas, font, area, values, (x, end), size, self.color);
@@ -201,14 +209,27 @@ fn draw_values(
     let metrics = font.line_metrics(size);
     let baseline = i32::from(area.y)
         + ((f32::from(area.height) + metrics.ascent - metrics.descent) / 2.0) as i32;
-    for value in values {
+    // Too wide: the longest text gives way, so short ones (the page, the
+    // time) stay whole.
+    let widths: Vec<f32> = values.iter().map(|v| value_width(font, size, v)).collect();
+    let total = widths.iter().sum::<f32>() + gap * values.len().saturating_sub(1) as f32;
+    let longest = (0..values.len())
+        .filter(|&i| matches!(values[i], StatusValue::Text(_)))
+        .max_by(|&a, &b| widths[a].total_cmp(&widths[b]));
+    let room = end - x;
+    let budget = |i: usize| match longest {
+        Some(l) if l == i && total > room => (widths[i] - (total - room)).max(0.0),
+        _ => f32::MAX,
+    };
+    for (i, value) in values.iter().enumerate() {
         if x >= end {
             break;
         }
         match value {
             StatusValue::Text(text) => {
                 // A pixel of slack for rounding: the parts were measured to fit.
-                let text = crate::ui::fit(font, size, text, end - x + 1.0);
+                let room = (end - x + 1.0).min(budget(i));
+                let text = crate::ui::fit(font, size, text, room);
                 x += font.draw(canvas, size, x, baseline, &text, color);
             }
             StatusValue::Level { percent, charging } => {

@@ -85,7 +85,9 @@ pub const NOTE_LINES: usize = 2;
 /// Line height of notes, relative to the small text size.
 const NOTE_LINE_HEIGHT: f32 = 1.3;
 
-/// Draws `text` vertically centred in `area`, starting at `x`.
+/// Draws `text` vertically centred in `area`, starting at `x`; text
+/// longer than the rest of the area is shortened with "…", so a label
+/// never runs into what is next to it.
 pub fn draw_label(
     canvas: &mut Canvas<'_>,
     font: &FontHandle<'_>,
@@ -98,7 +100,34 @@ pub fn draw_label(
     let metrics = font.line_metrics(size);
     let baseline = i32::from(area.y)
         + ((f32::from(area.height) + metrics.ascent - metrics.descent) / 2.0) as i32;
+    let room = f32::from(area.x) + f32::from(area.width) - x;
+    // A pixel of slack for rounding: callers often measured to fit.
+    if room > 0.0 && font.measure(size, text) > room + 1.0 {
+        let text = fit(font, size, text, room);
+        return font.draw(canvas, size, x, baseline, &text, color);
+    }
     font.draw(canvas, size, x, baseline, text, color)
+}
+
+/// A title and a value side by side in `width` pixels: both as they are
+/// if they fit, else shortened with "…". The title says what the row is,
+/// so it keeps up to 60 % of the width; the value gets the rest. Returns
+/// the texts and the value's width.
+pub fn fit_pair(
+    font: &FontHandle<'_>,
+    size: f32,
+    title: &str,
+    value: &str,
+    width: f32,
+    gap: f32,
+) -> (String, String, f32) {
+    let room = (width - gap).max(0.0);
+    let title_width = font.measure(size, title).min(room * 0.6);
+    let value_room = room - title_width;
+    let value = fit(font, size, value, value_room);
+    let value_width = font.measure(size, &value);
+    let title = fit(font, size, title, (room - value_width).max(0.0));
+    (title, value, value_width)
 }
 
 /// A black header bar with a title and an optional right-aligned note.
@@ -117,7 +146,8 @@ pub fn draw_header(
     let mut canvas = canvas.clipped(area);
     let margin = style.margin as f32;
     let mut right = f32::from(area.x) + f32::from(area.width) - margin;
-    if let Some(note) = note {
+    let note = note.map(|n| fit(&font, style.small, n, f32::from(area.width) / 2.0));
+    if let Some(note) = note.as_deref() {
         right -= font.measure(style.small, note);
         draw_label(
             &mut canvas,
@@ -268,7 +298,8 @@ impl Header {
         let margin = style.margin as f32;
         let mut right = f32::from(t.x) + f32::from(t.width) - margin;
         let mut canvas = canvas.clipped(t);
-        if let Some(note) = note {
+        let note = note.map(|n| fit(&font, style.small, n, f32::from(t.width) / 2.0));
+        if let Some(note) = note.as_deref() {
             right -= font.measure(style.small, note);
             draw_label(
                 &mut canvas,
@@ -460,14 +491,24 @@ pub fn draw_message(
     };
     let width = f32::from(area.width) - 2.0 * style.margin as f32;
     let line_height = font.line_metrics(style.text).line_height;
-    let lines = font.wrap(style.text, text, width);
+    let mut lines = font.wrap(style.text, text, width);
+    // As many lines as the area holds; the last one says there is more.
+    let fits = ((f32::from(area.height) / line_height) as usize).max(1);
+    let cut = lines.len() > fits;
+    lines.truncate(fits);
     let total = line_height * lines.len() as f32;
     let mut baseline =
-        f32::from(area.y) + (f32::from(area.height) - total) / 2.0 + line_height * 0.8;
-    for range in lines {
-        let line = &text[range];
-        let x = f32::from(area.x) + (f32::from(area.width) - font.measure(style.text, line)) / 2.0;
-        font.draw(canvas, style.text, x, baseline as i32, line, Color::BLACK);
+        f32::from(area.y) + (f32::from(area.height) - total).max(0.0) / 2.0 + line_height * 0.8;
+    let count = lines.len();
+    for (n, range) in lines.into_iter().enumerate() {
+        let line = if cut && n + 1 == count {
+            let rest = text[range.start..].trim_end();
+            Cow::Owned(fit(&font, style.text, &format!("{rest} …"), width))
+        } else {
+            Cow::Borrowed(&text[range])
+        };
+        let x = f32::from(area.x) + (f32::from(area.width) - font.measure(style.text, &line)) / 2.0;
+        font.draw(canvas, style.text, x, baseline as i32, &line, Color::BLACK);
         baseline += line_height;
     }
 }
@@ -715,11 +756,12 @@ pub fn draw_value_row(
     };
     let color = if focused { Color::WHITE } else { Color::BLACK };
     let margin = style.margin as f32;
-    let value_width = font.measure(style.text, value);
+    let width = f32::from(rect.width) - 2.0 * margin;
+    let (title, value, value_width) =
+        fit_pair(&font, style.text, title, value, width, margin * 2.0);
     let value_x = f32::from(rect.x) + f32::from(rect.width) - margin - value_width;
-    draw_label(canvas, &font, style.text, value_x, rect, value, color);
+    draw_label(canvas, &font, style.text, value_x, rect, &value, color);
     let title_x = f32::from(rect.x) + margin;
-    let title = fit(&font, style.text, title, value_x - title_x - margin * 2.0);
     draw_label(canvas, &font, style.text, title_x, rect, &title, color);
 }
 

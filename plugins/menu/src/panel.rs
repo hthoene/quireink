@@ -372,7 +372,11 @@ impl PanelScreen {
                 }
                 let color = if focused { Color::WHITE } else { Color::BLACK };
                 let value = alloc::format!("{} ›", ui::setting_value(env, spec));
-                let value_width = font.measure(style.text, &value);
+                let title = env.i18n.tr(&spec.title);
+                let gap = style.gap as f32;
+                let width = f32::from(rect.width);
+                let (name, value, value_width) =
+                    ui::fit_pair(&font, style.text, title, &value, width, gap);
                 let right = f32::from(rect.x) + f32::from(rect.width);
                 ui::draw_label(
                     canvas,
@@ -383,8 +387,6 @@ impl PanelScreen {
                     &value,
                     color,
                 );
-                let room = f32::from(rect.width) - value_width - style.gap as f32;
-                let name = ui::fit(&font, style.text, env.i18n.tr(&spec.title), room);
                 ui::draw_label(
                     canvas,
                     &font,
