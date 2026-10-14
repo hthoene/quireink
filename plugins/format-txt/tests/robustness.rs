@@ -1,6 +1,9 @@
 //! Any bytes are a plain text file of some sort: random data in various
 //! shapes must be read block by block without panics or endless loops.
 
+// Tests panic on purpose when something is wrong.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use quireink_plugin_format_txt::TxtDocument;
 use quireink_sdk::MemoryStorage;
 use quireink_sdk::document::{Document, Locator};

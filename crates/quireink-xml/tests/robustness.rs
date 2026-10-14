@@ -1,6 +1,9 @@
 //! The tokenizer must accept any input: random bytes and tag soup, in any
 //! chunking, without panicking and with a bounded buffer.
 
+// Tests panic on purpose when something is wrong.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use quireink_xml::{Token, Tokenizer, decode};
 
 struct Rng(u64);
@@ -64,7 +67,7 @@ fn any_input_is_tokenized() {
             Token::Start { name, attrs, .. } => {
                 let _ = name.len();
                 for (key, value) in attrs.iter() {
-                    let _ = (key, decode(&value));
+                    let _ = (key, decode(value));
                 }
                 let _ = attrs.get("class");
             }

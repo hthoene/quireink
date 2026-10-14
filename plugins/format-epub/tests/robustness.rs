@@ -8,6 +8,9 @@
 //!   then packed into a valid archive again, so the damage reaches the XML
 //!   tokenizer, the package reader and the converter.
 
+// Tests panic on purpose when something is wrong.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use quireink_plugin_format_epub::EpubDocument;
 use quireink_sdk::MemoryStorage;
 use quireink_sdk::document::{Document, Locator};

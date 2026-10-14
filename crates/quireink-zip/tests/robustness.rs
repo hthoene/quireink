@@ -1,6 +1,9 @@
 //! Damaged archives must fail cleanly: every byte of a small archive is
 //! mutated in turn, then random damage is applied.
 
+// Tests panic on purpose when something is wrong.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use quireink_platform::{DirEntry, Storage, StorageError};
 use quireink_zip::ZipArchive;
 use quireink_zip::testing::ZipBuilder;

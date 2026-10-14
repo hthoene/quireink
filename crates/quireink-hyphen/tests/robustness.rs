@@ -1,6 +1,9 @@
 //! Pattern tables come from plugins: damaged tables and unusual words must
 //! not panic.
 
+// Tests panic on purpose when something is wrong.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use quireink_hyphen::{Patterns, compile};
 
 struct Rng(u64);
