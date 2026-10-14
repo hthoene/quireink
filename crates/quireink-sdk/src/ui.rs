@@ -727,7 +727,7 @@ pub fn draw_value_row(
 /// between them.
 pub fn stepper(env: &Env<'_>, style: &UiStyle, rect: Rect, value: &str) -> Option<(Rect, Rect)> {
     let font = style.font(env)?;
-    let size = (u32::from(rect.height) * 7 / 10) as u16;
+    let size = button_height(rect);
     let y = rect.y + (rect.height - size) / 2;
     let margin = style.margin as u16;
     let gap = style.gap as u16;
@@ -736,6 +736,113 @@ pub fn stepper(env: &Env<'_>, style: &UiStyle, rect: Rect, value: &str) -> Optio
     let value_width = font.measure(style.text, value) as u16;
     let minus_x = plus.x.saturating_sub(2 * gap + value_width + size);
     Some((Rect::new(minus_x, y, size, size), plus))
+}
+
+/// The height of buttons in a row of height `row.height`: the `−` and `+`
+/// of numbers, the buttons of panels. One size everywhere.
+pub fn button_height(row: Rect) -> u16 {
+    (u32::from(row.height) * 7 / 10) as u16
+}
+
+/// The width of buttons' and boxes' borders.
+pub fn button_border(style: &UiStyle) -> u32 {
+    style.line.max(2)
+}
+
+/// A button: outlined, or filled when `on`; `focused` (chosen with
+/// buttons) draws a frame around it. Labels of one character (e.g. `+`)
+/// are set larger.
+#[allow(clippy::too_many_arguments)]
+pub fn draw_button(
+    canvas: &mut Canvas<'_>,
+    env: &Env<'_>,
+    style: &UiStyle,
+    rect: Rect,
+    label: &str,
+    on: bool,
+    focused: bool,
+) {
+    let (back, ink) = if on {
+        (Color::BLACK, Color::WHITE)
+    } else {
+        (Color::WHITE, Color::BLACK)
+    };
+    let border = button_border(style);
+    fill(canvas, rect, back);
+    let (x, y, w, h) = (
+        i32::from(rect.x),
+        i32::from(rect.y),
+        u32::from(rect.width),
+        u32::from(rect.height),
+    );
+    canvas.stroke_rect(x, y, w, h, border, Color::BLACK);
+    if focused {
+        let out = (border * 2) as i32;
+        canvas.stroke_rect(
+            x - out,
+            y - out,
+            w + 2 * out as u32,
+            h + 2 * out as u32,
+            border,
+            Color::BLACK,
+        );
+    }
+    let Some(font) = style.font(env) else {
+        return;
+    };
+    let single = label.chars().count() == 1;
+    let size = if single { style.text } else { style.small };
+    // A single character (− or +) is never shortened.
+    let room = if single {
+        f32::from(rect.width)
+    } else {
+        f32::from(rect.width) - 2.0 * style.gap as f32
+    };
+    let label = fit(&font, size, label, room);
+    let label_x = f32::from(rect.x) + (f32::from(rect.width) - font.measure(size, &label)) / 2.0;
+    draw_label(canvas, &font, size, label_x, rect, &label, ink);
+}
+
+/// A number on a light row: its title, then `[−] value [+]` exactly as in
+/// menus (see [`stepper`]); `focus` frames the `−` (`Some(false)`) or the
+/// `+` (`Some(true)`).
+#[allow(clippy::too_many_arguments)]
+pub fn draw_number(
+    canvas: &mut Canvas<'_>,
+    env: &Env<'_>,
+    style: &UiStyle,
+    rect: Rect,
+    title: &str,
+    value: &str,
+    focus: Option<bool>,
+) {
+    let (Some(font), Some((minus, plus))) = (style.font(env), stepper(env, style, rect, value))
+    else {
+        return;
+    };
+    let margin = style.margin as f32;
+    let title = fit(&font, style.text, title, f32::from(minus.x) - margin * 2.0);
+    draw_label(
+        canvas,
+        &font,
+        style.text,
+        margin,
+        rect,
+        &title,
+        Color::BLACK,
+    );
+    let value_x = f32::from(minus.x + minus.width + style.gap as u16);
+    draw_label(
+        canvas,
+        &font,
+        style.text,
+        value_x,
+        rect,
+        value,
+        Color::BLACK,
+    );
+    draw_button(canvas, env, style, minus, "−", false, focus == Some(false));
+    draw_button(canvas, env, style, plus, "+", false, focus == Some(true));
 }
 
 /// A focused number: title, then `[−] value [+]`. While editing with
@@ -785,7 +892,7 @@ pub fn draw_stepper(
             canvas.fill_rect(x, y, w, h, Color::WHITE);
             Color::BLACK
         } else {
-            canvas.stroke_rect(x, y, w, h, style.line.max(2), Color::WHITE);
+            canvas.stroke_rect(x, y, w, h, button_border(style), Color::WHITE);
             Color::WHITE
         };
         let glyph_width = font.measure(style.text, glyph);

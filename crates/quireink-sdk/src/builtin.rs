@@ -56,6 +56,10 @@ pub mod slots {
     /// [`LANGUAGE`](super::params::LANGUAGE). The standard dictionary
     /// binds here; translators or encyclopedias can too.
     pub const LOOKUP: Id = Id::new_static("core.lookup");
+    /// Shows a menu as a panel of controls for quick changes (an overlay):
+    /// parameter [`MENU`](super::params::MENU). The reader opens its
+    /// font and layout menu this way.
+    pub const PANEL: Id = Id::new_static("core.panel");
     /// Asks for text (usually an overlay with an on-screen keyboard).
     /// Parameters: [`TITLE`](super::params::TITLE) (shown above the
     /// field, already translated), [`TEXT`](super::params::TEXT) (the

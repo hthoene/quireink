@@ -63,8 +63,9 @@ pub const SEARCH_SCREEN: Id = Id::new_static("reader.search-results");
 /// The keyboard's replies: what to search for, which page to go to.
 const SEARCH_ENTERED: Id = Id::new_static("reader.search-entered");
 const PAGE_ENTERED: Id = Id::new_static("reader.page-entered");
-/// Submenus of [`MENU`]: menus like any other, so plugins add entries and
-/// users redefine them in `[menus]`.
+/// Font and layout, shown as a panel ([`actions::QUICK_SETTINGS`]), and
+/// the submenu "More" of [`MENU`]: menus like any other, so plugins add
+/// entries and users redefine them in `[menus]` or the menu editor.
 pub const LAYOUT_MENU: Id = Id::new_static("reader.layout");
 pub const MORE_MENU: Id = Id::new_static("reader.more");
 /// Asks the reader to show a position. Parameters: `path` (the book),
@@ -122,6 +123,8 @@ pub mod actions {
     pub const ANNOTATIONS: Id = Id::new_static("reader.show-annotations");
     /// Searches the book (asks for the text on the keyboard).
     pub const SEARCH: Id = Id::new_static("reader.search");
+    /// Opens font and layout as a panel of controls.
+    pub const QUICK_SETTINGS: Id = Id::new_static("reader.quick-settings");
     /// Goes to a page number (asks for it on the keyboard).
     pub const GO_TO_PAGE: Id = Id::new_static("reader.go-to-page");
     /// Items of the selection menu that the reader handles itself.
@@ -338,21 +341,33 @@ impl Plugin for Reader {
                 handler: Some(handler),
             })?;
         }
-        // Submenus are actions named like their menu: the menu shows them
-        // as submenus, and bound to a key they open the menu.
-        for (menu, title) in [(LAYOUT_MENU, "reader.layout"), (MORE_MENU, "reader.more")] {
-            let open = menu.clone();
-            r.add_action(quireink_sdk::ActionSpec {
-                id: menu,
-                title: Cow::Borrowed(title),
-                handler: Some(Box::new(move |_: &Env<'_>, out: &mut Vec<Command>| {
-                    out.push(Command::OpenSlot(
-                        slots::MENU,
-                        Params::new().with(params::MENU, String::from(open.as_str())),
-                    ));
-                })),
-            })?;
-        }
+        // A submenu is an action named like its menu: the menu shows it as
+        // a submenu, and bound to a key it opens the menu.
+        r.add_action(quireink_sdk::ActionSpec {
+            id: MORE_MENU,
+            title: Cow::Borrowed("reader.more"),
+            handler: Some(Box::new(|_: &Env<'_>, out: &mut Vec<Command>| {
+                out.push(Command::OpenSlot(
+                    slots::MENU,
+                    Params::new().with(params::MENU, String::from(MORE_MENU.as_str())),
+                ));
+            })),
+        })?;
+        // Font and layout as a panel of controls: changes show at once.
+        r.add_action(quireink_sdk::ActionSpec {
+            id: actions::QUICK_SETTINGS,
+            title: Cow::Borrowed("reader.layout"),
+            handler: Some(Box::new(|_: &Env<'_>, out: &mut Vec<Command>| {
+                out.push(Command::OpenSlot(
+                    slots::PANEL,
+                    Params::new().with(params::MENU, String::from(LAYOUT_MENU.as_str())),
+                ));
+            })),
+        })?;
+        // A tap at the bottom of a page opens it.
+        r.add_keymap(Cow::Borrowed(
+            "[keymap.reader.screen]\ntap.bottom = reader.quick-settings\n",
+        ))?;
         // A short menu; settings in it show their state and change in
         // place.
         let entries = [
@@ -360,7 +375,7 @@ impl Plugin for Reader {
             (MENU, actions::SEARCH, 20),
             (MENU, actions::GO_TO_PAGE, 30),
             (MENU, actions::ANNOTATIONS, 40),
-            (MENU, LAYOUT_MENU, 50),
+            (MENU, actions::QUICK_SETTINGS, 50),
             (MENU, core_settings::NIGHT_MODE, 60),
             (MENU, MORE_MENU, 70),
             (LAYOUT_MENU, core_settings::SCOPE_ONLY, 1),
@@ -368,7 +383,6 @@ impl Plugin for Reader {
             (LAYOUT_MENU, settings::FONT_SIZE, 10),
             (LAYOUT_MENU, settings::FONT_WEIGHT, 15),
             (LAYOUT_MENU, settings::LINE_SPACING, 20),
-            (LAYOUT_MENU, settings::WORD_SPACING, 25),
             (LAYOUT_MENU, settings::MARGIN, 30),
             (LAYOUT_MENU, settings::JUSTIFY, 40),
             (LAYOUT_MENU, settings::HYPHENATE, 50),

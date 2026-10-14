@@ -10,7 +10,8 @@
 //! submenu above this one.
 //!
 //! Bound to the `core.menu` slot — replace it to get a different menu style
-//! (radial, side bar, …) for every menu at once.
+//! (radial, side bar, …) for every menu at once. The same plugin shows
+//! menus as panels of controls (`core.panel`, see `panel`).
 
 #![no_std]
 
@@ -31,6 +32,10 @@ use quireink_sdk::{
 
 pub const PLUGIN: Id = Id::new_static("menu");
 pub const SCREEN: Id = Id::new_static("menu.list");
+/// A menu as a panel of controls.
+pub const PANEL: Id = Id::new_static("menu.panel");
+
+mod panel;
 
 /// Most of the screen a menu may cover.
 const MAX_SHARE: f32 = 0.75;
@@ -59,6 +64,12 @@ impl Plugin for Menu {
             factory: Box::new(|env, params| Box::new(MenuScreen::new(env, params))),
         })?;
         r.bind_slot(slots::MENU, SCREEN, Priority::DEFAULT)?;
+        r.add_screen(ScreenSpec {
+            id: PANEL,
+            title: Cow::Borrowed("menu.title"),
+            factory: Box::new(|env, params| Box::new(panel::PanelScreen::open(env, params))),
+        })?;
+        r.bind_slot(slots::PANEL, PANEL, Priority::DEFAULT)?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/en.ini")))?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/de.ini")))?;
         Ok(())
@@ -84,7 +95,7 @@ struct MenuScreen {
 const DEPTH: &str = "depth";
 
 /// The settings plugin's list for choosing a value.
-const CHOOSE_SCREEN: Id = Id::new_static("settings.choose");
+pub(crate) const CHOOSE_SCREEN: Id = Id::new_static("settings.choose");
 
 impl MenuScreen {
     fn new(env: &Env<'_>, params: &Params) -> Self {
@@ -201,7 +212,7 @@ impl MenuScreen {
 }
 
 /// Whether `id` names a menu with entries (a submenu).
-fn is_menu(env: &Env<'_>, id: &Id) -> bool {
+pub(crate) fn is_menu(env: &Env<'_>, id: &Id) -> bool {
     !env.menus.items(id.as_str()).is_empty()
 }
 
