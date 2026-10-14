@@ -8,6 +8,11 @@
 //! The numbers approximate a real embedded allocator: each allocation is
 //! charged a small fixed header. Fragmentation and stack usage are not
 //! modelled, so keep a safety margin.
+//!
+//! Each allocation remembers whether it was charged (in a byte before
+//! it), so memory is credited back exactly when charged memory is freed —
+//! wherever that happens: the shell's memory freed by the kernel (e.g. a
+//! received part of a request) does not lower the count.
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::backtrace::Backtrace;
@@ -42,13 +47,47 @@ fn tracking() -> bool {
     TRACKING.try_with(Cell::get).unwrap_or(false)
 }
 
+/// The allocation made for `layout`, with room before it for the mark,
+/// and where the memory handed out starts in it.
+fn outer(layout: Layout) -> (Layout, usize) {
+    let offset = layout.align().max(16);
+    let size = layout.size().saturating_add(offset);
+    // The size stays within what `Layout` allows for any real request.
+    let outer = Layout::from_size_align(size, layout.align()).unwrap_or(layout);
+    (outer, offset)
+}
+
+/// Marks of allocations: whether they were charged.
+const CHARGED: u8 = 0xC4;
+const FREE: u8 = 0x00;
+
+/// Allocates `layout` with its mark.
+///
+/// # Safety
+///
+/// As [`GlobalAlloc::alloc`].
+unsafe fn alloc_marked(layout: Layout, charged: bool) -> *mut u8 {
+    let (outer, offset) = outer(layout);
+    // SAFETY: `outer` has a non-zero size, as it holds the mark.
+    let base = unsafe { System.alloc(outer) };
+    if base.is_null() {
+        return base;
+    }
+    // SAFETY: `offset` lies within the allocation, and the mark before it.
+    unsafe {
+        let ptr = base.add(offset);
+        ptr.sub(1).write(if charged { CHARGED } else { FREE });
+        ptr
+    }
+}
+
 // SAFETY: forwards to the system allocator; the bookkeeping does not touch
 // the allocated memory.
 unsafe impl GlobalAlloc for BudgetAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         if !tracking() {
             // SAFETY: same contract as the caller's.
-            return unsafe { System.alloc(layout) };
+            return unsafe { alloc_marked(layout, false) };
         }
         let charge = layout.size() + HEADER;
         if LIVE.load(Ordering::Relaxed) + charge > LIMIT.load(Ordering::Relaxed) {
@@ -56,7 +95,7 @@ unsafe impl GlobalAlloc for BudgetAllocator {
             return std::ptr::null_mut();
         }
         // SAFETY: same contract as the caller's.
-        let ptr = unsafe { System.alloc(layout) };
+        let ptr = unsafe { alloc_marked(layout, true) };
         if !ptr.is_null() {
             let live = LIVE.fetch_add(charge, Ordering::Relaxed) + charge;
             PEAK.fetch_max(live, Ordering::Relaxed);
@@ -86,9 +125,12 @@ unsafe impl GlobalAlloc for BudgetAllocator {
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        // SAFETY: same contract as the caller's.
-        unsafe { System.dealloc(ptr, layout) };
-        if tracking() {
+        let (outer, offset) = outer(layout);
+        // SAFETY: `ptr` came from `alloc_marked` with the same layout.
+        let charged = unsafe { ptr.sub(1).read() } == CHARGED;
+        // SAFETY: as above; this is the start of the allocation.
+        unsafe { System.dealloc(ptr.sub(offset), outer) };
+        if charged {
             if PROFILE.load(Ordering::Relaxed) {
                 let tracking = TRACKING.with(|t| t.replace(false));
                 if let Ok(mut sites) = SITES.lock()
