@@ -39,6 +39,7 @@ OPTIONS:
     --screenshot-dir <d>  Where F12 saves screenshots (default: out)
     --heap-budget <KiB>   Override the profile's heap budget (`none` = unlimited)
     --trace-alloc <bytes> Print every kernel allocation of at least this size
+    --heap-report         After a headless run, list the live heap by call site
     -h, --help            Show this help
 
 KEYS (if the device has the button):
@@ -62,6 +63,7 @@ struct Options {
     library: Option<PathBuf>,
     /// `Some(None)` removes the budget.
     heap_budget: Option<Option<usize>>,
+    heap_report: bool,
 }
 
 fn main() -> ExitCode {
@@ -88,6 +90,12 @@ fn run() -> Result<(), String> {
         .unwrap_or_else(|| PathBuf::from("samples/library"));
     let storage = storage::DirStorage::new(&library)
         .map_err(|e| format!("library {}: {e}", library.display()))?;
+    if options.heap_report {
+        if !options.headless {
+            return Err("--heap-report requires --headless".into());
+        }
+        budget::profile();
+    }
     let mut device = Device::new(profile, user_config(&options)?, storage, options.headless)
         .map_err(|e| format!("{}: {e}", profile.device.id))?;
     if let Some(limit) = options.heap_budget {
@@ -113,6 +121,9 @@ fn run() -> Result<(), String> {
                 .unwrap_or_default(),
             budget::stats()
         );
+        if options.heap_report {
+            budget::report(2);
+        }
         return Ok(());
     }
 
@@ -176,6 +187,7 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Option<Options>,
             "--screenshot-dir" => {
                 options.screenshot_dir = Some(PathBuf::from(value("--screenshot-dir")?));
             }
+            "--heap-report" => options.heap_report = true,
             "--trace-alloc" => {
                 let bytes = value("--trace-alloc")?;
                 budget::trace(

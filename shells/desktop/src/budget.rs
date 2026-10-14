@@ -10,8 +10,11 @@
 //! modelled, so keep a safety margin.
 
 use std::alloc::{GlobalAlloc, Layout, System};
+use std::backtrace::Backtrace;
 use std::cell::Cell;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::collections::HashMap;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 /// Per-allocation bookkeeping overhead of typical embedded allocators.
 const HEADER: usize = 8;
@@ -22,6 +25,10 @@ static LIMIT: AtomicUsize = AtomicUsize::new(usize::MAX);
 static FAILED: AtomicUsize = AtomicUsize::new(0);
 /// Allocations of at least this many bytes are printed.
 static TRACE: AtomicUsize = AtomicUsize::new(usize::MAX);
+/// Whether live allocations are recorded with their call site.
+static PROFILE: AtomicBool = AtomicBool::new(false);
+/// Live tracked allocations: address → (size, where it was made).
+static SITES: Mutex<Option<HashMap<usize, (usize, Backtrace)>>> = Mutex::new(None);
 
 thread_local! {
     static TRACKING: Cell<bool> = const { Cell::new(false) };
@@ -63,6 +70,17 @@ unsafe impl GlobalAlloc for BudgetAllocator {
                 );
                 TRACKING.with(|t| t.set(tracking));
             }
+            if PROFILE.load(Ordering::Relaxed) {
+                // Untracked: the bookkeeping is not part of the budget.
+                let tracking = TRACKING.with(|t| t.replace(false));
+                let site = Backtrace::force_capture();
+                if let Ok(mut sites) = SITES.lock() {
+                    sites
+                        .get_or_insert_with(HashMap::new)
+                        .insert(ptr as usize, (layout.size(), site));
+                }
+                TRACKING.with(|t| t.set(tracking));
+            }
         }
         ptr
     }
@@ -71,6 +89,15 @@ unsafe impl GlobalAlloc for BudgetAllocator {
         // SAFETY: same contract as the caller's.
         unsafe { System.dealloc(ptr, layout) };
         if tracking() {
+            if PROFILE.load(Ordering::Relaxed) {
+                let tracking = TRACKING.with(|t| t.replace(false));
+                if let Ok(mut sites) = SITES.lock()
+                    && let Some(sites) = sites.as_mut()
+                {
+                    sites.remove(&(ptr as usize));
+                }
+                TRACKING.with(|t| t.set(tracking));
+            }
             let charge = layout.size() + HEADER;
             let mut live = LIVE.load(Ordering::Relaxed);
             while let Err(actual) = LIVE.compare_exchange_weak(
@@ -106,6 +133,74 @@ pub fn set_limit(limit: Option<usize>) {
 /// what makes up a peak.
 pub fn trace(bytes: usize) {
     TRACE.store(bytes, Ordering::Relaxed);
+}
+
+/// Records the call site of every tracked allocation for [`report`].
+/// Slow; for analysing memory use only.
+pub fn profile() {
+    PROFILE.store(true, Ordering::Relaxed);
+}
+
+/// The first frames in QuireInk code below the allocator, e.g.
+/// `quireink_text::cache::GlyphCache::insert (cache.rs:120)`.
+fn site_of(backtrace: &Backtrace, depth: usize) -> String {
+    let text = backtrace.to_string();
+    let mut frames = Vec::new();
+    let mut lines = text.lines().peekable();
+    while let Some(line) = lines.next() {
+        let Some((_, name)) = line.trim().split_once(": ") else {
+            continue;
+        };
+        let location = lines
+            .peek()
+            .and_then(|l| l.trim().strip_prefix("at "))
+            .map(|l| {
+                let file = l.rsplit(['\\', '/']).next().unwrap_or(l);
+                file.rsplitn(2, ':').nth(1).unwrap_or(file).to_string()
+            })
+            .unwrap_or_default();
+        let name = name.rsplit_once("::h").map_or(name, |(n, _)| n);
+        if name.starts_with("quireink") && !name.contains("budget") && !name.contains("__rust_") {
+            frames.push(format!("{name} ({location})"));
+            if frames.len() == depth {
+                break;
+            }
+        } else if !frames.is_empty() && name.contains("quireink_emu") {
+            break;
+        }
+    }
+    if frames.is_empty() {
+        String::from("(outside QuireInk code)")
+    } else {
+        frames.join(
+            "
+      <- ",
+        )
+    }
+}
+
+/// Prints the live allocations grouped by call site, largest first.
+pub fn report(depth: usize) {
+    let tracking = TRACKING.with(|t| t.replace(false));
+    let sites = SITES
+        .lock()
+        .ok()
+        .and_then(|mut s| s.take())
+        .unwrap_or_default();
+    let mut groups: HashMap<String, (usize, usize)> = HashMap::new();
+    for (size, backtrace) in sites.values() {
+        let group = groups.entry(site_of(backtrace, depth)).or_default();
+        group.0 += size + HEADER;
+        group.1 += 1;
+    }
+    let mut groups: Vec<_> = groups.into_iter().collect();
+    groups.sort_by(|a, b| b.1.0.cmp(&a.1.0));
+    let total: usize = groups.iter().map(|(_, (bytes, _))| bytes).sum();
+    println!("live heap by call site ({:.1} KiB):", total as f64 / 1024.0);
+    for (site, (bytes, count)) in groups {
+        println!("{:>8.1} KiB {count:>6}x  {site}", bytes as f64 / 1024.0);
+    }
+    TRACKING.with(|t| t.set(tracking));
 }
 
 /// Current heap usage of the kernel and its plugins.

@@ -94,7 +94,8 @@ public-domain books are included as EPUB and TXT. Put your own `.epub` and
 The emulator enforces each device's heap budget on the kernel, so memory
 problems show up on the desktop before they show up on hardware
 (`--heap-budget none` shows the real peak, `--trace-alloc 1024` lists the
-large allocations behind it). Headless
+large allocations behind it, `--heap-report` groups the live heap by call
+site). Headless
 runs produce screenshots for tests and bug reports:
 
 ```bash
