@@ -300,6 +300,15 @@ impl ReaderScreen {
             }
             return;
         }
+        if *item == crate::actions::MORE {
+            // The whole selection menu as a list; the chosen action comes
+            // back to `on_action` while the text stays selected.
+            cx.command(Command::OpenSlot(
+                slots::MENU,
+                Params::new().with(params::MENU, crate::SELECTION_MENU.as_str()),
+            ));
+            return;
+        }
         if *item == crate::actions::EXTEND {
             let to = Selection {
                 mode: Mode::Extending,
@@ -335,6 +344,9 @@ impl ReaderScreen {
                     .with(crate::END_SECTION, format!("{}", end.section))
                     .with(crate::END_OFFSET, format!("{}", end.offset)),
             ));
+            // Then the action runs as usual (after the selection is gone),
+            // so any action works here, e.g. the night mode.
+            cx.command(Command::RunAction(item.clone()));
         }
         self.set_selection(None, cx);
         cx.request_refresh(RefreshMode::Partial);
@@ -354,6 +366,16 @@ impl ReaderScreen {
         let a = action;
         if *a == actions::BACK || *a == actions::MENU {
             self.set_selection(None, cx);
+            return Handled::Yes;
+        }
+        // An action of the selection menu, e.g. chosen in its list.
+        if env
+            .menus
+            .items(crate::SELECTION_MENU.as_str())
+            .iter()
+            .any(|item| item.id == a)
+        {
+            self.activate(a, cx);
             return Handled::Yes;
         }
         match selection.mode {

@@ -565,7 +565,7 @@ architecture (G1–G12 below).
 | Feature users want | Built from | Gap |
 |--------------------|-----------|-----|
 | Dictionary lookup on long-press, Wikipedia, translation | gesture on page → hit test → word → slot `core.lookup` (overlay); ✅ StarDict dictionary plugin (`quireink-stardict`: block index, dictzip, synonyms), word choice with buttons; Wikipedia/translation can bind the same slot | G1, G5 |
-| Highlights, notes, annotation export (Markdown, Readwise, Obsidian) | selection + locators; `annotations` service; display-list overlay filter; network/storage. ✅ bookmarks and highlights at source positions (`PageLine::words`), selection by touch or buttons, the selection bar as menu `reader.selection` (plugins add actions and get `reader.text-chosen`) · ⬜ notes (needs the on-screen keyboard), export | G5 |
+| Highlights, notes, annotation export (Markdown, Readwise, Obsidian) | selection + locators; `annotations` service; display-list overlay filter; network/storage. ✅ bookmarks and highlights at source positions (`PageLine::words`), selection by touch or buttons, the selection bar as menu `reader.selection` (plugins add actions and get `reader.text-chosen`; what does not fit goes into a *More* list) · ⬜ notes (needs the on-screen keyboard), export | G5 |
 | Footnote popups, internal links | link hit test; overlay | G1, G5 |
 | Reading statistics, streaks, goals, time-left estimates | `page.turned` events with timestamps; plugin storage; home widgets | G4 |
 | Custom fonts, margins, spacing, hyphenation, justification | font/hyphenation contributions; reader settings | — |

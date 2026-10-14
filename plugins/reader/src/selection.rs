@@ -13,7 +13,7 @@ use quireink_sdk::ui::{self, UiStyle};
 use quireink_sdk::{Canvas, Color, Env, Id, Point, Rect};
 
 use crate::SELECTION_MENU;
-use crate::actions::{CANCEL, EXTEND, HIGHLIGHT};
+use crate::actions::{CANCEL, EXTEND, HIGHLIGHT, MORE};
 use crate::screen::WordBox;
 
 /// What the buttons do with the selection.
@@ -94,12 +94,16 @@ impl Selection {
     }
 }
 
-/// The bar's items: the selection menu's entries. *Highlight* reads
-/// *Remove highlight* on highlighted text. With buttons, *Cancel* is left
-/// out (back cancels); on touch screens *Extend* is (tapping words
-/// extends the selection).
+/// The bar's items: the selection menu's entries, as many as fit with
+/// readable labels; if not all do, *More* before the last place opens the
+/// whole menu as a list. *Cancel* always stays visible, at the end, since
+/// tapping the page mostly hits words, which extends the selection.
+/// *Highlight* reads *Remove highlight* on highlighted text. With buttons,
+/// *Cancel* is left out (back cancels); on touch screens *Extend* is
+/// (tapping words extends the selection).
 pub(crate) fn items(env: &Env<'_>, highlighted: bool) -> Vec<Item> {
-    env.menus
+    let mut all: Vec<Item> = env
+        .menus
         .items(SELECTION_MENU.as_str())
         .into_iter()
         .filter(|item| {
@@ -114,7 +118,38 @@ pub(crate) fn items(env: &Env<'_>, highlighted: bool) -> Vec<Item> {
                 item.title.to_string()
             },
         })
-        .collect()
+        .collect();
+    let cancel: Vec<Item> = all
+        .iter()
+        .position(|item| item.id == CANCEL)
+        .map(|at| all.remove(at))
+        .into_iter()
+        .collect();
+    let style = UiStyle::new(env);
+    let width = f32::from(bar_area(env, &style).width);
+    let fits = |items: &[Item]| natural_widths(env, &style, items).iter().sum::<f32>() <= width;
+    if fits(&[all.as_slice(), &cancel].concat()) {
+        all.extend(cancel);
+        return all;
+    }
+    let more = Item {
+        id: MORE,
+        title: "reader.select.more".to_string(),
+    };
+    let mut shown: Vec<Item> = Vec::new();
+    for item in &all {
+        let mut next = shown.clone();
+        next.push(item.clone());
+        next.push(more.clone());
+        next.extend(cancel.iter().cloned());
+        if !fits(&next) {
+            break;
+        }
+        shown.push(item.clone());
+    }
+    shown.push(more);
+    shown.extend(cancel);
+    shown
 }
 
 /// Where the bar is: over the status line at the bottom.
@@ -124,10 +159,40 @@ pub(crate) fn bar_area(env: &Env<'_>, style: &UiStyle) -> Rect {
     Rect::new(0, display.height - height, display.width, height)
 }
 
-/// The rectangle of item `index` of `count` in the bar.
-fn item_area(bar: Rect, index: usize, count: usize) -> Rect {
-    let width = bar.width / count.max(1) as u16;
-    Rect::new(bar.x + width * index as u16, bar.y, width, bar.height)
+/// How wide the items' labels are, with a gap around each.
+fn natural_widths(env: &Env<'_>, style: &UiStyle, items: &[Item]) -> Vec<f32> {
+    let font = style.font(env);
+    items
+        .iter()
+        .map(|item| {
+            let label = font
+                .as_ref()
+                .map_or(0.0, |f| f.measure(style.small, env.i18n.tr(&item.title)));
+            label + style.gap as f32
+        })
+        .collect()
+}
+
+/// The rectangles of the bar's items: each as wide as its label needs,
+/// the rest of the bar shared equally.
+fn item_areas(env: &Env<'_>, style: &UiStyle, items: &[Item]) -> Vec<Rect> {
+    let bar = bar_area(env, style);
+    let natural = natural_widths(env, style, items);
+    let spare =
+        (f32::from(bar.width) - natural.iter().sum::<f32>()).max(0.0) / items.len().max(1) as f32;
+    let mut left = f32::from(bar.x);
+    let mut areas = Vec::with_capacity(items.len());
+    for (index, width) in natural.iter().enumerate() {
+        let right = if index + 1 == natural.len() {
+            f32::from(bar.x) + f32::from(bar.width)
+        } else {
+            left + width + spare
+        };
+        let (x, end) = ((left + 0.5) as u16, (right + 0.5) as u16);
+        areas.push(Rect::new(x, bar.y, end.saturating_sub(x), bar.height));
+        left = right;
+    }
+    areas
 }
 
 pub(crate) fn draw_bar(
@@ -150,8 +215,8 @@ pub(crate) fn draw_bar(
     let Some(font) = style.font(env) else {
         return;
     };
-    for (index, item) in items.iter().enumerate() {
-        let area = item_area(bar, index, items.len());
+    let areas = item_areas(env, &style, items);
+    for (index, (item, &area)) in items.iter().zip(&areas).enumerate() {
         let focused = focus == Some(index);
         if focused {
             ui::fill(canvas, area, Color::BLACK);
@@ -177,14 +242,13 @@ pub(crate) fn draw_bar(
 
 /// The bar item at `point`, if any.
 pub(crate) fn item_at(env: &Env<'_>, items: &[Item], point: Point) -> Option<Item> {
-    let bar = bar_area(env, &UiStyle::new(env));
-    if !bar.contains(point) {
+    let style = UiStyle::new(env);
+    if !bar_area(env, &style).contains(point) {
         return None;
     }
-    let width = i32::from(bar.width / items.len().max(1) as u16).max(1);
-    items
-        .get(((point.x - i32::from(bar.x)) / width) as usize)
-        .cloned()
+    let areas = item_areas(env, &style, items);
+    let index = areas.iter().position(|area| area.contains(point))?;
+    items.get(index).cloned()
 }
 
 /// Boxes around runs of words on one line, e.g. to draw a selection or

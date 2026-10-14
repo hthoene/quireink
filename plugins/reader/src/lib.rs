@@ -48,7 +48,8 @@ pub const SELECTION_MENU: Id = Id::new_static("reader.selection");
 /// parameters `action` (the action's id), `text`, `language`, `path`,
 /// `section` and `offset` (the start) and `end-section` and `end-offset`.
 /// The plugin whose action it is reacts; e.g. a "Share" or "Translate"
-/// action needs no more than a menu entry and a subscription.
+/// action needs no more than a menu entry and a subscription. Afterwards
+/// the action itself runs as usual, so any action can be listed.
 pub const TEXT_CHOSEN: Id = Id::new_static("reader.text-chosen");
 /// Parameters of [`TEXT_CHOSEN`].
 pub const ACTION: &str = "action";
@@ -106,6 +107,9 @@ pub mod actions {
     /// Moves the end of the selection with the buttons.
     pub const EXTEND: Id = Id::new_static("reader.selection.extend");
     pub const CANCEL: Id = Id::new_static("reader.selection.cancel");
+    /// Shows all actions for the selection as a list, when the bar is too
+    /// small for them.
+    pub const MORE: Id = Id::new_static("reader.selection.more");
 }
 
 /// The reader plugin.
@@ -157,6 +161,7 @@ impl Plugin for Reader {
             (actions::HIGHLIGHT, "reader.select.highlight"),
             (actions::EXTEND, "reader.select.extend"),
             (actions::CANCEL, "reader.select.cancel"),
+            (actions::MORE, "reader.select.more"),
         ] {
             r.add_action(quireink_sdk::ActionSpec {
                 id,
