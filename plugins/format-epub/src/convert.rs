@@ -332,8 +332,8 @@ impl Converter<'_> {
         if href.is_empty() || quireink_sdk::document::is_external(&href) {
             return (!href.is_empty()).then_some(href);
         }
-        let (path, fragment) = if href.starts_with('#') {
-            (self.chapter.clone(), Some(String::from(&href[1..])))
+        let (path, fragment) = if let Some(fragment) = href.strip_prefix('#') {
+            (self.chapter.clone(), Some(String::from(fragment)))
         } else {
             crate::package::resolve(&self.base, &href)
         };
