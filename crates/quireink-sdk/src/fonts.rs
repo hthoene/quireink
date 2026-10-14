@@ -317,16 +317,35 @@ impl Fonts {
         self.cache.borrow().bytes()
     }
 
-    /// A handle of loaded entry `index`.
+    /// A handle of loaded entry `index`, with the fallback font for
+    /// characters it lacks.
     fn handle(&self, index: usize) -> FontHandle<'_> {
         let entry = &self.entries[index];
+        let fallback = self
+            .fallback_index()
+            .filter(|&f| f != index)
+            .and_then(|f| Some((self.entries[f].font.as_ref()?, f as u16)));
         FontHandle {
             id: &entry.id,
             // Handles are made for loaded fonts only.
             font: entry.font.as_ref().unwrap_or_else(|| unreachable!()),
             cache: &self.cache,
             index: index as u16,
+            fallback,
         }
+    }
+
+    /// The font for characters another one lacks (e.g. Cyrillic in a UI
+    /// font for Latin): the one plugins propose for reading, as reading
+    /// fonts cover the most scripts.
+    fn fallback_index(&self) -> Option<usize> {
+        let reading = roles::READING;
+        let reading = reading.as_str();
+        self.candidates
+            .iter()
+            .filter(|(r, font, _)| r.as_str() == reading && self.index_of(font.as_str()).is_some())
+            .max_by_key(|(_, _, priority)| *priority)
+            .and_then(|(_, font, _)| self.index_of(font.as_str()))
     }
 
     fn index_of(&self, id: &str) -> Option<usize> {
@@ -403,6 +422,7 @@ impl FontSet {
             font,
             cache: &self.cache,
             index: index as u16,
+            fallback: None,
         })
     }
 }
@@ -416,6 +436,9 @@ pub struct FontHandle<'a> {
     cache: &'a RefCell<GlyphCache>,
     /// The font's number in that cache.
     index: u16,
+    /// A font for the characters this one lacks, and its number in the
+    /// same cache.
+    fallback: Option<(&'a Font, u16)>,
 }
 
 impl fmt::Debug for FontHandle<'_> {
@@ -438,14 +461,26 @@ impl<'a> FontHandle<'a> {
         self.font().line_metrics(size)
     }
 
+    /// The font that draws `ch` and its number in the cache: this one,
+    /// or the fallback if only that has it.
+    fn pick(&self, ch: char) -> (&'a Font, u16) {
+        match self.fallback {
+            Some((font, index)) if !self.font.has_char(ch) && font.has_char(ch) => (font, index),
+            _ => (self.font, self.index),
+        }
+    }
+
     /// Horizontal advance of one character in pixels.
     pub fn advance(&self, size: f32, ch: char) -> f32 {
-        self.font().advance(ch, size)
+        self.pick(ch).0.advance(ch, size)
     }
 
     /// Width of a single line of text in pixels.
     pub fn measure(&self, size: f32, text: &str) -> f32 {
-        quireink_text::measure(self.font(), size, text)
+        match self.fallback {
+            None => quireink_text::measure(self.font(), size, text),
+            Some(_) => text.chars().map(|ch| self.advance(size, ch)).sum(),
+        }
     }
 
     /// Breaks `text` into lines that fit `max_width`.
@@ -481,17 +516,29 @@ impl<'a> FontHandle<'a> {
         extra: u16,
     ) -> f32 {
         let mut cache = self.cache.borrow_mut();
-        quireink_text::draw_text_bolder(
-            canvas,
-            &mut cache,
-            self.index,
-            self.font(),
-            size,
-            x,
-            baseline,
-            text,
-            color,
-            extra,
-        )
+        let mut pen = x;
+        // Runs of characters drawn by the same font.
+        let mut rest = text;
+        while let Some(first) = rest.chars().next() {
+            let (font, index) = self.pick(first);
+            let end = rest
+                .char_indices()
+                .find(|(_, ch)| self.pick(*ch).1 != index)
+                .map_or(rest.len(), |(at, _)| at);
+            pen += quireink_text::draw_text_bolder(
+                canvas,
+                &mut cache,
+                index,
+                font,
+                size,
+                pen,
+                baseline,
+                &rest[..end],
+                color,
+                extra,
+            );
+            rest = &rest[end..];
+        }
+        pen - x
     }
 }

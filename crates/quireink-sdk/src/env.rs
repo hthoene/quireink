@@ -38,6 +38,11 @@ pub struct Env<'a> {
     /// Whether the device can make HTTP requests
     /// ([`Command::Http`](crate::Command::Http)).
     pub network: bool,
+    /// Whether there is text on the clipboard, copied here
+    /// ([`Command::SetClipboard`](crate::Command::SetClipboard)) or, where
+    /// the system has a clipboard, in another app; read it with
+    /// [`Command::ReadClipboard`](crate::Command::ReadClipboard).
+    pub clipboard: bool,
     /// The device's storage. Plugins keep their own files below
     /// [`Env::plugin_dir`].
     pub storage: &'a dyn Storage,

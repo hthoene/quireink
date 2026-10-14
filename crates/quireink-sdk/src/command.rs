@@ -64,7 +64,19 @@ pub enum Command {
     /// Restarts QuireInk, e.g. to apply switched plugins. The shell builds
     /// a new kernel; the reading position is already saved.
     Restart,
+    /// Puts text on the clipboard, on devices with one also the system's,
+    /// for other apps. Long text is cut at [`MAX_CLIPBOARD`] bytes.
+    SetClipboard(alloc::string::String),
+    /// Asks for the text on the clipboard (see
+    /// [`Env::clipboard`](crate::Env)). It comes as the event `.0` with
+    /// the parameters `.1` plus `text` ([`params::TEXT`](crate::builtin::params::TEXT)),
+    /// empty if there is none. Read it only when the user asks to paste:
+    /// some systems tell the user every time an app reads the clipboard.
+    ReadClipboard(Id, Params),
 }
+
+/// The most text the clipboard holds, in bytes.
+pub const MAX_CLIPBOARD: usize = 4096;
 
 impl Command {
     /// Opens a slot without parameters.

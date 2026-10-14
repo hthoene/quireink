@@ -893,6 +893,55 @@ fn http_requests_go_to_the_shell_and_answers_come_back() {
 }
 
 #[test]
+fn copied_text_reaches_plugins_and_the_shell() {
+    let log = log();
+    let mut kernel = Kernel::builder(DEVICE)
+        .plugin(OverlayPlugin { log: log.clone() })
+        .build()
+        .unwrap();
+    kernel.start(Instant(0));
+    assert!(!kernel.shared.env(Instant(0)).clipboard);
+    let read = |id: &str| {
+        Command::ReadClipboard(
+            Id::new_static("ov.reply"),
+            quireink_sdk::Params::new().with("id", String::from(id)),
+        )
+    };
+    kernel
+        .output
+        .commands
+        .extend([Command::SetClipboard(String::from("Alice")), read("a")]);
+    kernel.run_commands();
+    assert!(kernel.shared.env(Instant(0)).clipboard);
+    assert_eq!(kernel.take_clipboard().as_deref(), Some("Alice"));
+    assert_eq!(kernel.take_clipboard(), None);
+    // Without the system's clipboard, the answer comes at once.
+    assert!(!kernel.wants_clipboard());
+    assert!(log.borrow().contains(&String::from("event ov.reply a")));
+    // Long text is cut at a character boundary.
+    let long = "ä".repeat(quireink_sdk::MAX_CLIPBOARD);
+    assert_eq!(crate::clipped(&long).len(), quireink_sdk::MAX_CLIPBOARD);
+
+    // With it: the shell reads it when asked.
+    let log = self::log();
+    let mut kernel = Kernel::builder(DEVICE)
+        .plugin(OverlayPlugin { log: log.clone() })
+        .system_clipboard(true)
+        .build()
+        .unwrap();
+    kernel.start(Instant(0));
+    kernel.set_clipboard_available(true);
+    assert!(kernel.shared.env(Instant(0)).clipboard);
+    kernel.output.commands.push(read("b"));
+    kernel.run_commands();
+    assert!(kernel.wants_clipboard());
+    assert!(!log.borrow().contains(&String::from("event ov.reply b")));
+    kernel.clipboard_text(Instant(1), Some(String::from("from another app")));
+    assert!(!kernel.wants_clipboard());
+    assert!(log.borrow().contains(&String::from("event ov.reply b")));
+}
+
+#[test]
 fn changed_settings_are_saved_and_announced() {
     let log = log();
     let storage = quireink_sdk::MemoryStorage::new()

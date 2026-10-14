@@ -52,6 +52,8 @@ struct Running {
     status_read: Instant,
     /// HTTP requests in flight.
     net: crate::net::Net,
+    /// For the system's clipboard.
+    app: AndroidApp,
 }
 
 /// How often the battery and time zone are read again.
@@ -129,6 +131,14 @@ fn android_main(app: AndroidApp) {
                         apply(running, effects);
                     }
                 }
+                MainEvent::GainedFocus => {
+                    // Maybe copied something in another app (not read
+                    // until pasted).
+                    if let Some(running) = running.as_mut() {
+                        let available = crate::clipboard::has_text(&app);
+                        running.kernel.set_clipboard_available(available);
+                    }
+                }
                 MainEvent::TerminateWindow { .. } => window = None,
                 MainEvent::Destroy => quit = true,
                 _ => {}
@@ -165,6 +175,11 @@ fn android_main(app: AndroidApp) {
         }
         while let Some(response) = state.net.next() {
             let effects = state.kernel.http_response(now(), response);
+            changed |= apply(state, effects);
+        }
+        if state.kernel.wants_clipboard() {
+            let text = crate::clipboard::read(&app);
+            let effects = state.kernel.clipboard_text(now(), text);
             changed |= apply(state, effects);
         }
         if state.wake_at.is_some_and(|at| at <= now()) {
@@ -261,7 +276,10 @@ fn start_kernel(
         .filter(|dir| shared.is_some() && dir.join(KOREADER_DICTIONARIES).is_dir())
         .map_or(DICTIONARIES, |_| KOREADER_DICTIONARIES);
     let shared_storage = shared.is_some();
-    let mut builder = Kernel::builder(device).plugin_dir("plugins").network(true);
+    let mut builder = Kernel::builder(device)
+        .plugin_dir("plugins")
+        .network(true)
+        .system_clipboard(true);
     builder = match shared {
         Some(shared) => builder
             .storage(Mounted::new(storage, SHARED, shared))
@@ -311,6 +329,7 @@ fn start_kernel(
         refresh: None,
         status_read: now,
         net: crate::net::Net::new(app),
+        app: app.clone(),
     };
     apply(&mut running, effects);
     Some(running)
@@ -356,6 +375,9 @@ fn apply(state: &mut Running, effects: Effects) -> bool {
     state.wake_at = effects.wake_at();
     for call in state.kernel.take_requests() {
         state.net.start(call);
+    }
+    if let Some(text) = state.kernel.take_clipboard() {
+        crate::clipboard::write(&state.app, &text);
     }
     state.restart |= effects.restart();
     if let Some((_, mode)) = effects.refresh() {

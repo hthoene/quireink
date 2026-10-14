@@ -1,7 +1,7 @@
 //! Choosing text on the page and what can be done with it.
 //!
 //! Touch: a long press on a word selects it and shows a bar at the bottom
-//! (look up, highlight, cancel); tapping more words extends the selection.
+//! (look up, highlight, copy, cancel); tapping more words extends the selection.
 //! Buttons: *Select text* in the reader's menu, move to a word, confirm for
 //! the bar, where *Extend* moves the end of the selection word by word.
 

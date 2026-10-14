@@ -257,11 +257,15 @@ impl Typography {
         let (top, bottom) = (status::shown(env, true), status::shown(env, false));
         let lines = f32::from(u8::from(top) + u8::from(bottom));
         let width = (f32::from(display.width) - 2.0 * margin).max(1.0);
-        let height = (f32::from(display.height) - 2.0 * margin - lines * status_height).max(1.0);
-        let y = margin + if top { status_height } else { 0.0 };
+        // Text never runs up to a status line, also on pages it fills to
+        // the last pixel.
+        let status_gap = m.mm(2) as f32;
+        let status_room = status_height + status_gap;
+        let height = (f32::from(display.height) - 2.0 * margin - lines * status_room).max(1.0);
+        let y = margin + if top { status_room } else { 0.0 };
         let line = |y: f32| Rect::new(margin as u16, y as u16, width as u16, status_height as u16);
         let top_status = top.then(|| line(margin));
-        let status = bottom.then(|| line(y + height));
+        let status = bottom.then(|| line(y + height + status_gap));
         let hyphenation = (settings.bool(HYPHENATE.as_str())
             && env.hyphenation.get(language).is_some())
         .then(|| language.to_string());
@@ -458,7 +462,9 @@ impl ReaderScreen {
             self.set_selection(Some(to), cx);
             return;
         }
-        if *item == crate::actions::HIGHLIGHT {
+        if *item == crate::actions::COPY {
+            cx.command(Command::SetClipboard(text.clone()));
+        } else if *item == crate::actions::HIGHLIGHT {
             let highlight = |m: &Mark| m.kind == Kind::Highlight && m.overlaps(start, end);
             // On highlighted text the item removes the highlight.
             if !annotations::remove(env.storage, &book.dir, highlight) {

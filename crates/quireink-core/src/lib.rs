@@ -194,6 +194,7 @@ pub struct KernelBuilder {
     user_config: Option<String>,
     glyph_cache: usize,
     network: bool,
+    system_clipboard: bool,
     frame_rows: Option<u16>,
     storage: Option<Box<dyn Storage>>,
     setting_defaults: Vec<(String, String)>,
@@ -268,6 +269,14 @@ impl KernelBuilder {
         self
     }
 
+    /// The shell reads the system's clipboard when plugins ask for its
+    /// text (see [`Kernel::wants_clipboard`]); without, only text copied
+    /// in QuireInk is pasted.
+    pub fn system_clipboard(mut self, available: bool) -> Self {
+        self.system_clipboard = available;
+        self
+    }
+
     /// Memory for glyphs rasterized at runtime (default 32 KiB). Bitmap font
     /// packs do not use it.
     pub fn glyph_cache(mut self, bytes: usize) -> Self {
@@ -303,6 +312,8 @@ impl KernelBuilder {
                 status: SystemStatus::default(),
                 status_items: StatusItems::new(),
                 network: self.network,
+                clipboard: String::new(),
+                system_clipboard: false,
                 storage: self.storage.unwrap_or_else(|| Box::new(NoStorage)),
             },
             pending: None,
@@ -323,6 +334,9 @@ impl KernelBuilder {
             restart: false,
             scope: None,
             requests: Vec::new(),
+            copied: None,
+            clipboard_reads: Vec::new(),
+            reads_clipboard: self.system_clipboard,
             awaiting: Vec::new(),
             next_request: 0,
             plugin_defaults: Vec::new(),
@@ -487,6 +501,14 @@ pub struct Kernel {
     scope: Option<(String, Option<usize>)>,
     /// HTTP requests for the shell to make.
     requests: Vec<HttpCall>,
+    /// Text copied, for the shell to put on the system's clipboard.
+    copied: Option<String>,
+    /// Requests for the clipboard's text, waiting for the shell: reply
+    /// event and parameters.
+    clipboard_reads: Vec<(Id, Params)>,
+    /// The shell reads the system's clipboard (see
+    /// [`KernelBuilder::system_clipboard`]).
+    reads_clipboard: bool,
     /// Requests made and not answered yet: id, reply event, parameters.
     awaiting: Vec<(u32, Id, Params)>,
     next_request: u32,
@@ -518,6 +540,7 @@ impl Kernel {
             user_config: None,
             glyph_cache: DEFAULT_GLYPH_CACHE,
             network: false,
+            system_clipboard: false,
             frame_rows: None,
             storage: None,
             setting_defaults: Vec::new(),
@@ -676,6 +699,48 @@ impl Kernel {
     /// Returns and clears the collected warnings.
     pub fn take_warnings(&mut self) -> Vec<Warning> {
         mem::take(&mut self.warnings)
+    }
+
+    /// Text copied since the last call, for the system's clipboard (see
+    /// [`Command::SetClipboard`]). Check after every kernel call.
+    pub fn take_clipboard(&mut self) -> Option<String> {
+        self.copied.take()
+    }
+
+    /// Tells the kernel whether the system's clipboard has text, e.g. when
+    /// the app comes back from another one (without reading it, which some
+    /// systems announce to the user).
+    pub fn set_clipboard_available(&mut self, available: bool) {
+        self.shared.system_clipboard = available;
+    }
+
+    /// Whether plugins wait for the system clipboard's text: read it and
+    /// pass it to [`Kernel::clipboard_text`]. Check after every kernel
+    /// call.
+    pub fn wants_clipboard(&self) -> bool {
+        !self.clipboard_reads.is_empty()
+    }
+
+    /// The system clipboard's text, for the plugins that asked for it;
+    /// `None` if it could not be read (the text copied here is used).
+    pub fn clipboard_text(&mut self, now: Instant, text: Option<String>) -> Effects {
+        self.now = now;
+        if let Some(text) = text {
+            self.shared.clipboard = clipped(&text);
+        }
+        for (reply, params) in mem::take(&mut self.clipboard_reads) {
+            self.reply_clipboard(reply, params);
+        }
+        self.finish()
+    }
+
+    /// Answers a [`Command::ReadClipboard`] with the text known here.
+    fn reply_clipboard(&mut self, reply: Id, params: Params) {
+        let text = self.shared.clipboard.clone();
+        self.output.commands.push(Command::Emit(
+            reply,
+            params.with(quireink_sdk::builtin::params::TEXT, text),
+        ));
     }
 
     /// Returns the HTTP requests to make; answer each with
@@ -1292,6 +1357,14 @@ impl Kernel {
             Command::RunAction(action) => self.dispatch(action),
             Command::SetPluginEnabled(id, enabled) => self.set_plugin_enabled(&id, enabled),
             Command::Restart => self.restart = true,
+            Command::SetClipboard(text) => {
+                self.shared.clipboard = clipped(&text);
+                self.copied = Some(self.shared.clipboard.clone());
+            }
+            Command::ReadClipboard(reply, params) if self.reads_clipboard => {
+                self.clipboard_reads.push((reply, params));
+            }
+            Command::ReadClipboard(reply, params) => self.reply_clipboard(reply, params),
             Command::Back => {
                 if self.stack.len() > 1 {
                     self.close_above(self.stack.len() - 2);
@@ -1801,6 +1874,11 @@ struct Shared {
     status: SystemStatus,
     status_items: StatusItems,
     network: bool,
+    /// Text copied here.
+    clipboard: String,
+    /// The system's clipboard has text (see
+    /// [`Kernel::set_clipboard_available`]).
+    system_clipboard: bool,
     storage: Box<dyn Storage>,
 }
 
@@ -1821,9 +1899,19 @@ impl Shared {
             status: &self.status,
             status_items: &self.status_items,
             network: self.network,
+            clipboard: self.system_clipboard || !self.clipboard.is_empty(),
             storage: self.storage.as_ref(),
         }
     }
+}
+
+/// `text` cut to what the clipboard holds, at a character boundary.
+fn clipped(text: &str) -> String {
+    let mut end = text.len().min(quireink_sdk::MAX_CLIPBOARD);
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    String::from(&text[..end])
 }
 
 /// Whether this build renders OpenType/TrueType fonts.

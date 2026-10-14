@@ -8,35 +8,58 @@
 //! down) between rows, confirm presses the key, back cancels and a long
 //! press on confirm finishes.
 //!
-//! The letter rows come from the translation key `keyboard.letters` (rows
-//! separated by spaces), so a translation brings its own layout. Bind
-//! another screen to `core.keyboard` for a different keyboard altogether.
+//! - Layouts: the setting *Keyboard layouts* chooses one or more of the
+//!   built-in ones (see [`layouts`]); by default the UI language's, which
+//!   a translation brings under `keyboard.letters`. With several, a key
+//!   with the layout's code (e.g. `DE`) switches between them.
+//! - Accents and other variants: a long press on a letter (with buttons:
+//!   a long press on confirm) shows its variants, e.g. `é è ê ë` for `e`,
+//!   and German quotes on `"`.
+//! - When there is text on the clipboard, *Paste* in the text field
+//!   inserts it (with buttons: up from the first row).
+//!
+//! Bind another screen to `core.keyboard` for a different keyboard
+//! altogether.
 
 #![no_std]
 
 extern crate alloc;
 
+mod choose;
+mod layouts;
+
 use alloc::borrow::Cow;
 use alloc::boxed::Box;
+use alloc::rc::Rc;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
+use core::cell::Cell;
 
-use quireink_sdk::builtin::{actions, params, slots};
+use quireink_sdk::builtin::{actions, groups, params, slots};
 use quireink_sdk::ui::{self, UiStyle};
 use quireink_sdk::{
     Canvas, Color, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Manifest, Params, Plugin,
     Priority, Rect, RefreshMode, RegisterError, Registrar, SDK_VERSION, Screen, ScreenSpec,
-    Version,
+    SettingKind, SettingSpec, SettingValue, Version,
 };
 
 pub const PLUGIN: Id = Id::new_static("keyboard");
 pub const SCREEN: Id = Id::new_static("keyboard.screen");
+/// The layouts to type with: ids separated by commas, in the order the
+/// layout key switches through them.
+pub const LAYOUTS_SETTING: Id = Id::new_static("keyboard.layouts");
+const CHOOSE_SCREEN: Id = Id::new_static("keyboard.choose");
+/// The clipboard's text, asked for by *Paste*.
+const PASTED: Id = Id::new_static("keyboard.pasted");
 
 /// Longest text the keyboard accepts, in characters.
 const MAX_CHARS: usize = 200;
 
 /// The rows of the symbol layer (the last one also gets *Delete*).
 const SYMBOLS: [&str; 3] = ["1234567890", "@#&_-+()/%", "*\"':;!?"];
+
+/// The focus "row" of the *Paste* button in the text field.
+const PASTE_ROW: usize = usize::MAX;
 
 /// The keyboard plugin.
 #[derive(Debug, Default)]
@@ -54,12 +77,32 @@ impl Plugin for Keyboard {
     }
 
     fn register(&self, r: &mut dyn Registrar) -> Result<(), RegisterError> {
+        // The layout in use; the next keyboard opens with it.
+        let current = Rc::new(Cell::new(0usize));
         r.add_screen(ScreenSpec {
             id: SCREEN,
             title: Cow::Borrowed("keyboard.title"),
-            factory: Box::new(|env, params| Box::new(KeyboardScreen::new(env, params))),
+            factory: Box::new(move |env, params| {
+                Box::new(KeyboardScreen::new(env, params, current.clone()))
+            }),
         })?;
         r.bind_slot(slots::KEYBOARD, SCREEN, Priority::DEFAULT)?;
+        r.add_setting(
+            SettingSpec::new(
+                LAYOUTS_SETTING,
+                "keyboard.setting.layouts",
+                SettingKind::List,
+                SettingValue::Text(Cow::Borrowed(layouts::AUTO)),
+            )
+            .group(groups::SYSTEM)
+            .editor(CHOOSE_SCREEN)
+            .description("keyboard.setting.layouts.help"),
+        )?;
+        r.add_screen(ScreenSpec {
+            id: CHOOSE_SCREEN,
+            title: Cow::Borrowed("keyboard.setting.layouts"),
+            factory: Box::new(|env, _| Box::new(choose::ChooseScreen::new(env))),
+        })?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/en.ini")))?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/de.ini")))?;
         Ok(())
@@ -81,23 +124,22 @@ enum Key {
     Delete,
     Space,
     Layer(Layer),
+    /// Switches to the next chosen layout.
+    NextLayout,
     Done,
 }
 
 /// A key and its width in units (a letter is 2).
 type Slot = (Key, u8);
 
-/// The rows of a layer.
-fn rows(env: &Env<'_>, layer: Layer) -> Vec<Vec<Slot>> {
+/// The rows of a layer; `letters` are the rows of the layout, `switch`
+/// adds the key for the next layout.
+fn rows(letters: &str, layer: Layer, switch: bool) -> Vec<Vec<Slot>> {
     let chars = |row: &str| -> Vec<Slot> { row.chars().map(|c| (Key::Char(c), 2)).collect() };
     match layer {
         Layer::Letters | Layer::Symbols => {
             let mut rows: Vec<Vec<Slot>> = if layer == Layer::Letters {
-                env.i18n
-                    .tr("keyboard.letters")
-                    .split_whitespace()
-                    .map(chars)
-                    .collect()
+                letters.split_whitespace().map(chars).collect()
             } else {
                 SYMBOLS.iter().map(|row| chars(row)).collect()
             };
@@ -112,13 +154,18 @@ fn rows(env: &Env<'_>, layer: Layer) -> Vec<Vec<Slot>> {
             } else {
                 Layer::Letters
             };
-            rows.push(alloc::vec![
-                (Key::Layer(other), 3),
+            let mut bottom = alloc::vec![(Key::Layer(other), 3)];
+            if switch && layer == Layer::Letters {
+                bottom.push((Key::NextLayout, 2));
+            }
+            let space = if bottom.len() > 1 { 8 } else { 10 };
+            bottom.extend([
                 (Key::Char(','), 2),
-                (Key::Space, 10),
+                (Key::Space, space),
                 (Key::Char('.'), 2),
                 (Key::Done, 3),
             ]);
+            rows.push(bottom);
             rows
         }
         Layer::Digits => {
@@ -133,12 +180,35 @@ fn rows(env: &Env<'_>, layer: Layer) -> Vec<Vec<Slot>> {
     }
 }
 
+/// The variants of a letter, shown above it.
+struct Popup {
+    chars: Vec<char>,
+    area: Rect,
+    /// The variant chosen with buttons.
+    focus: Option<usize>,
+}
+
+impl Popup {
+    fn key(&self, index: usize) -> Rect {
+        let width = self.area.width / self.chars.len().max(1) as u16;
+        Rect::new(
+            self.area.x + width * index as u16,
+            self.area.y,
+            width,
+            self.area.height,
+        )
+    }
+}
+
 struct KeyboardScreen {
     /// The opening parameters, sent back with the text.
     params: Params,
     title: String,
     text: String,
     layer: Layer,
+    /// The chosen layouts (code, letter rows) and the one in use.
+    layouts: Vec<(String, Cow<'static, str>)>,
+    current: Rc<Cell<usize>>,
     /// Shown as dots (mode `password`).
     password: bool,
     /// The next letter is a capital.
@@ -146,6 +216,9 @@ struct KeyboardScreen {
     rows: Vec<Vec<Slot>>,
     /// The key chosen with buttons, as `(row, index)`; none while tapping.
     focus: Option<(usize, usize)>,
+    /// Where *Paste* is, when there is text on the clipboard.
+    paste: Option<Rect>,
+    popup: Option<Popup>,
     style: UiStyle,
     region: Rect,
     field: Rect,
@@ -154,14 +227,18 @@ struct KeyboardScreen {
 }
 
 impl KeyboardScreen {
-    fn new(env: &Env<'_>, params: &Params) -> Self {
+    fn new(env: &Env<'_>, params: &Params, current: Rc<Cell<usize>>) -> Self {
         let style = UiStyle::new(env);
         let layer = if params.get(params::MODE) == Some("number") {
             Layer::Digits
         } else {
             Layer::Letters
         };
-        let rows = rows(env, layer);
+        let layouts = layouts::chosen(env, env.settings.text(LAYOUTS_SETTING.as_str()));
+        if current.get() >= layouts.len() {
+            current.set(0);
+        }
+        let rows = rows(&layouts[current.get()].1, layer, layouts.len() > 1);
         let display = env.device.display;
         let key_height = style.row as u16;
         let field_height = (style.small * 1.5) as u16 + style.row as u16;
@@ -176,25 +253,70 @@ impl KeyboardScreen {
             display.width,
             keys_height,
         );
-        Self {
+        let mut screen = Self {
             title: params.get(params::TITLE).unwrap_or_default().to_string(),
             text: params.get(params::TEXT).unwrap_or_default().to_string(),
             params: params.clone(),
             password: params.get(params::MODE) == Some("password"),
             layer,
+            layouts,
+            current,
             shift: false,
             rows,
             focus: (!env.device.input.touch).then_some((0, 0)),
+            paste: None,
+            popup: None,
             style,
             region,
             field,
             keys,
             key_height,
-        }
+        };
+        screen.paste = screen.paste_button(env);
+        screen
     }
 
-    /// Where key `index` of row `row` is.
+    /// The box of the text field.
+    fn text_box(&self) -> Rect {
+        let f = self.field;
+        let title_height = (self.style.small * 1.5) as u16;
+        let m = self.style.margin as u16 / 2;
+        Rect::new(
+            f.x + m,
+            f.y + title_height,
+            f.width - self.style.margin as u16,
+            f.height - title_height,
+        )
+    }
+
+    /// *Paste* at the right end of the text field, when there is text on
+    /// the clipboard.
+    fn paste_button(&self, env: &Env<'_>) -> Option<Rect> {
+        let font = self.style.font(env)?;
+        if !env.clipboard {
+            return None;
+        }
+        let b = self.text_box();
+        let label = env.i18n.tr("keyboard.paste");
+        // Room for the label (rounded up) and the button's padding.
+        let label_width = (font.measure(self.style.small, label) + 1.0) as u16;
+        let width = label_width + self.style.gap as u16 * 3;
+        let height = ui::button_height(b);
+        let pad = (b.height - height) / 2;
+        Some(Rect::new(
+            b.x + b.width - width - pad,
+            b.y + pad,
+            width,
+            height,
+        ))
+    }
+
+    /// Where key `index` of row `row` is (the *Paste* button for
+    /// [`PASTE_ROW`]).
     fn key_area(&self, row: usize, index: usize) -> Rect {
+        if row == PASTE_ROW {
+            return self.paste.unwrap_or(self.field);
+        }
         let keys = &self.rows[row];
         let total: u32 = keys.iter().map(|(_, w)| u32::from(*w)).sum::<u32>().max(1);
         let width = u32::from(self.keys.width) - self.style.margin;
@@ -207,6 +329,9 @@ impl KeyboardScreen {
     }
 
     fn key_at(&self, point: quireink_sdk::Point) -> Option<(usize, usize)> {
+        if self.paste.is_some_and(|a| a.contains(point)) {
+            return Some((PASTE_ROW, 0));
+        }
         (0..self.rows.len()).find_map(|row| {
             (0..self.rows[row].len())
                 .find(|&index| self.key_area(row, index).contains(point))
@@ -214,42 +339,49 @@ impl KeyboardScreen {
         })
     }
 
+    /// `c` as typed now: a capital after *Shift* (if it has one capital).
+    fn cased(&self, c: char) -> char {
+        if !self.shift {
+            return c;
+        }
+        let mut upper = c.to_uppercase();
+        match (upper.next(), upper.next()) {
+            (Some(u), None) => u,
+            _ => c,
+        }
+    }
+
     fn label(&self, env: &Env<'_>, key: Key) -> String {
         match key {
-            Key::Char(c) if self.shift => {
-                let mut upper = c.to_uppercase();
-                match (upper.next(), upper.next()) {
-                    (Some(u), None) => u.to_string(),
-                    _ => c.to_string(),
-                }
-            }
-            Key::Char(c) => c.to_string(),
+            Key::Char(c) => self.cased(c).to_string(),
             Key::Layer(Layer::Letters) => env.i18n.tr("keyboard.letters-key").to_string(),
             Key::Layer(_) => env.i18n.tr("keyboard.symbols-key").to_string(),
+            Key::NextLayout => self.layouts[self.current.get()].0.clone(),
             Key::Done => env.i18n.tr("keyboard.done").to_string(),
             Key::Shift | Key::Delete | Key::Space => String::new(),
         }
+    }
+
+    /// Adds text at the end, as far as there is room.
+    fn insert(&mut self, text: &str, cx: &mut Cx<'_, '_>) {
+        let room = MAX_CHARS.saturating_sub(self.text.chars().count());
+        self.text.extend(text.chars().take(room));
+        if self.shift {
+            self.shift = false;
+            self.redraw(cx, self.keys);
+        }
+        self.redraw(cx, self.field);
     }
 
     fn press(&mut self, key: Key, cx: &mut Cx<'_, '_>) {
         let env = *cx.env();
         match key {
             Key::Char(c) => {
-                let label = self.label(&env, key);
-                let typed = if self.shift { label } else { c.to_string() };
-                if self.text.chars().count() < MAX_CHARS {
-                    self.text.push_str(&typed);
-                }
-                if self.shift {
-                    self.shift = false;
-                    self.redraw(cx, self.keys);
-                }
+                let c = self.cased(c);
+                let mut buffer = [0u8; 4];
+                return self.insert(c.encode_utf8(&mut buffer), cx);
             }
-            Key::Space => {
-                if self.text.chars().count() < MAX_CHARS {
-                    self.text.push(' ');
-                }
-            }
+            Key::Space => return self.insert(" ", cx),
             Key::Delete => {
                 self.text.pop();
             }
@@ -259,13 +391,12 @@ impl KeyboardScreen {
             }
             Key::Layer(layer) => {
                 self.layer = layer;
-                self.shift = false;
-                self.rows = rows(&env, layer);
-                if let Some((row, index)) = self.focus {
-                    let row = row.min(self.rows.len() - 1);
-                    self.focus = Some((row, index.min(self.rows[row].len() - 1)));
-                }
-                self.redraw(cx, self.keys);
+                self.rebuild(&env, cx);
+            }
+            Key::NextLayout => {
+                self.current
+                    .set((self.current.get() + 1) % self.layouts.len());
+                self.rebuild(&env, cx);
             }
             Key::Done => {
                 self.finish(cx);
@@ -273,6 +404,68 @@ impl KeyboardScreen {
             }
         }
         self.redraw(cx, self.field);
+    }
+
+    /// The keys again, after the layer or layout changed.
+    fn rebuild(&mut self, env: &Env<'_>, cx: &mut Cx<'_, '_>) {
+        let _ = env;
+        self.shift = false;
+        let letters = self.layouts[self.current.get()].1.clone();
+        self.rows = rows(&letters, self.layer, self.layouts.len() > 1);
+        if let Some((row, index)) = self.focus.filter(|(row, _)| *row != PASTE_ROW) {
+            let row = row.min(self.rows.len() - 1);
+            self.focus = Some((row, index.min(self.rows[row].len() - 1)));
+        }
+        self.redraw(cx, self.keys);
+    }
+
+    /// Asks for the clipboard's text ([`PASTED`] brings it).
+    fn paste(&mut self, cx: &mut Cx<'_, '_>) {
+        cx.command(Command::ReadClipboard(PASTED, Params::new()));
+    }
+
+    /// Inserts pasted text: one line, digits only for numbers.
+    fn pasted(&mut self, text: &str, cx: &mut Cx<'_, '_>) {
+        let line: String = text
+            .chars()
+            .map(|c| if c.is_control() { ' ' } else { c })
+            .filter(|c| self.layer != Layer::Digits || c.is_ascii_digit())
+            .collect();
+        self.insert(line.trim(), cx);
+    }
+
+    /// Shows the variants of the letter at `(row, index)`, if it has any.
+    fn open_variants(&mut self, row: usize, index: usize, cx: &mut Cx<'_, '_>) -> bool {
+        let Some(Key::Char(c)) = self.rows.get(row).and_then(|r| r.get(index)).map(|k| k.0) else {
+            return false;
+        };
+        let Some(variants) = layouts::variants(c) else {
+            return false;
+        };
+        let chars: Vec<char> = variants.chars().map(|v| self.cased(v)).collect();
+        let key = self.key_area(row, index);
+        let margin = self.style.margin as u16 / 2;
+        let room = self.region.width - 2 * margin;
+        let width = (key.width.max(self.key_height) * chars.len() as u16).min(room);
+        let center = key.x + key.width / 2;
+        let x = center
+            .saturating_sub(width / 2)
+            .clamp(margin, self.region.width - margin - width);
+        let y = key.y.saturating_sub(self.key_height).max(self.region.y);
+        let focus = self.focus.map(|_| 0);
+        self.popup = Some(Popup {
+            chars,
+            area: Rect::new(x, y, width, self.key_height),
+            focus,
+        });
+        self.redraw(cx, self.region);
+        true
+    }
+
+    fn close_variants(&mut self, cx: &mut Cx<'_, '_>) {
+        if self.popup.take().is_some() {
+            self.redraw(cx, self.region);
+        }
     }
 
     /// Closes the keyboard and sends the text.
@@ -305,7 +498,20 @@ impl KeyboardScreen {
         };
         let a = action;
         let last_row = self.rows.len() - 1;
-        let to = if *a == actions::LEFT || *a == actions::PREVIOUS {
+        let up = *a == actions::UP || *a == actions::PREV_PAGE;
+        let down = *a == actions::DOWN || *a == actions::NEXT_PAGE;
+        let to = if row == PASTE_ROW {
+            // *Paste* sits above the first row.
+            if down || *a == actions::NEXT {
+                self.nearest(row, index, 0)
+            } else if up {
+                self.nearest(row, index, last_row)
+            } else if [actions::LEFT, actions::RIGHT, actions::PREVIOUS].contains(a) {
+                (row, index)
+            } else {
+                return false;
+            }
+        } else if *a == actions::LEFT || *a == actions::PREVIOUS {
             match index.checked_sub(1) {
                 Some(index) => (row, index),
                 None if *a == actions::PREVIOUS => {
@@ -322,9 +528,13 @@ impl KeyboardScreen {
             } else {
                 (row, 0)
             }
-        } else if *a == actions::UP || *a == actions::PREV_PAGE {
-            self.nearest(row, index, row.checked_sub(1).unwrap_or(last_row))
-        } else if *a == actions::DOWN || *a == actions::NEXT_PAGE {
+        } else if up {
+            match row.checked_sub(1) {
+                Some(above) => self.nearest(row, index, above),
+                None if self.paste.is_some() => (PASTE_ROW, 0),
+                None => self.nearest(row, index, last_row),
+            }
+        } else if down {
             self.nearest(row, index, if row == last_row { 0 } else { row + 1 })
         } else {
             return false;
@@ -343,6 +553,36 @@ impl KeyboardScreen {
             .find(|&i| self.key_area(to, i).right() > center)
             .unwrap_or(self.rows[to].len() - 1);
         (to, at)
+    }
+
+    /// Buttons while the variants are shown.
+    fn on_variants_action(&mut self, action: &Id, cx: &mut Cx<'_, '_>) -> Handled {
+        let Some(popup) = &mut self.popup else {
+            return Handled::No;
+        };
+        let last = popup.chars.len() - 1;
+        let focus = popup.focus.unwrap_or(0);
+        let a = action;
+        let to = if [actions::LEFT, actions::PREVIOUS, actions::UP].contains(a) {
+            focus.saturating_sub(1)
+        } else if [actions::RIGHT, actions::NEXT, actions::DOWN].contains(a) {
+            (focus + 1).min(last)
+        } else if *a == actions::CONFIRM {
+            let c = popup.chars[focus];
+            self.close_variants(cx);
+            let mut buffer = [0u8; 4];
+            self.insert(c.encode_utf8(&mut buffer), cx);
+            return Handled::Yes;
+        } else if *a == actions::BACK || *a == actions::MENU {
+            self.close_variants(cx);
+            return Handled::Yes;
+        } else {
+            return Handled::Yes;
+        };
+        popup.focus = Some(to);
+        let area = popup.area;
+        self.redraw(cx, area);
+        Handled::Yes
     }
 
     fn draw_field(&self, canvas: &mut Canvas<'_>, env: &Env<'_>) {
@@ -369,13 +609,7 @@ impl KeyboardScreen {
             &title,
             Color::gray(90),
         );
-        let m = style.margin / 2;
-        let box_area = Rect::new(
-            f.x + m as u16,
-            f.y + title_height,
-            f.width - style.margin as u16,
-            f.height - title_height,
-        );
+        let box_area = self.text_box();
         canvas.stroke_rect(
             i32::from(box_area.x),
             i32::from(box_area.y),
@@ -390,7 +624,10 @@ impl KeyboardScreen {
         } else {
             self.text.clone()
         };
-        let room = f32::from(box_area.width) - margin * 1.5;
+        let paste_width = self
+            .paste
+            .map_or(0.0, |area| f32::from(area.width) + margin);
+        let room = f32::from(box_area.width) - margin * 1.5 - paste_width;
         let mut start = 0;
         while font.measure(style.text, &text[start..]) > room {
             start += text[start..].chars().next().map_or(1, char::len_utf8);
@@ -407,6 +644,11 @@ impl KeyboardScreen {
             cursor,
             Color::BLACK,
         );
+        if let Some(area) = self.paste {
+            let focused = self.focus == Some((PASTE_ROW, 0));
+            let label = env.i18n.tr("keyboard.paste");
+            ui::draw_button(canvas, env, &style, area, label, false, focused);
+        }
     }
 
     fn draw_key(&self, canvas: &mut Canvas<'_>, env: &Env<'_>, row: usize, index: usize) {
@@ -446,6 +688,44 @@ impl KeyboardScreen {
                 canvas.fill_rect(cx + w / 2 - t, cy, t as u32, (size / 3 + t) as u32, ink);
             }
             _ => {}
+        }
+    }
+
+    fn draw_variants(&self, canvas: &mut Canvas<'_>, env: &Env<'_>) {
+        let Some(popup) = &self.popup else {
+            return;
+        };
+        let style = self.style;
+        let a = popup.area;
+        let border = (style.line * 2).max(2);
+        let out = border as u16 * 2;
+        let frame = Rect::new(
+            a.x.saturating_sub(out),
+            a.y.saturating_sub(out),
+            a.width + 2 * out,
+            a.height + 2 * out,
+        );
+        ui::fill(canvas, frame, Color::WHITE);
+        canvas.stroke_rect(
+            i32::from(frame.x),
+            i32::from(frame.y),
+            u32::from(frame.width),
+            u32::from(frame.height),
+            border,
+            Color::BLACK,
+        );
+        for (index, c) in popup.chars.iter().enumerate() {
+            let key = popup.key(index);
+            let h = ui::button_height(key);
+            let pad = ui::button_border(&style) as u16 * 3;
+            let r = Rect::new(
+                key.x + pad,
+                key.y + (key.height - h) / 2,
+                key.width.saturating_sub(2 * pad),
+                h,
+            );
+            let focused = popup.focus == Some(index);
+            ui::draw_button(canvas, env, &style, r, &c.to_string(), false, focused);
         }
     }
 }
@@ -494,11 +774,16 @@ impl Screen for KeyboardScreen {
                 }
             }
         }
+        self.draw_variants(canvas, env);
     }
 
     fn on_action(&mut self, action: &Id, cx: &mut Cx<'_, '_>) -> Handled {
+        if self.popup.is_some() {
+            return self.on_variants_action(action, cx);
+        }
         if *action == actions::CONFIRM {
             match self.focus {
+                Some((PASTE_ROW, _)) => self.paste(cx),
                 Some((row, index)) => self.press(self.rows[row][index].0, cx),
                 None => {
                     self.move_focus(action, cx);
@@ -507,7 +792,13 @@ impl Screen for KeyboardScreen {
             return Handled::Yes;
         }
         if *action == actions::MENU {
-            self.finish(cx);
+            // A long press on confirm: the variants of a letter, else done.
+            let opened = self
+                .focus
+                .is_some_and(|(row, index)| self.open_variants(row, index, cx));
+            if !opened {
+                self.finish(cx);
+            }
             return Handled::Yes;
         }
         if *action == actions::BACK {
@@ -521,24 +812,45 @@ impl Screen for KeyboardScreen {
         }
     }
 
+    fn on_event(&mut self, event: &Id, params: &Params, cx: &mut Cx<'_, '_>) {
+        if *event == PASTED {
+            self.pasted(params.get(params::TEXT).unwrap_or_default(), cx);
+        }
+    }
+
     fn on_gesture(&mut self, gesture: Gesture, cx: &mut Cx<'_, '_>) -> Handled {
         if !self.region.contains(gesture.start) {
             return Handled::No;
         }
-        let key = self.key_at(gesture.start);
-        match (gesture.kind, key) {
-            (GestureKind::Tap, Some((row, index))) => {
-                if let Some((r, i)) = self.focus.take() {
-                    self.redraw(cx, self.key_area(r, i));
-                }
-                self.press(self.rows[row][index].0, cx);
+        if let Some(popup) = &self.popup {
+            // A variant, or anywhere else to close them.
+            let chosen = (0..popup.chars.len())
+                .find(|&i| popup.key(i).contains(gesture.start))
+                .map(|i| popup.chars[i]);
+            self.close_variants(cx);
+            if let Some(c) = chosen.filter(|_| gesture.kind == GestureKind::Tap) {
+                let mut buffer = [0u8; 4];
+                self.insert(c.encode_utf8(&mut buffer), cx);
             }
+            return Handled::Yes;
+        }
+        let key = self.key_at(gesture.start);
+        if let Some((r, i)) = self.focus.take() {
+            self.redraw(cx, self.key_area(r, i));
+        }
+        match (gesture.kind, key) {
+            (GestureKind::Tap, Some((PASTE_ROW, _))) => self.paste(cx),
+            (GestureKind::Tap, Some((row, index))) => self.press(self.rows[row][index].0, cx),
             // A long press on *Delete* clears the text.
             (GestureKind::LongPress, Some((row, index)))
-                if self.rows[row][index].0 == Key::Delete =>
+                if row != PASTE_ROW && self.rows[row][index].0 == Key::Delete =>
             {
                 self.text.clear();
                 self.redraw(cx, self.field);
+            }
+            // A long press on a letter shows its variants.
+            (GestureKind::LongPress, Some((row, index))) if row != PASTE_ROW => {
+                self.open_variants(row, index, cx);
             }
             _ => {}
         }
@@ -550,11 +862,34 @@ impl Screen for KeyboardScreen {
 mod tests {
     use quireink_i18n::{Catalog, check};
 
+    use super::*;
+
     #[test]
     fn translations_are_complete() {
         let en = Catalog::parse(include_str!("../i18n/en.ini")).unwrap();
         let de = Catalog::parse(include_str!("../i18n/de.ini")).unwrap();
         let issues = check::compare(&en, &de);
         assert!(issues.is_empty(), "{issues:?}");
+    }
+
+    #[test]
+    fn several_layouts_get_a_key_to_switch() {
+        let letters = "abc def ghi";
+        let one = rows(letters, Layer::Letters, false);
+        let two = rows(letters, Layer::Letters, true);
+        let has = |rows: &Vec<Vec<Slot>>| rows.iter().flatten().any(|(k, _)| *k == Key::NextLayout);
+        assert!(!has(&one));
+        assert!(has(&two));
+        // Rows add up to the same width with or without it.
+        let width = |rows: &Vec<Vec<Slot>>| -> u32 {
+            rows.last()
+                .unwrap()
+                .iter()
+                .map(|(_, w)| u32::from(*w))
+                .sum()
+        };
+        assert_eq!(width(&one), width(&two));
+        // Not on the symbols.
+        assert!(!has(&rows(letters, Layer::Symbols, true)));
     }
 }
