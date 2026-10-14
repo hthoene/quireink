@@ -56,6 +56,16 @@ pub mod slots {
     /// [`LANGUAGE`](super::params::LANGUAGE). The standard dictionary
     /// binds here; translators or encyclopedias can too.
     pub const LOOKUP: Id = Id::new_static("core.lookup");
+    /// Asks for text (usually an overlay with an on-screen keyboard).
+    /// Parameters: [`TITLE`](super::params::TITLE) (shown above the
+    /// field, already translated), [`TEXT`](super::params::TEXT) (the
+    /// initial text), [`MODE`](super::params::MODE) and
+    /// [`REPLY`](super::params::REPLY). When the text is confirmed the
+    /// screen closes and emits the event named by `reply` with all of its
+    /// parameters, `text` set to what was entered — so the asking plugin
+    /// can pass along anything it needs to know (e.g. which setting). Bind
+    /// another screen here for a different keyboard, handwriting or voice.
+    pub const KEYBOARD: Id = Id::new_static("core.keyboard");
 }
 
 /// Standard menus. Plugins add entries with
@@ -79,8 +89,15 @@ pub mod params {
     pub const MENU: &str = "menu";
     /// An id, e.g. of the setting in `core.setting-changed`.
     pub const ID: &str = "id";
-    /// A book's title.
+    /// A title, e.g. of a book or of what a keyboard asks for.
     pub const TITLE: &str = "title";
+    /// Text, e.g. entered on the keyboard.
+    pub const TEXT: &str = "text";
+    /// What kind of text a keyboard asks for: `text` (the default) or
+    /// `number`.
+    pub const MODE: &str = "mode";
+    /// The event a screen emits with its result, e.g. the keyboard's text.
+    pub const REPLY: &str = "reply";
     /// Reading progress in percent, e.g. `12.5`.
     pub const PROGRESS: &str = "progress";
     /// A word, e.g. to look up.

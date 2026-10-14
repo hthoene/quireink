@@ -31,6 +31,7 @@ members = [
     "plugins/settings",
     "plugins/home",
     "plugins/hyphenation",
+    "plugins/keyboard",
     "shells/desktop",
     "shells/android",
     "tools/fontgen",
@@ -65,6 +66,7 @@ quireink-fs = { path = "crates/quireink-fs", version = "0.1.0" }
 quireink-plugin-diagnostics = { path = "plugins/diagnostics", version = "0.1.0" }
 quireink-plugin-dictionary = { path = "plugins/dictionary", version = "0.1.0" }
 quireink-plugin-menu = { path = "plugins/menu", version = "0.1.0" }
+quireink-plugin-keyboard = { path = "plugins/keyboard", version = "0.1.0" }
 quireink-plugin-plugin-manager = { path = "plugins/plugin-manager", version = "0.1.0" }
 quireink-plugin-hyphenation = { path = "plugins/hyphenation", version = "0.1.0" }
 quireink-plugin-home = { path = "plugins/home", version = "0.1.0" }

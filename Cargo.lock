@@ -1191,6 +1191,7 @@ dependencies = [
  "quireink-plugin-format-txt",
  "quireink-plugin-home",
  "quireink-plugin-hyphenation",
+ "quireink-plugin-keyboard",
  "quireink-plugin-menu",
  "quireink-plugin-plugin-manager",
  "quireink-plugin-reader",
@@ -1350,6 +1351,14 @@ name = "quireink-plugin-hyphenation"
 version = "0.1.0"
 dependencies = [
  "quireink-hyphen",
+ "quireink-i18n",
+ "quireink-sdk",
+]
+
+[[package]]
+name = "quireink-plugin-keyboard"
+version = "0.1.0"
+dependencies = [
  "quireink-i18n",
  "quireink-sdk",
 ]
