@@ -7,8 +7,8 @@ use quireink_sdk::builtin::{actions, events, fonts, params, slots};
 use quireink_sdk::document::{Document, DocumentError, Locator};
 use quireink_sdk::layout::{Face, Hyphenate, Page, PageImage, Style, Typesetter, layout_page};
 use quireink_sdk::{
-    Arg, Canvas, Color, Command, Cx, Env, FontHandle, Gesture, GestureKind, Handled, Id, Params,
-    Point, Rect, RefreshMode, Screen,
+    Arg, Canvas, Color, Command, Cx, Env, FontHandle, FontSet, Gesture, GestureKind, Handled, Id,
+    Params, Point, Rect, RefreshMode, Screen,
 };
 
 use crate::annotations::{self, Annotation, Kind, Mark};
@@ -30,10 +30,69 @@ const HISTORY: usize = 64;
 /// Relative sizes of headings 1 to 6.
 const HEADING_SCALE: [f32; 6] = [1.6, 1.4, 1.2, 1.1, 1.0, 1.0];
 
+/// Glyphs of a book's embedded fonts kept at most.
+const EMBEDDED_CACHE: usize = 256 * 1024;
+/// Largest total size of a book's embedded fonts loaded.
+const EMBEDDED_LIMIT: usize = 8 * 1024 * 1024;
+
+/// The fonts a book embeds, loaded with the book.
+struct Embedded {
+    set: FontSet,
+    /// Family, bold, italic and index in `set` of each font.
+    faces: Vec<(u8, bool, bool, usize)>,
+}
+
+impl Embedded {
+    /// The book's fonts, if the reader uses them and they render here.
+    fn load(env: &Env<'_>, document: &dyn Document) -> Option<Embedded> {
+        if !quireink_sdk::text::OUTLINES
+            || !env.settings.bool(crate::settings::EMBEDDED_FONTS.as_str())
+        {
+            return None;
+        }
+        let fonts = document.fonts(env.storage);
+        if fonts.is_empty() {
+            return None;
+        }
+        let mut set = FontSet::new(EMBEDDED_CACHE);
+        let mut faces = Vec::new();
+        let mut total = 0;
+        for (index, font) in fonts.iter().enumerate() {
+            let Ok(data) = document.font_data(env.storage, index) else {
+                continue;
+            };
+            total += data.len();
+            if total > EMBEDDED_LIMIT {
+                break;
+            }
+            let Ok(loaded) = quireink_sdk::Font::from_data(data, &[]) else {
+                continue;
+            };
+            let id = Id::parse(&format!("reader.book-font-{index}")).ok()?;
+            let at = set.add(id, loaded);
+            faces.push((font.family, font.bold, font.italic, at));
+        }
+        (!faces.is_empty()).then_some(Embedded { set, faces })
+    }
+
+    /// The face of `family` closest to `bold` and `italic`.
+    fn face(&self, family: u8, bold: bool, italic: bool) -> Option<FontHandle<'_>> {
+        let of_family = || self.faces.iter().filter(|f| f.0 == family);
+        let exact = of_family().find(|f| f.1 == bold && f.2 == italic);
+        let regular = || of_family().find(|f| !f.1 && !f.2);
+        exact
+            .or_else(regular)
+            .or_else(|| of_family().next())
+            .and_then(|f| self.set.get(f.3))
+    }
+}
+
 /// The reading fonts by face, for layout and drawing.
 struct Faces<'a> {
     /// Regular, bold, italic and bold italic.
     fonts: [FontHandle<'a>; 4],
+    /// The book's own fonts.
+    embedded: Option<&'a Embedded>,
     size: f32,
     ascent: f32,
     line_height: f32,
@@ -43,7 +102,7 @@ impl<'a> Faces<'a> {
     /// The reading faces; missing ones fall back to the nearest face, and
     /// a font the user chose for book text is not mixed with the default
     /// bold or italic faces.
-    fn new(env: &Env<'a>, t: &Typography) -> Option<Self> {
+    fn new(env: &Env<'a>, t: &Typography, embedded: Option<&'a Embedded>) -> Option<Self> {
         let fonts_ = env.fonts;
         let regular = fonts_.role(fonts::READING.as_str())?;
         let custom = fonts_.user_bound(fonts::READING.as_str());
@@ -59,14 +118,24 @@ impl<'a> Faces<'a> {
         let bold_italic = face(&fonts::READING_BOLD_ITALIC).unwrap_or(bold);
         Some(Self {
             fonts: [regular, bold, italic, bold_italic],
+            embedded,
             size: t.size,
             ascent: t.ascent,
             line_height: t.line_height,
         })
     }
 
-    fn font(&self, face: Face) -> &FontHandle<'a> {
-        &self.fonts[usize::from(face.style.bits() & 3)]
+    /// The book's font for text in an embedded family, else the reader's.
+    fn font(&self, face: Face) -> FontHandle<'a> {
+        let style = face.style;
+        if style.family() != 0
+            && let Some(font) = self
+                .embedded
+                .and_then(|e| e.face(style.family(), style.bold(), style.italic()))
+        {
+            return font;
+        }
+        self.fonts[usize::from(style.bits() & 3)]
     }
 
     fn size(&self, face: Face) -> f32 {
@@ -150,7 +219,7 @@ impl Typography {
         let key = format!(
             "{:016x}",
             fnv(&format!(
-                "{}|{}|{}|{}|{size}|{line_height}|{}|{}|{justify}|{width}x{height}|{}|{}",
+                "{}|{}|{}|{}|{size}|{line_height}|{}|{}|{justify}|{width}x{height}|{}|{}|{}",
                 font.id(),
                 face_id(env, &fonts::READING_BOLD),
                 face_id(env, &fonts::READING_ITALIC),
@@ -159,6 +228,9 @@ impl Typography {
                 style.paragraph_spacing,
                 hyphenation.as_deref().unwrap_or("-"),
                 settings.bool(crate::settings::PUBLISHER_STYLES.as_str()),
+                // Missing where embedded fonts do not render: always off.
+                quireink_sdk::text::OUTLINES
+                    && settings.bool(crate::settings::EMBEDDED_FONTS.as_str()),
             ))
         );
         Self {
@@ -200,6 +272,8 @@ struct Book {
     /// The chapter of the page, for status lines: where it starts, where
     /// the next one starts and its title (empty before the first).
     chapter: Option<(Locator, Option<Locator>, String)>,
+    /// The book's own fonts, if used.
+    embedded: Option<Embedded>,
 }
 
 /// A word on the page, with its box on the screen and its place in the
@@ -596,7 +670,9 @@ impl Book {
             marks,
             found: None,
             chapter: None,
+            embedded: None,
         };
+        book.embedded = Embedded::load(env, book.document.as_ref());
         let start = book.saved_position(env).unwrap_or(Locator::START);
         book.page = match book.layout(env, start).map_err(error)? {
             page if page.is_past_end() && start != Locator::START => {
@@ -647,7 +723,7 @@ impl Book {
 
     fn layout(&self, env: &Env<'_>, at: Locator) -> Result<Page, DocumentError> {
         let t = &self.typography;
-        let Some(faces) = Faces::new(env, t) else {
+        let Some(faces) = Faces::new(env, t, self.embedded.as_ref()) else {
             return Ok(Page::default());
         };
         let patterns = t
@@ -812,7 +888,7 @@ impl Book {
 
     fn draw_page(&self, canvas: &mut Canvas<'_>, env: &Env<'_>) {
         let t = &self.typography;
-        let Some(faces) = Faces::new(env, t) else {
+        let Some(faces) = Faces::new(env, t, self.embedded.as_ref()) else {
             return;
         };
         let clip = canvas.clip();
@@ -851,7 +927,7 @@ impl Book {
     /// order, measured as they are drawn.
     fn words(&self, env: &Env<'_>) -> Vec<WordBox> {
         let t = &self.typography;
-        let Some(faces) = Faces::new(env, t) else {
+        let Some(faces) = Faces::new(env, t, self.embedded.as_ref()) else {
             return Vec::new();
         };
         let mut words: Vec<WordBox> = Vec::new();
@@ -1328,7 +1404,11 @@ impl Screen for ReaderScreen {
             return;
         };
         let id = params.get(params::ID).unwrap_or_default();
-        if *event == events::SETTING_CHANGED && id == crate::settings::PUBLISHER_STYLES.as_str() {
+        let reopen = [
+            crate::settings::PUBLISHER_STYLES,
+            crate::settings::EMBEDDED_FONTS,
+        ];
+        if *event == events::SETTING_CHANGED && reopen.iter().any(|r| r.as_str() == id) {
             // Another conversion of the book: open it again where it was.
             let env = *cx.env();
             let path = book.path.clone();

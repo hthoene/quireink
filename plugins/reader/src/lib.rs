@@ -92,6 +92,8 @@ pub mod settings {
     pub const HYPHENATE: Id = Id::new_static("reader.hyphenate");
     /// Apply the book's own styles (an EPUB's CSS).
     pub const PUBLISHER_STYLES: Id = Id::new_static("reader.publisher-styles");
+    /// Use the fonts a book embeds (only where scalable fonts render).
+    pub const EMBEDDED_FONTS: Id = Id::new_static("reader.embedded-fonts");
     /// A tap on the top right corner sets or removes a bookmark.
     pub const CORNER_BOOKMARK: Id = Id::new_static("reader.corner-bookmark");
 }
@@ -271,6 +273,23 @@ impl Plugin for Reader {
             .description("reader.setting.corner-bookmark.help"),
         ] {
             r.add_setting(setting)?;
+        }
+
+        // Embedded fonts need scalable font rendering.
+        if quireink_sdk::text::OUTLINES {
+            r.add_setting(
+                flag(
+                    settings::EMBEDDED_FONTS,
+                    "reader.setting.embedded-fonts",
+                    true,
+                )
+                .description("reader.setting.embedded-fonts.help"),
+            )?;
+            r.add_menu_entry(quireink_sdk::MenuEntry {
+                menu: LAYOUT_MENU,
+                item: settings::EMBEDDED_FONTS,
+                order: 65,
+            })?;
         }
 
         let font_step = |step: i64| -> quireink_sdk::ActionHandler {

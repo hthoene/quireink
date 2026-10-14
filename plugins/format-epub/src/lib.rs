@@ -19,6 +19,7 @@ extern crate alloc;
 mod convert;
 mod css;
 mod document;
+mod obfuscation;
 mod package;
 
 use alloc::borrow::Cow;
@@ -145,6 +146,66 @@ mod tests {
             )
             .build();
         MemoryStorage::new().with("books/test.epub", zip)
+    }
+
+    #[test]
+    fn embedded_fonts_are_listed_used_and_revealed() {
+        let opf = OPF
+            .replace(
+                "<package xmlns=\"http://www.idpf.org/2007/opf\" version=\"3.0\">",
+                "<package xmlns=\"http://www.idpf.org/2007/opf\" version=\"3.0\" unique-identifier=\"uid\">",
+            )
+            .replace(
+                "<dc:language>de</dc:language>",
+                "<dc:language>de</dc:language><dc:identifier id=\"uid\">urn:isbn:123</dc:identifier>",
+            );
+        let font: Vec<u8> = (0..1500).map(|i| (i % 253) as u8).collect();
+        let mut hidden = font.clone();
+        obfuscation::reveal(&mut hidden, obfuscation::Method::Idpf, "urn:isbn:123");
+        let encryption = r#"<encryption xmlns="urn:oasis:names:tc:opendocument:xmlns:container"
+            xmlns:enc="http://www.w3.org/2001/04/xmlenc#"><enc:EncryptedData>
+            <enc:EncryptionMethod Algorithm="http://www.idpf.org/2008/embedding"/>
+            <enc:CipherData><enc:CipherReference URI="OEBPS/fonts/Fancy.ttf"/></enc:CipherData>
+            </enc:EncryptedData></encryption>"#;
+        let zip = ZipBuilder::new()
+            .stored("mimetype", "application/epub+zip")
+            .deflated("META-INF/container.xml", CONTAINER)
+            .deflated("META-INF/encryption.xml", encryption)
+            .deflated("OEBPS/content.opf", opf.as_str())
+            .deflated("OEBPS/nav.xhtml", NAV)
+            .deflated("OEBPS/text/ch1.xhtml", CH1)
+            .deflated(
+                "OEBPS/text/ch 2.xhtml",
+                "<html><body><p class=\"fancy\">Schmuck <b>fett</b></p><p>Normal</p></body></html>",
+            )
+            .stored("OEBPS/fonts/Fancy.ttf", &hidden[..])
+            .deflated(
+                "OEBPS/style.css",
+                "@font-face { font-family: Fancy; src: url(fonts/Fancy.ttf) } .fancy { font-family: Fancy }",
+            )
+            .build();
+        let storage = MemoryStorage::new().with("books/test.epub", zip);
+        let doc = EpubDocument::open(&storage, "books/test.epub").unwrap();
+        let fonts = doc.fonts(&storage);
+        assert_eq!(fonts.len(), 1);
+        assert_eq!(
+            (fonts[0].family, fonts[0].bold, fonts[0].italic),
+            (1, false, false)
+        );
+        assert_eq!(doc.font_data(&storage, 0).unwrap(), font);
+        let fancy = doc.block_at(&storage, Locator::new(1, 0)).unwrap().unwrap();
+        assert_eq!(fancy.style_at(0).family(), 1);
+        // Bold inside keeps the family.
+        let bold = fancy.text.find("fett").unwrap();
+        assert_eq!(fancy.style_at(bold), TextStyle::BOLD.with_family(1));
+        let plain = doc
+            .block_at(&storage, Locator::new(1, fancy.end))
+            .unwrap()
+            .unwrap();
+        assert_eq!(plain.style_at(0).family(), 0);
+        // Without the book's styles there are no embedded fonts either.
+        let plain_doc = EpubDocument::open_with(&storage, "books/test.epub", false).unwrap();
+        assert!(plain_doc.fonts(&storage).is_empty());
     }
 
     fn blocks(

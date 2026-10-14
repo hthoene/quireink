@@ -222,8 +222,7 @@ impl Fonts {
 
     /// A font by id, if loaded.
     pub fn get(&self, id: &str) -> Option<FontHandle<'_>> {
-        self.index_of(id)
-            .map(|index| FontHandle { fonts: self, index })
+        self.index_of(id).map(|index| self.handle(index))
     }
 
     /// The chosen family's face for a reading role: `None` if no family
@@ -244,7 +243,7 @@ impl Fonts {
                 && e.bold == bold
                 && e.italic == italic
         });
-        Some(index.map(|index| FontHandle { fonts: self, index }))
+        Some(index.map(|index| self.handle(index)))
     }
 
     fn proposed(&self, role: &str) -> Option<FontHandle<'_>> {
@@ -263,7 +262,7 @@ impl Fonts {
             self.entries
                 .iter()
                 .position(|e| e.font.is_some())
-                .map(|index| FontHandle { fonts: self, index })
+                .map(|index| self.handle(index))
         };
         user.or_else(|| self.family_face(role).flatten())
             .or_else(|| self.proposed(role))
@@ -292,6 +291,18 @@ impl Fonts {
         self.cache.borrow().bytes()
     }
 
+    /// A handle of loaded entry `index`.
+    fn handle(&self, index: usize) -> FontHandle<'_> {
+        let entry = &self.entries[index];
+        FontHandle {
+            id: &entry.id,
+            // Handles are made for loaded fonts only.
+            font: entry.font.as_ref().unwrap_or_else(|| unreachable!()),
+            cache: &self.cache,
+            index: index as u16,
+        }
+    }
+
     fn index_of(&self, id: &str) -> Option<usize> {
         self.entries
             .iter()
@@ -317,11 +328,68 @@ fn read_font(storage: &dyn Storage, path: &str) -> Option<Font> {
     Font::from_data(data, &[]).ok()
 }
 
+/// Fonts a plugin loads itself, e.g. the fonts embedded in a book, with
+/// a glyph cache of their own; freed when the set is dropped.
+pub struct FontSet {
+    fonts: Vec<(Id, Font)>,
+    cache: RefCell<GlyphCache>,
+}
+
+impl fmt::Debug for FontSet {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("FontSet")
+            .field(
+                "fonts",
+                &self.fonts.iter().map(|(id, _)| id).collect::<Vec<_>>(),
+            )
+            .finish_non_exhaustive()
+    }
+}
+
+impl FontSet {
+    /// `cache_bytes` bounds the memory for the set's glyphs.
+    pub fn new(cache_bytes: usize) -> Self {
+        Self {
+            fonts: Vec::new(),
+            cache: RefCell::new(GlyphCache::new(cache_bytes)),
+        }
+    }
+
+    /// Adds a font; returns its index.
+    pub fn add(&mut self, id: Id, font: Font) -> usize {
+        self.fonts.push((id, font));
+        self.fonts.len() - 1
+    }
+
+    pub fn len(&self) -> usize {
+        self.fonts.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.fonts.is_empty()
+    }
+
+    /// Font `index`, ready to measure and draw.
+    pub fn get(&self, index: usize) -> Option<FontHandle<'_>> {
+        let (id, font) = self.fonts.get(index)?;
+        Some(FontHandle {
+            id,
+            font,
+            cache: &self.cache,
+            index: index as u16,
+        })
+    }
+}
+
 /// A font ready to measure and draw text.
 #[derive(Clone, Copy)]
 pub struct FontHandle<'a> {
-    fonts: &'a Fonts,
-    index: usize,
+    id: &'a Id,
+    font: &'a Font,
+    /// The glyph cache of the registry or set the font is in.
+    cache: &'a RefCell<GlyphCache>,
+    /// The font's number in that cache.
+    index: u16,
 }
 
 impl fmt::Debug for FontHandle<'_> {
@@ -332,15 +400,11 @@ impl fmt::Debug for FontHandle<'_> {
 
 impl<'a> FontHandle<'a> {
     pub fn id(&self) -> &'a Id {
-        &self.fonts.entries[self.index].id
+        self.id
     }
 
     fn font(&self) -> &'a Font {
-        // Handles exist only for loaded fonts.
-        match &self.fonts.entries[self.index].font {
-            Some(font) => font,
-            None => unreachable!("font handle of an unloaded font"),
-        }
+        self.font
     }
 
     /// Ascent, descent and line height at `size` pixels.
@@ -374,11 +438,11 @@ impl<'a> FontHandle<'a> {
         text: &str,
         color: Color,
     ) -> f32 {
-        let mut cache = self.fonts.cache.borrow_mut();
+        let mut cache = self.cache.borrow_mut();
         quireink_text::draw_text(
             canvas,
             &mut cache,
-            self.index as u16,
+            self.index,
             self.font(),
             size,
             x,

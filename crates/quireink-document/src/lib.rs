@@ -76,9 +76,13 @@ pub struct ImageRef {
     pub height: u32,
 }
 
-/// The character style of a run of text.
+/// The character style of a run of text: bold, italic and the font
+/// family embedded in the document, if any (see [`Document::fonts`]).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TextStyle(u8);
+
+/// Most embedded font families a document can use.
+pub const MAX_FAMILIES: u8 = 63;
 
 impl TextStyle {
     pub const REGULAR: TextStyle = TextStyle(0);
@@ -94,9 +98,27 @@ impl TextStyle {
         self.0 & 2 != 0
     }
 
-    /// Both styles combined, e.g. bold text in an italic paragraph.
+    /// The embedded font family (1 to [`MAX_FAMILIES`]); 0 for the
+    /// reader's font.
+    pub const fn family(self) -> u8 {
+        self.0 >> 2
+    }
+
+    /// This style in embedded family `family` (0: the reader's font).
+    pub const fn with_family(self, family: u8) -> TextStyle {
+        let family = if family > MAX_FAMILIES { 0 } else { family };
+        TextStyle((self.0 & 3) | (family << 2))
+    }
+
+    /// Both styles combined, e.g. bold text in an italic paragraph; the
+    /// family is `other`'s if it has one.
     pub const fn union(self, other: TextStyle) -> TextStyle {
-        TextStyle(self.0 | other.0)
+        let family = if other.family() != 0 {
+            other.family()
+        } else {
+            self.family()
+        };
+        TextStyle((self.0 | other.0) & 3).with_family(family)
     }
 
     /// For storing styles compactly.
@@ -105,7 +127,7 @@ impl TextStyle {
     }
 
     pub const fn from_bits(bits: u8) -> TextStyle {
-        TextStyle(bits & 3)
+        TextStyle(bits)
     }
 }
 
@@ -300,6 +322,15 @@ impl From<StorageError> for DocumentError {
     }
 }
 
+/// A font embedded in a document, e.g. with CSS `@font-face` in an EPUB.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EmbeddedFont {
+    /// The family, as in [`TextStyle::family`].
+    pub family: u8,
+    pub bold: bool,
+    pub italic: bool,
+}
+
 /// An entry of a document's table of contents.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TocEntry {
@@ -353,6 +384,20 @@ pub trait Document {
     fn cover(&self, storage: &dyn Storage) -> Result<Option<ImageRef>, DocumentError> {
         let _ = storage;
         Ok(None)
+    }
+
+    /// The fonts the document embeds; text in their families carries the
+    /// family in its [`TextStyle`].
+    fn fonts(&self, storage: &dyn Storage) -> Vec<EmbeddedFont> {
+        let _ = storage;
+        Vec::new()
+    }
+
+    /// The data (an OpenType/TrueType file) of embedded font `index` of
+    /// [`Document::fonts`].
+    fn font_data(&self, storage: &dyn Storage, index: usize) -> Result<Vec<u8>, DocumentError> {
+        let _ = (storage, index);
+        Err(DocumentError::Malformed(Cow::Borrowed("no embedded fonts")))
     }
 
     /// Reading progress of `at` from 0.0 to 1.0.

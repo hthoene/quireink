@@ -100,7 +100,7 @@ struct Frame {
 fn element_props(
     tag: &str,
     attrs: &quireink_sdk::xml::Attrs<'_>,
-    rules: &Rules,
+    rules: &mut Rules,
     styles: bool,
 ) -> Props {
     let mut props = Props::default();
@@ -116,12 +116,12 @@ fn element_props(
         props.align = parse_align(&value).or(props.align);
     }
     if styles && let Some(css) = attrs.get("style") {
-        props.apply(&Props::parse(&css));
+        props.apply(&rules.parse_style(&css));
     }
     props
 }
 
-/// `style` with bold and italic as `props` sets them.
+/// `style` with bold, italic and the font family as `props` sets them.
 fn styled(style: TextStyle, props: &Props) -> TextStyle {
     let mut bits = style.bits();
     for (flag, on) in [
@@ -134,7 +134,11 @@ fn styled(style: TextStyle, props: &Props) -> TextStyle {
             None => {}
         }
     }
-    TextStyle::from_bits(bits)
+    let style = TextStyle::from_bits(bits);
+    match props.family {
+        Some(family) => style.with_family(family),
+        None => style,
+    }
 }
 
 struct Converter<'a> {
@@ -257,7 +261,7 @@ impl Converter<'_> {
         let _ = self_closing;
         let tag = local_name(name).to_ascii_lowercase();
         let props = if self.hidden == 0 {
-            element_props(&tag, &attrs, &self.rules, self.styles)
+            element_props(&tag, &attrs, &mut self.rules, self.styles)
         } else {
             Props::default()
         };
@@ -569,7 +573,7 @@ pub(crate) fn convert(
         stack: Vec::new(),
         rules,
         styles,
-        css: css::Parser::default(),
+        css: css::Parser::new(&base),
         base,
         images: Vec::new(),
         kind: BlockKind::Paragraph,

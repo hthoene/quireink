@@ -1,10 +1,11 @@
+use alloc::borrow::Cow;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::cell::Cell;
 
 use quireink_sdk::document::{
-    Align, Block, BlockKind, Document, DocumentError, ImageRef, Locator, Metadata, OffsetMap, Run,
-    TextStyle, TocEntry,
+    Align, Block, BlockKind, Document, DocumentError, EmbeddedFont, ImageRef, Locator, Metadata,
+    OffsetMap, Run, TextStyle, TocEntry,
 };
 use quireink_sdk::image::GrayFile;
 use quireink_sdk::zip::ZipArchive;
@@ -12,7 +13,11 @@ use quireink_sdk::{Env, Storage, StorageError};
 
 use crate::PLUGIN;
 use crate::convert::{self, CachePaths, HEADER};
+use crate::obfuscation;
 use crate::package::{self, Chapter};
+
+/// Largest embedded font read.
+const MAX_FONT: u64 = 16 * 1024 * 1024;
 
 /// Marks a chapter whose converted length is not known yet.
 const UNKNOWN: u32 = u32::MAX;
@@ -304,6 +309,45 @@ impl Document for EpubDocument {
 
     /// Estimated from the chapters' sizes in the archive, so it needs no
     /// conversion of unread chapters.
+    fn fonts(&self, storage: &dyn Storage) -> Vec<EmbeddedFont> {
+        if !self.styles {
+            return Vec::new();
+        }
+        package::fonts(storage, &self.cache)
+            .1
+            .into_iter()
+            .map(|f| EmbeddedFont {
+                family: f.family,
+                bold: f.bold,
+                italic: f.italic,
+            })
+            .collect()
+    }
+
+    fn font_data(&self, storage: &dyn Storage, index: usize) -> Result<Vec<u8>, DocumentError> {
+        let (identifier, fonts) = package::fonts(storage, &self.cache);
+        let font = fonts
+            .get(index)
+            .ok_or(DocumentError::Malformed(Cow::Borrowed("no such font")))?;
+        let entry = self
+            .archive
+            .entry(storage, &font.path)
+            .map_err(package::error)?
+            .ok_or(DocumentError::Malformed(Cow::Borrowed("font file missing")))?;
+        if u64::from(entry.size) > MAX_FONT {
+            return Err(DocumentError::OutOfMemory);
+        }
+        let mut data = Vec::with_capacity(entry.size as usize);
+        self.archive
+            .stream(storage, &entry, &mut |chunk| {
+                data.extend_from_slice(chunk);
+                true
+            })
+            .map_err(package::error)?;
+        obfuscation::reveal(&mut data, font.method, &identifier);
+        Ok(data)
+    }
+
     fn progress(&self, at: Locator) -> f32 {
         let total: u64 = self.spine.iter().map(|c| u64::from(c.size)).sum();
         if total == 0 {

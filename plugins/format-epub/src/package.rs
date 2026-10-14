@@ -11,6 +11,8 @@
 //!   length u16, title length u16, fragment, title); `toc.idx` holds the
 //!   offset of each record as u32.
 //! - `styles.txt`: the rules of all the book's stylesheets (see `css`).
+//! - `fonts.txt`: the embedded fonts: first `id<TAB>identifier`, then per
+//!   font `family<TAB>bold<TAB>italic<TAB>obfuscation<TAB>path`.
 //! - `package.ini`: cache version, book size, metadata and counts. Written
 //!   last, so its presence marks a complete package cache.
 
@@ -25,9 +27,10 @@ use quireink_sdk::xml::{Token, Tokenizer, decode, local_name};
 use quireink_sdk::zip::ZipArchive;
 
 use crate::css;
+use crate::obfuscation::Method;
 
 /// Bump when the cache format or the conversion changes.
-pub(crate) const CACHE_VERSION: u32 = 8;
+pub(crate) const CACHE_VERSION: u32 = 9;
 
 /// A chapter: where it is in the archive and its uncompressed size.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -219,6 +222,95 @@ pub(crate) fn load(storage: &dyn Storage, cache: &str, book_size: u64) -> Option
     })
 }
 
+/// Writes `fonts.txt`: the fonts the stylesheets embed and how
+/// `META-INF/encryption.xml` says they are obfuscated.
+fn write_fonts(
+    storage: &dyn Storage,
+    archive: &ZipArchive,
+    cache: &str,
+    faces: &[css::FontFace],
+    identifier: &str,
+) -> Result<(), DocumentError> {
+    let mut methods: Vec<(String, Method)> = Vec::new();
+    if !faces.is_empty() {
+        let mut method = Method::None;
+        // A missing encryption.xml is fine: nothing is obfuscated.
+        let _ = tokenize(storage, archive, "META-INF/encryption.xml", &mut |token| {
+            if let Token::Start { name, attrs, .. } = token {
+                match local_name(name) {
+                    "EncryptionMethod" => {
+                        method =
+                            Method::from_algorithm(&attrs.get("Algorithm").unwrap_or_default());
+                    }
+                    "CipherReference" => {
+                        if let Some(uri) = attrs.get("URI") {
+                            methods.push((resolve("", &uri).0, method));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        });
+    }
+    let mut out = alloc::format!("id\t{}\n", identifier.replace(['\t', '\n'], " "));
+    for face in faces {
+        let method = methods
+            .iter()
+            .find(|(p, _)| *p == face.path)
+            .map_or(Method::None, |(_, m)| *m);
+        out.push_str(&alloc::format!(
+            "{}\t{}\t{}\t{}\t{}\n",
+            face.family,
+            u8::from(face.bold),
+            u8::from(face.italic),
+            method.code(),
+            face.path
+        ));
+    }
+    storage.write(&path(cache, "fonts.txt"), out.as_bytes())?;
+    Ok(())
+}
+
+/// An embedded font as listed in `fonts.txt`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FontEntry {
+    pub family: u8,
+    pub bold: bool,
+    pub italic: bool,
+    pub method: Method,
+    pub path: String,
+}
+
+/// The book's identifier and embedded fonts from the cache.
+pub(crate) fn fonts(storage: &dyn Storage, cache: &str) -> (String, Vec<FontEntry>) {
+    let Ok(data) = quireink_sdk::read_file(storage, &path(cache, "fonts.txt"), 64 * 1024) else {
+        return (String::new(), Vec::new());
+    };
+    let text = String::from_utf8_lossy(&data);
+    let mut identifier = String::new();
+    let mut entries = Vec::new();
+    for line in text.lines() {
+        let fields: Vec<&str> = line.split('\t').collect();
+        match fields.as_slice() {
+            ["id", id] => identifier = String::from(*id),
+            [family, bold, italic, method, path] => {
+                let Ok(family) = family.parse() else {
+                    continue;
+                };
+                entries.push(FontEntry {
+                    family,
+                    bold: *bold == "1",
+                    italic: *italic == "1",
+                    method: Method::from_code(method.parse().unwrap_or(0)),
+                    path: String::from(*path),
+                });
+            }
+            _ => {}
+        }
+    }
+    (identifier, entries)
+}
+
 /// The book's stylesheet rules from the cache.
 pub(crate) fn styles(storage: &dyn Storage, cache: &str) -> css::Rules {
     quireink_sdk::read_file(storage, &path(cache, "styles.txt"), 64 * 1024)
@@ -391,12 +483,26 @@ pub(crate) fn build(
     let mut cover_id: Option<u64> = None;
     let mut capture: Option<&'static str> = None;
     let mut text = String::new();
+    // The unique identifier, the key of obfuscated fonts.
+    let mut unique_id: Option<String> = None;
+    let mut identifier = String::new();
     tokenize(storage, archive, &opf_path, &mut |token| match token {
         Token::Start {
             name,
             attrs,
             self_closing,
         } => match local_name(name) {
+            "package" => unique_id = attrs.get("unique-identifier").map(|v| v.into_owned()),
+            "identifier"
+                if !self_closing
+                    && identifier.is_empty()
+                    && attrs
+                        .get("id")
+                        .is_some_and(|id| unique_id.as_deref() == Some(&*id)) =>
+            {
+                capture = Some("identifier");
+                text.clear();
+            }
             "title" | "creator" | "language" if !self_closing => {
                 capture = match local_name(name) {
                     "title" => Some("title"),
@@ -432,6 +538,7 @@ pub(crate) fn build(
                     "language" if metadata.language.is_none() && !value.is_empty() => {
                         metadata.language = Some(value);
                     }
+                    "identifier" => identifier = value,
                     _ => {}
                 }
                 capture = None;
@@ -553,7 +660,7 @@ pub(crate) fn build(
     // Stylesheets, one at a time; a damaged one is skipped.
     let mut rules = css::Rules::default();
     for path in &stylesheets {
-        let mut parser = css::Parser::default();
+        let mut parser = css::Parser::new(dir_of(path));
         let Ok(Some(entry)) = archive.entry(storage, path) else {
             continue;
         };
@@ -573,6 +680,7 @@ pub(crate) fn build(
         });
     }
     storage.write(&path(cache, "styles.txt"), rules.encode().as_bytes())?;
+    write_fonts(storage, archive, cache, &rules.faces, &identifier)?;
     drop(rules);
 
     let mut ini = String::new();
