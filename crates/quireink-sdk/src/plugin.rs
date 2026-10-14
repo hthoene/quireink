@@ -125,6 +125,16 @@ pub trait Registrar {
 
     /// Adds a translation catalog (see `quireink-i18n`).
     fn add_translations(&mut self, source: Cow<'static, str>) -> Result<(), RegisterError>;
+
+    /// Changes the default of any plugin's setting, written as in
+    /// `quireink.ini` (e.g. a theme's text size). Device defaults and the
+    /// user's choice still win; unknown settings are reported once all
+    /// plugins are registered.
+    fn set_setting_default(
+        &mut self,
+        setting: Id,
+        value: Cow<'static, str>,
+    ) -> Result<(), RegisterError>;
 }
 
 /// Why a contribution was rejected.

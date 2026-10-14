@@ -146,6 +146,10 @@ pub mod keymap_presets {
 /// in the UI are written back to it; comments and order are preserved.
 pub const CONFIG_FILE: &str = "quireink.ini";
 
+/// The folder with data plugins (one subfolder each) on the storage,
+/// unless the shell names others.
+pub const PLUGIN_DIR: &str = "plugins";
+
 /// Font roles.
 /// Groups of the generated settings screen; plugins can add their own.
 pub mod groups {

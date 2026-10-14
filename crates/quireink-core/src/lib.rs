@@ -38,6 +38,7 @@
 extern crate alloc;
 
 mod core_plugin;
+mod data_plugin;
 mod input;
 mod keymap;
 mod refresh;
@@ -193,6 +194,7 @@ pub struct KernelBuilder {
     frame_rows: Option<u16>,
     storage: Option<Box<dyn Storage>>,
     setting_defaults: Vec<(String, String)>,
+    plugin_dirs: Vec<String>,
 }
 
 impl fmt::Debug for KernelBuilder {
@@ -237,6 +239,13 @@ impl KernelBuilder {
     pub fn setting_default(mut self, id: &str, value: &str) -> Self {
         self.setting_defaults
             .push((String::from(id), String::from(value)));
+        self
+    }
+
+    /// A folder on the storage with data plugins (see `data_plugin`), one
+    /// subfolder each. Without any, `plugins` is used.
+    pub fn plugin_dir(mut self, dir: impl Into<String>) -> Self {
+        self.plugin_dirs.push(dir.into());
         self
     }
 
@@ -289,6 +298,7 @@ impl KernelBuilder {
             output: Output::default(),
             warnings: Vec::new(),
             restart: false,
+            plugin_defaults: Vec::new(),
             now: Instant::default(),
         };
 
@@ -301,11 +311,25 @@ impl KernelBuilder {
         let disabled: Vec<String> = configs.iter().flat_map(|c| disabled_plugins(c)).collect();
         let core: Box<dyn Plugin> = Box::new(CorePlugin);
         for plugin in core::iter::once(core).chain(self.plugins) {
-            let manifest = plugin.manifest();
-            if manifest.id != CORE && disabled.iter().any(|id| id == manifest.id.as_str()) {
-                kernel.register_off(plugin.as_ref(), manifest);
-            } else {
-                kernel.register_plugin(plugin.as_ref(), manifest);
+            kernel.add_plugin(plugin.as_ref(), &disabled);
+        }
+        // Data plugins from the storage, after the built-in ones.
+        let dirs = if self.plugin_dirs.is_empty() {
+            alloc::vec![String::from(quireink_sdk::builtin::PLUGIN_DIR)]
+        } else {
+            self.plugin_dirs
+        };
+        for dir in &dirs {
+            let mut problems = Vec::new();
+            let found =
+                data_plugin::discover(kernel.shared.storage.as_ref(), dir, &mut |problem| {
+                    problems.push(problem);
+                });
+            for problem in problems {
+                kernel.warn(WarningSource::Runtime, None, problem);
+            }
+            for plugin in found {
+                kernel.add_plugin(&plugin, &disabled);
             }
         }
         kernel.find_required_plugins();
@@ -332,6 +356,20 @@ impl KernelBuilder {
             .shared
             .settings
             .set_choices(core_settings::KEYMAP_PRESET.as_str(), presets);
+        // Defaults from plugins (e.g. themes), then the device's.
+        for (plugin, id, value) in mem::take(&mut kernel.plugin_defaults) {
+            if let Err(error) = kernel
+                .shared
+                .settings
+                .set_default_from_text(id.as_str(), &value)
+            {
+                kernel.warn(
+                    WarningSource::Plugin(plugin),
+                    None,
+                    format!("default for `{id}`: {error}"),
+                );
+            }
+        }
         for (id, value) in &self.setting_defaults {
             if let Err(error) = kernel.shared.settings.set_default_from_text(id, value) {
                 kernel.warn(
@@ -395,6 +433,9 @@ pub struct Kernel {
     warnings: Vec<Warning>,
     /// A restart was requested (see [`Command::Restart`]).
     restart: bool,
+    /// Setting defaults from plugins, applied once all are registered:
+    /// `(plugin, setting, value)`.
+    plugin_defaults: Vec<(Id, Id, Cow<'static, str>)>,
     now: Instant,
 }
 
@@ -422,6 +463,7 @@ impl Kernel {
             frame_rows: None,
             storage: None,
             setting_defaults: Vec::new(),
+            plugin_dirs: Vec::new(),
         }
     }
 
@@ -554,6 +596,16 @@ impl Kernel {
 
     // ---- Registration -------------------------------------------------
 
+    /// Registers `plugin`, or only lists it if the user switched it off.
+    fn add_plugin(&mut self, plugin: &dyn Plugin, disabled: &[String]) {
+        let manifest = plugin.manifest();
+        if manifest.id != CORE && disabled.iter().any(|id| id == manifest.id.as_str()) {
+            self.register_off(plugin, manifest);
+        } else {
+            self.register_plugin(plugin, manifest);
+        }
+    }
+
     fn register_plugin(&mut self, plugin: &dyn Plugin, manifest: Manifest) {
         let id = manifest.id.clone();
         let source = || WarningSource::Plugin(id.clone());
@@ -576,7 +628,7 @@ impl Kernel {
         let mut staging = Staging::default();
         let result = plugin
             .register(&mut PluginRegistrar::new(id.clone(), &mut staging))
-            .and_then(|()| self.merge(staging));
+            .and_then(|()| self.merge(&id, staging));
         match result {
             Ok(()) => self.add_plugin_info(manifest, PluginState::Running, true),
             Err(error) => {
@@ -679,7 +731,7 @@ impl Kernel {
     }
 
     /// Merges a plugin's contributions — all of them or none.
-    fn merge(&mut self, mut staging: Staging) -> Result<(), RegisterError> {
+    fn merge(&mut self, plugin: &Id, mut staging: Staging) -> Result<(), RegisterError> {
         for setting in &staging.settings {
             if self.shared.settings.get(setting.id.as_str()).is_some() {
                 return Err(RegisterError::Duplicate {
@@ -754,6 +806,12 @@ impl Kernel {
             let _ = self.shared.hyphenation.add(spec);
         }
         self.subscriptions.append(&mut staging.subscriptions);
+        self.plugin_defaults.extend(
+            staging
+                .setting_defaults
+                .drain(..)
+                .map(|(id, value)| (plugin.clone(), id, value)),
+        );
         for entry in staging.menu_entries.drain(..) {
             self.shared.menus.add(entry);
         }

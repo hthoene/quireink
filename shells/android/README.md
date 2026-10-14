@@ -40,6 +40,8 @@ USB debugging*.
   library is `Android/data/io.github.hthoene.quireink/files/books` with the
   sample books. `quireink.ini` and all caches stay in
   `Android/data/io.github.hthoene.quireink/files`.
+- **Plugins without code:** copy plugin folders into `QuireInk/plugins` on
+  the device's storage (created once access is allowed) and restart.
 - **Touch:** tap the left or right side to turn pages, the middle for the
   menu, or swipe. Long-press for more options.
 - **Buttons:** page keys and volume keys turn pages; Back goes back.

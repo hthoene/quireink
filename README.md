@@ -59,6 +59,26 @@ through the [`quireink-sdk`](crates/quireink-sdk) crate. See
 [docs/PLANNING.md §7](docs/PLANNING.md#7-extensibility) for the full
 extension model.
 
+### Plugins without code
+
+A folder with a few text files is a plugin too. Copy it into the `plugins`
+folder of the device (on Android: `QuireInk/plugins` on the device's
+storage) and restart; it shows up in *Settings → Plugins*, where it can be
+switched off again. These work on every device, including the Xteink X4.
+
+```text
+plugins/large-print/
+  plugin.ini     [plugin] id, name, description, version
+  i18n/*.ini     translations, also whole new languages
+  keymap.ini     key bindings, as in quireink.ini
+  settings.ini   new defaults for any setting, e.g. [reader] font-size = 14
+```
+
+[`samples/plugins/large-print`](samples/plugins/large-print) is a complete
+example. Plugins with code are Rust crates using the SDK; they are built
+into the app (a web firmware builder for the X4 is planned) or, on larger
+devices, will be loadable as WebAssembly.
+
 ## Try it in the emulator
 
 You need a recent stable [Rust toolchain](https://rustup.rs). The required

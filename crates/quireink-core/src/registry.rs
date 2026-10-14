@@ -93,6 +93,7 @@ pub(crate) struct Staging {
     pub(crate) subscriptions: Vec<(Id, EventHandler)>,
     pub(crate) menu_entries: Vec<MenuEntry>,
     pub(crate) keymap_presets: Vec<(Id, Cow<'static, str>)>,
+    pub(crate) setting_defaults: Vec<(Id, Cow<'static, str>)>,
 }
 
 impl Staging {
@@ -261,6 +262,15 @@ impl Registrar for PluginRegistrar<'_> {
         Self::check_unique(self.staging.keymap_presets.iter().map(|(i, _)| i), &id)?;
         validate_keymap(&source)?;
         self.staging.keymap_presets.push((id, source));
+        Ok(())
+    }
+
+    fn set_setting_default(
+        &mut self,
+        setting: Id,
+        value: Cow<'static, str>,
+    ) -> Result<(), RegisterError> {
+        self.staging.setting_defaults.push((setting, value));
         Ok(())
     }
 

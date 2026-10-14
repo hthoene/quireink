@@ -861,6 +861,71 @@ a = off
 }
 
 #[test]
+fn data_plugins_load_from_storage() {
+    use quireink_sdk::PluginState::{Off, Running};
+
+    let files = |config: &str| {
+        quireink_sdk::MemoryStorage::new()
+            .with(
+                "plugins/large/plugin.ini",
+                "[plugin]
+name = Large print
+description = Bigger text.
+",
+            )
+            .with(
+                "plugins/large/settings.ini",
+                "[core]
+ui-size = 14
+night-mode = on
+",
+            )
+            .with(
+                "plugins/large/i18n/de.ini",
+                "[meta]
+language = de
+name = Deutsch
+plural = one-other
+
+[messages]
+large.plugin.name = Großdruck
+",
+            )
+            .with("quireink.ini", config)
+    };
+
+    // Its defaults apply; the user's own choice wins.
+    let kernel = Kernel::builder(DEVICE)
+        .storage(files(
+            "[core]
+night-mode = off
+",
+        ))
+        .build()
+        .unwrap();
+    let large = kernel.plugins().get("large").unwrap();
+    assert_eq!(large.state, Running);
+    assert_eq!(large.manifest.name, "Large print");
+    assert_eq!(kernel.settings().int("core.ui-size"), 14);
+    assert!(!kernel.settings().bool("core.night-mode"));
+
+    // Switched off: listed with its translated name, no defaults.
+    let mut kernel = Kernel::builder(DEVICE)
+        .storage(files(
+            "[plugins]
+large = off
+",
+        ))
+        .build()
+        .unwrap();
+    kernel.shared.translator.set_language("de");
+    let large = kernel.plugins().get("large").unwrap();
+    assert_eq!(large.state, Off);
+    assert_eq!(large.name(&kernel.shared.translator), "Großdruck");
+    assert_ne!(kernel.settings().int("core.ui-size"), 14);
+}
+
+#[test]
 fn keymap_presets_follow_device_defaults_and_switch_at_runtime() {
     let log = log();
     let mut kernel = Kernel::builder(DEVICE)

@@ -23,6 +23,8 @@ use crate::{access, keys, pixels};
 
 /// Where the device's shared storage appears in QuireInk's storage.
 const SHARED: &str = "storage";
+/// Data plugins on the shared storage, where users can copy them.
+const PLUGINS: &str = "QuireInk/plugins";
 
 /// The running app once the window size is known.
 struct Running {
@@ -195,18 +197,25 @@ fn start_kernel(app: &AndroidApp, window: &NativeWindow, now: Instant) -> Option
     let shared = access::granted(app)
         .then(|| access::storage_dir(app))
         .flatten()
-        .and_then(|dir| match DirStorage::new(&dir) {
-            Ok(shared) => Some(shared),
-            Err(e) => {
-                log::warn!("{}: {e}", dir.display());
-                None
+        .and_then(|dir| {
+            // Data plugins are copied there, next to the books.
+            if let Err(e) = std::fs::create_dir_all(dir.join(PLUGINS)) {
+                log::warn!("{}: {e}", dir.join(PLUGINS).display());
+            }
+            match DirStorage::new(&dir) {
+                Ok(shared) => Some(shared),
+                Err(e) => {
+                    log::warn!("{}: {e}", dir.display());
+                    None
+                }
             }
         });
     let shared_storage = shared.is_some();
-    let mut builder = Kernel::builder(device);
+    let mut builder = Kernel::builder(device).plugin_dir("plugins");
     builder = match shared {
         Some(shared) => builder
             .storage(Mounted::new(storage, SHARED, shared))
+            .plugin_dir(format!("{SHARED}/{PLUGINS}"))
             .setting_default("files.root", &format!("{SHARED}/Books")),
         None => builder.storage(storage),
     };

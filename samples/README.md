@@ -14,3 +14,9 @@ Both books are in the public domain and come unchanged from
 |------|------|--------|
 | `library/books/alice-in-wonderland.txt` | Lewis Carroll, *Alice's Adventures in Wonderland* (English) | [eBook #11](https://www.gutenberg.org/ebooks/11) |
 | `library/books/die-verwandlung.txt` | Franz Kafka, *Die Verwandlung* (German) | [eBook #22367](https://www.gutenberg.org/ebooks/22367) |
+
+## Plugins
+
+`plugins/large-print` is a data plugin: larger text in books and menus,
+with its name translated to German. To try it, copy it into
+`library/plugins/` (or the `plugins` folder of a device) and restart.

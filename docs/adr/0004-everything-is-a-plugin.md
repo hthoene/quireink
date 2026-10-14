@@ -30,6 +30,12 @@ ahead of what plugins can do.
 - Plugins are compiled in (all tiers) or, later, loaded as sandboxed
   WebAssembly modules (larger devices). Declarative contributions (key maps,
   translations, layouts, themes) are data and work on every tier.
+- **Data plugins** are folders on the storage (`plugins/<id>/` by default;
+  shells may add folders): a `plugin.ini` manifest, translation catalogs in
+  `i18n/`, a `keymap.ini` and a `settings.ini` with new setting defaults
+  (`Registrar::set_setting_default`). The kernel turns each into an
+  ordinary plugin after the built-in ones, so they are listed, switched
+  and replaced like any other. Files are read once at start-up.
 
 ### Switching plugins on and off
 
