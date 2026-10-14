@@ -63,7 +63,25 @@ impl UiStyle {
     pub fn font<'a>(&self, env: &Env<'a>) -> Option<FontHandle<'a>> {
         env.fonts.role(fonts::UI.as_str())
     }
+
+    /// Height of a row with a note: the title line, then up to
+    /// [`NOTE_LINES`] lines of small text (see [`draw_noted_row`]).
+    pub fn noted_row(&self) -> u32 {
+        let notes = (NOTE_LINES as f32 * self.small * NOTE_LINE_HEIGHT) as u32;
+        self.title_band() + notes + self.gap * 3 / 2
+    }
+
+    /// Height of the title line of a noted row.
+    fn title_band(&self) -> u32 {
+        self.row * 3 / 4
+    }
 }
+
+/// Lines of a row's note, e.g. a setting's description.
+pub const NOTE_LINES: usize = 2;
+
+/// Line height of notes, relative to the small text size.
+const NOTE_LINE_HEIGHT: f32 = 1.3;
 
 /// Draws `text` vertically centred in `area`, starting at `x`.
 pub fn draw_label(
@@ -79,50 +97,6 @@ pub fn draw_label(
     let baseline = i32::from(area.y)
         + ((f32::from(area.height) + metrics.ascent - metrics.descent) / 2.0) as i32;
     font.draw(canvas, size, x, baseline, text, color)
-}
-
-/// Small gray text wrapped below a list, at most `lines` lines, e.g. the
-/// description of the focused item. `top` is the y of the first line box.
-pub fn draw_footer(
-    canvas: &mut Canvas<'_>,
-    env: &Env<'_>,
-    style: &UiStyle,
-    top: f32,
-    lines: u32,
-    text: &str,
-) {
-    let Some(font) = style.font(env) else {
-        return;
-    };
-    let margin = style.margin as f32;
-    let width = f32::from(env.device.display.width) - 2.0 * margin;
-    let line = style.small * 1.5;
-    for (n, range) in font
-        .wrap(style.small, text, width)
-        .into_iter()
-        .take(lines as usize)
-        .enumerate()
-    {
-        let baseline = top + line * (n as f32 + 0.8);
-        font.draw(
-            canvas,
-            style.small,
-            margin,
-            baseline as i32,
-            &text[range],
-            Color::gray(80),
-        );
-    }
-}
-
-/// The height of [`draw_footer`] with `lines` lines, including the gap
-/// above it.
-pub fn footer_height(style: &UiStyle, lines: u32) -> u16 {
-    if lines == 0 {
-        0
-    } else {
-        (lines as f32 * style.small * 1.5) as u16 + style.gap as u16
-    }
 }
 
 /// A black header bar with a title and an optional right-aligned note.
@@ -343,6 +317,80 @@ impl ListView {
 }
 
 // ---- Settings as rows --------------------------------------------------
+
+/// The part of a noted row (see [`UiStyle::noted_row`]) that holds the
+/// title and the value, or a stepper; the note goes below it.
+pub fn title_area(style: &UiStyle, rect: Rect) -> Rect {
+    let band = (style.title_band() as u16).min(rect.height);
+    Rect::new(rect.x, rect.y + style.gap as u16 / 2, rect.width, band)
+}
+
+/// Draws a row with `title` and `value` on its first line and `note` in
+/// small text below, wrapped to [`NOTE_LINES`] lines and shortened with
+/// "…" if longer. Rows are always fully readable before they are tapped,
+/// so a description never needs a tap that would change a setting.
+/// Without a note, the row looks like [`draw_value_row`].
+#[allow(clippy::too_many_arguments)]
+pub fn draw_noted_row(
+    canvas: &mut Canvas<'_>,
+    env: &Env<'_>,
+    style: &UiStyle,
+    rect: Rect,
+    focused: bool,
+    title: &str,
+    value: &str,
+    note: &str,
+) {
+    if note.is_empty() {
+        return draw_value_row(canvas, env, style, rect, focused, title, value);
+    }
+    let band = title_area(style, rect);
+    draw_value_row(canvas, env, style, band, focused, title, value);
+    draw_note(canvas, env, style, rect, focused, note);
+}
+
+/// Draws the note of a noted row below its [`title_area`].
+pub fn draw_note(
+    canvas: &mut Canvas<'_>,
+    env: &Env<'_>,
+    style: &UiStyle,
+    rect: Rect,
+    focused: bool,
+    note: &str,
+) {
+    let Some(font) = style.font(env) else {
+        return;
+    };
+    let band = title_area(style, rect);
+    let margin = style.margin as f32;
+    let width = f32::from(rect.width) - 2.0 * margin;
+    let color = if focused {
+        Color::gray(215)
+    } else {
+        Color::gray(80)
+    };
+    let line = style.small * NOTE_LINE_HEIGHT;
+    let ascent = font.line_metrics(style.small).ascent;
+    let top = f32::from(band.y + band.height);
+    let lines = font.wrap(style.small, note, width);
+    for (n, range) in lines.iter().take(NOTE_LINES).enumerate() {
+        let last = n + 1 == NOTE_LINES && lines.len() > NOTE_LINES;
+        let text = if last {
+            fit(&font, style.small, note[range.start..].trim_end(), width)
+        } else {
+            note[range.clone()].to_string()
+        };
+        let baseline = top + line * n as f32 + ascent;
+        font.draw(
+            canvas,
+            style.small,
+            f32::from(rect.x) + margin,
+            baseline as i32,
+            &text,
+            color,
+        );
+    }
+}
 
 /// Draws a row: `title` on the left, `value` right-aligned.
 #[allow(clippy::too_many_arguments)]

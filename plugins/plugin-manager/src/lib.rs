@@ -3,12 +3,13 @@
 //!
 //! - Each row shows a plugin and its state: *On*, *Off*, *Always on* (the
 //!   kernel), *Required* (it alone provides e.g. the settings or the menu,
-//!   so switching it off would leave no way back) or *Error*.
+//!   so switching it off would leave no way back; once another plugin
+//!   provides them too, it can be switched off) or *Error*.
 //! - Confirming or tapping a row switches the plugin. The choice is saved
 //!   to `quireink.ini` (`[plugins] id = off`) and applies after a restart;
 //!   a *Restart now* row appears at the top until then.
-//! - Below the list: the focused plugin's description, version and what
-//!   happens to it.
+//! - Below each name: what happens to the plugin (if anything), its
+//!   description and version, readable without tapping it.
 //!
 //! The manager is itself a plugin and reached from the main settings page
 //! (`core.settings-pages`); another plugin can replace it.
@@ -36,9 +37,6 @@ pub const PLUGIN: Id = Id::new_static("plugin-manager");
 pub const SCREEN: Id = Id::new_static("plugin-manager.list");
 /// Opens [`SCREEN`].
 pub const OPEN: Id = Id::new_static("plugin-manager.open");
-
-/// Lines of text below the list.
-const FOOTER_LINES: u32 = 4;
 
 /// The plugin manager plugin.
 #[derive(Debug, Default)]
@@ -102,11 +100,9 @@ impl PluginList {
         let display = env.device.display;
         let header = Rect::new(0, 0, display.width, style.header as u16);
         let top = header.height + style.gap as u16;
-        let height = display
-            .height
-            .saturating_sub(top)
-            .saturating_sub(ui::footer_height(&style, FOOTER_LINES));
-        let list = ListView::new(Rect::new(0, top, display.width, height), style.row);
+        let height = display.height.saturating_sub(top);
+        let area = Rect::new(0, top, display.width, height);
+        let list = ListView::new(area, style.noted_row());
         let mut plugins: Vec<&PluginInfo> = env.plugins.iter().collect();
         plugins.sort_by_key(|p| {
             (
@@ -192,8 +188,8 @@ fn state(info: &PluginInfo) -> &'static str {
     }
 }
 
-/// The text below the list for a plugin: description, version and what
-/// happens to it.
+/// The note below a plugin's name: what happens to it, its description
+/// and version.
 fn details(env: &Env<'_>, info: &PluginInfo) -> String {
     let i18n = env.i18n;
     let version = i18n.format(
@@ -228,12 +224,11 @@ fn details(env: &Env<'_>, info: &PluginInfo) -> String {
     } else {
         None
     };
-    let mut text = format!("{} {version}", info.description(i18n));
-    if let Some(note) = note {
-        text.push(' ');
-        text.push_str(&note);
+    let description = info.description(i18n);
+    match note {
+        Some(note) => format!("{note} {description} {version}"),
+        None => format!("{description} {version}"),
     }
-    text
 }
 
 /// Translation key of a standard slot's name.
@@ -251,7 +246,6 @@ fn slot_key(slot: &Id) -> &'static str {
 
 fn moved(change: ListChange, cx: &mut Cx<'_, '_>) {
     if change != ListChange::None {
-        // The footer follows the focus.
         cx.request_redraw();
         cx.request_refresh(if change == ListChange::Page {
             RefreshMode::Partial
@@ -292,23 +286,16 @@ impl Screen for PluginList {
                 Some(info) => {
                     let value = env.i18n.tr(state(info));
                     let name = info.name(env.i18n);
-                    ui::draw_value_row(canvas, env, &style, rect, focused, name, value);
+                    let note = details(env, info);
+                    ui::draw_noted_row(canvas, env, &style, rect, focused, name, value, &note);
                 }
                 None => {
                     let title = env.i18n.tr("plugin-manager.restart");
-                    ui::draw_value_row(canvas, env, &style, rect, focused, title, "›");
+                    let note = env.i18n.tr("plugin-manager.restart.help");
+                    ui::draw_noted_row(canvas, env, &style, rect, focused, title, "›", note);
                 }
             },
         );
-        let text = match rows.get(self.list.focus) {
-            Some(row) => match Self::info(env, row) {
-                Some(info) => details(env, info),
-                None => env.i18n.tr("plugin-manager.restart.help").to_string(),
-            },
-            None => return,
-        };
-        let top = f32::from(self.list.area.y) + f32::from(self.list.area.height);
-        ui::draw_footer(canvas, env, &style, top, FOOTER_LINES, &text);
     }
 
     fn on_action(&mut self, action: &Id, cx: &mut Cx<'_, '_>) -> Handled {

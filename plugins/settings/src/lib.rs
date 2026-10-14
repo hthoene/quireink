@@ -4,8 +4,9 @@
 //! - The main page lists the setting groups, pages other plugins add to
 //!   the `core.settings-pages` menu (e.g. the plugin manager), and a
 //!   switch for advanced settings.
-//! - A group page lists its settings with their values and units; the
-//!   focused setting's description is shown below the list.
+//! - A group page lists its settings with their values and units, each
+//!   with its description below it, so nothing has to be tapped (and
+//!   changed) to find out what it does.
 //! - Choices and languages open a list to pick from.
 //!
 //! Changes apply immediately and are saved to `quireink.ini` by the
@@ -109,18 +110,17 @@ fn visible(env: &Env<'_>, spec: &SettingSpec) -> bool {
     spec.level == Level::Basic || env.settings.bool(ADVANCED.as_str())
 }
 
-/// The header, list area and list for a screen with a footer of
-/// `footer` text lines.
-fn frame(env: &Env<'_>, footer: u32) -> (UiStyle, Rect, ListView) {
+/// The header, list area and list for a screen; rows have notes if
+/// `noted`.
+fn frame(env: &Env<'_>, noted: bool) -> (UiStyle, Rect, ListView) {
     let style = UiStyle::new(env);
     let display = env.device.display;
     let header = Rect::new(0, 0, display.width, style.header as u16);
     let top = header.height + style.gap as u16;
-    // Room for `footer` lines of small text below the list.
-    let footer = ui::footer_height(&style, footer);
-    let height = display.height.saturating_sub(top).saturating_sub(footer);
+    let height = display.height.saturating_sub(top);
     let area = Rect::new(0, top, display.width, height);
-    (style, header, ListView::new(area, style.row))
+    let row = if noted { style.noted_row() } else { style.row };
+    (style, header, ListView::new(area, row))
 }
 
 fn moved(change: ListChange, cx: &mut Cx<'_, '_>) {
@@ -180,7 +180,7 @@ struct GroupList {
 
 impl GroupList {
     fn new(env: &Env<'_>) -> Self {
-        let (style, header, list) = frame(env, 0);
+        let (style, header, list) = frame(env, false);
         let groups = env
             .settings
             .groups()
@@ -318,9 +318,6 @@ impl Screen for GroupList {
 
 // ---- Group page: settings ----------------------------------------------
 
-/// Lines of description below the list.
-const FOOTER_LINES: u32 = 3;
-
 #[derive(Debug)]
 struct GroupPage {
     group: Id,
@@ -331,11 +328,12 @@ struct GroupPage {
     list: ListView,
     /// The focused number is being edited.
     editing: bool,
+    /// Rows have room for descriptions.
+    noted: bool,
 }
 
 impl GroupPage {
     fn new(env: &Env<'_>, group: Id) -> Self {
-        let (style, header, list) = frame(env, FOOTER_LINES);
         let title = env
             .settings
             .groups()
@@ -346,7 +344,9 @@ impl GroupPage {
             .specs()
             .filter(|spec| env.settings.group_of(spec) == group && visible(env, spec))
             .cloned()
-            .collect();
+            .collect::<Vec<SettingSpec>>();
+        let noted = specs.iter().any(|spec| spec.description.is_some());
+        let (style, header, list) = frame(env, noted);
         Self {
             group,
             title,
@@ -355,6 +355,16 @@ impl GroupPage {
             header,
             list,
             editing: false,
+            noted,
+        }
+    }
+
+    /// Where a row's title and value (or stepper) are drawn.
+    fn title_area(&self, rect: Rect) -> Rect {
+        if self.noted {
+            ui::title_area(&self.style, rect)
+        } else {
+            rect
         }
     }
 
@@ -422,27 +432,30 @@ impl Screen for GroupPage {
         );
         let specs = &self.specs;
         let editing = self.editing;
+        let noted = self.noted;
         self.list
             .draw(canvas, &style, len, |canvas, index, rect, focused| {
                 let spec = &specs[index];
                 let title = env.i18n.tr(&spec.title);
+                let note = spec.description.as_deref().map_or("", |d| env.i18n.tr(d));
                 let mut value = ui::setting_value(env, spec);
                 if focused && matches!(spec.kind, SettingKind::Int { .. }) {
-                    ui::draw_stepper(canvas, env, &style, rect, title, &value, editing);
+                    let area = if noted {
+                        ui::title_area(&style, rect)
+                    } else {
+                        rect
+                    };
+                    ui::draw_stepper(canvas, env, &style, area, title, &value, editing);
+                    if noted && !note.is_empty() {
+                        ui::draw_note(canvas, env, &style, rect, true, note);
+                    }
                     return;
                 }
                 if matches!(spec.kind, SettingKind::Choice(_) | SettingKind::Language) {
                     value.push_str(" ›");
                 }
-                ui::draw_value_row(canvas, env, &style, rect, focused, title, &value);
+                ui::draw_noted_row(canvas, env, &style, rect, focused, title, &value, note);
             });
-
-        // The focused setting's description.
-        let Some(help) = self.focused().and_then(|s| s.description.as_deref()) else {
-            return;
-        };
-        let top = f32::from(self.list.area.y) + f32::from(self.list.area.height);
-        ui::draw_footer(canvas, env, &style, top, FOOTER_LINES, env.i18n.tr(help));
     }
 
     fn on_action(&mut self, action: &Id, cx: &mut Cx<'_, '_>) -> Handled {
@@ -476,10 +489,6 @@ impl Screen for GroupPage {
         }
         if let Some(change) = navigate(&mut self.list, len, action) {
             moved(change, cx);
-            if change != ListChange::None {
-                // The description below changes with the focus.
-                cx.request_redraw();
-            }
         } else if *action == actions::CONFIRM {
             self.activate(&env, 1, cx);
         } else {
@@ -513,7 +522,7 @@ impl Screen for GroupPage {
             let Some(spec) = self.focused() else {
                 return Handled::Yes;
             };
-            let rect = self.list.row_rect(index % self.list.rows());
+            let rect = self.title_area(self.list.row_rect(index % self.list.rows()));
             let value = ui::setting_value(&env, spec);
             if let Some((minus, plus)) = ui::stepper(&env, &self.style, rect, &value) {
                 let x = gesture.start.x;
@@ -561,7 +570,7 @@ struct Chooser {
 
 impl Chooser {
     fn new(env: &Env<'_>, id: &str) -> Self {
-        let (style, header, mut list) = frame(env, 0);
+        let (style, header, mut list) = frame(env, false);
         let spec = env.settings.specs().find(|s| s.id.as_str() == id).cloned();
         let options: Vec<(String, String)> = match spec.as_ref().map(|s| (&s.kind, s)) {
             Some((SettingKind::Language, _)) => env
