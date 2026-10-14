@@ -38,9 +38,15 @@ impl Entry {
     }
 }
 
+/// Folders other readers keep next to a book, e.g. KOReader's
+/// `Book.sdr` with its reading position: not part of the library.
+fn is_sidecar(name: &str) -> bool {
+    name.len() > 4 && name[name.len() - 4..].eq_ignore_ascii_case(".sdr")
+}
+
 /// The visible entries of a directory: folders and files a format plugin
-/// can open (or only folders); hidden names (starting with `.`) are
-/// skipped.
+/// can open (or only folders); hidden names (starting with `.`) and
+/// sidecar folders of other readers are skipped.
 pub(crate) struct Listing<'a> {
     pub storage: &'a dyn Storage,
     pub formats: &'a Formats,
@@ -51,7 +57,11 @@ pub(crate) struct Listing<'a> {
 impl Listing<'_> {
     fn each(&self, f: &mut dyn FnMut(bool, &str)) {
         let _ = self.storage.list(self.dir, &mut |entry| {
-            let shown = entry.is_dir || (!self.folders_only && self.formats.supports(entry.name));
+            let shown = if entry.is_dir {
+                !is_sidecar(entry.name)
+            } else {
+                !self.folders_only && self.formats.supports(entry.name)
+            };
             if shown && !entry.name.starts_with('.') {
                 f(entry.is_dir, entry.name);
             }
@@ -212,7 +222,8 @@ mod tests {
         }
         storage = storage
             .with("books/cover.jpg", "")
-            .with("books/.hidden.txt", "");
+            .with("books/.hidden.txt", "")
+            .with("books/Book 01.SDR/metadata.epub.lua", "");
         expected[2..].sort_by_key(|n| (n.to_lowercase(), n.clone()));
         let formats = formats();
         let listing = Listing {
