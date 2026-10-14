@@ -1,0 +1,101 @@
+# QuireInk
+
+**A lean, fast and endlessly customizable e-reader for e-ink devices — from a
+380 KB microcontroller to Linux and Android e-readers, from one codebase.**
+
+> **Status: early development.** The kernel, plugin SDK and emulator work;
+> there is no book rendering yet. See the [project plan](docs/PLANNING.md)
+> and the [roadmap](docs/PLANNING.md#12-roadmap).
+
+## Why QuireInk?
+
+- **Runs where others can't.** The smallest target is the Xteink X4 with an
+  ESP32-C3 and no PSRAM. Everything is designed for that budget, so larger
+  devices get a fast, battery-friendly reader for free.
+- **Everything is a plugin.** The core is a small kernel. The home screen,
+  library, reader, menus, file formats, themes, key maps and translations are
+  plugins — first-party ones use exactly the same SDK as community plugins.
+  Anything can be added, replaced, reconfigured or removed.
+- **Simple by default.** Turn it on and keep reading. Every function is at
+  most two steps away, and it works with buttons only or with touch.
+- **One codebase, many devices.** Xteink X4/X3, Kobo, Kindle (jailbroken),
+  PocketBook, reMarkable, Boox and other Android e-readers, desktop and web.
+  Grayscale and colour e-ink.
+
+## Customization at a glance
+
+A plain text file (`quireink.ini`) on the device changes behaviour without
+any programming:
+
+```ini
+[core]
+language = de
+full-refresh-interval = 8
+
+[slots]
+# Replace the home screen with any screen a plugin provides.
+core.home = diagnostics.screen
+
+[keymap.global]
+# Bind any input to any action; `none` removes a binding.
+long.page-forward = core.toggle-night-mode
+tap.center = none
+swipe.up = core.menu
+
+[plugins]
+# Switch any plugin off by its id.
+some-plugin = off
+```
+
+Plugins contribute screens, actions, settings, key maps and translations
+through the [`quireink-sdk`](crates/quireink-sdk) crate. See
+[docs/PLANNING.md §7](docs/PLANNING.md#7-extensibility) for the full
+extension model.
+
+## Try it in the emulator
+
+You need a recent stable [Rust toolchain](https://rustup.rs). The required
+targets are installed automatically from `rust-toolchain.toml`.
+
+```bash
+cargo run -p quireink-emulator -- --profile xteink-x4
+```
+
+```bash
+cargo run -p quireink-emulator -- --list-profiles
+```
+
+Keys: `PageDown`/`Space` next page, `PageUp` previous page, arrow keys,
+`Enter` confirm, `Esc` back; hold a key for a long press. The mouse acts as
+the touch screen. `F2` shows refreshed regions, `F12` saves a screenshot.
+
+The emulator enforces each device's heap budget on the kernel, so memory
+problems show up on the desktop before they show up on hardware. Headless
+runs produce screenshots for tests and bug reports:
+
+```bash
+cargo run -p quireink-emulator -- --headless --profile boox-go-7 --set core.language=de --script "page-forward,long:page-forward" --screenshot out/go7.png
+```
+
+## Repository layout
+
+| Path | Contents |
+|------|----------|
+| `crates/quireink-platform` | Vocabulary shared by shells and kernel: display info, pixel formats, raw input |
+| `crates/quireink-config` | The human-editable config format used for settings, key maps and translations |
+| `crates/quireink-i18n` | Message catalogs, fallback chains and plural rules |
+| `crates/quireink-graphics` | Framebuffers in native pixel formats, clipped canvas |
+| `crates/quireink-sdk` | **The plugin SDK** — the only API plugins use |
+| `crates/quireink-core` | The kernel: plugin host, registries, input routing, refresh policy |
+| `plugins/` | First-party plugins |
+| `shells/desktop` | Desktop emulator with device profiles |
+| `docs/` | [Plan](docs/PLANNING.md) and [architecture decisions](docs/adr/) |
+
+## Contributing
+
+Contributions are very welcome — code, translations, device profiles and
+testing on real hardware. Please read [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## License
+
+QuireInk is licensed under the [Apache License, Version 2.0](LICENSE).

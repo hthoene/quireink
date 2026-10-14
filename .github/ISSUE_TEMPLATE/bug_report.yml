@@ -1,0 +1,34 @@
+name: Bug report
+description: Something does not work as expected
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Device or emulator profile
+      placeholder: e.g. Xteink X4, Kobo Clara BW, emulator --profile boox-go-7
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: QuireInk version or commit
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: >
+        If possible, an emulator command such as
+        `quireink-emu --headless --profile xteink-x4 --script "page-forward,long:confirm" --screenshot bug.png`.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Warnings or logs
+      render: text

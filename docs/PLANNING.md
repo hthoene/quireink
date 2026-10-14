@@ -1,0 +1,730 @@
+# QuireInk — Project Plan
+
+> Status: **Draft v0.5** — living document. Decisions that are not yet final are
+> marked **[OPEN]**. Facts about hardware that still need verification are
+> marked **[VERIFY]**. Once a decision is final it moves into an Architecture
+> Decision Record under `docs/adr/`.
+
+---
+
+## 1. Vision
+
+QuireInk is a lean, fast, power-efficient e-reader application that runs from
+**one codebase** on as many e-ink devices as possible — from a microcontroller
+with 380 KB of RAM up to Linux and Android e-readers.
+
+The core is deliberately small and simple. Everything beyond the essentials is
+added through **plugins**, so the community can extend QuireInk without
+touching the core.
+
+### 1.1 Guiding principles
+
+| # | Principle | What it means in practice |
+|---|-----------|---------------------------|
+| P1 | **Simple to use** | Opening the device continues the last book. Every function is reachable in at most two steps from the reader. Sensible defaults; no setting is required to start reading. |
+| P2 | **Lean** | The smallest target (ESP32-C3) defines the budget. No garbage collector, no runtime, no heavyweight dependencies in the core. |
+| P3 | **Fast** | Page turns feel instant. Work is done ahead of time (pagination caches) and in the background, never while the reader waits. |
+| P4 | **Power-efficient** | Event-driven, never polling. Only redraw what changed. Radios off unless needed. Sleep whenever idle. |
+| P5 | **Small kernel, everything else is a plugin** | The core is a kernel: plugin host, registries, input routing, rendering, settings. Every screen (including home and library), format, theme, key map, translation and service is a plugin — first-party ones use the same SDK as community plugins. Anything can be added, replaced, reconfigured or removed. |
+| P6 | **Portable by construction** | The core never talks to an OS. All I/O goes through platform interfaces implemented by thin shells. |
+| P7 | **Testable without hardware** | Every feature can be developed and tested in the desktop emulator, including memory limits of the smallest device. |
+| P8 | **Open-source quality** | Clean history, documentation, CI, reproducible builds, license hygiene from day one. |
+
+### 1.2 Non-goals (for now)
+
+- Smartphone/tablet UI with animations or app-store polish. (Colour e-ink is
+  supported, see §3.7 — but the UI stays e-ink-first.)
+- DRM-protected content (Kindle KFX, Adobe ADEPT, etc.).
+- Being a full KOReader replacement on day one — we grow towards it.
+
+---
+
+## 2. Target devices
+
+Devices are grouped into **capability tiers**. Features are designed per tier, so
+small devices are never blocked by features of large devices — and large
+devices are not limited by small ones.
+
+| Tier | Devices | CPU / RAM | Shell | Notes |
+|------|---------|-----------|-------|-------|
+| **S** (small) | Xteink X4, X3 | ESP32-C3, ~380 KB SRAM, no PSRAM, 16 MB flash | `esp32` (bare metal) | Buttons only. microSD **[VERIFY]**. Display 800×480 **[VERIFY: controller, grayscale capability]**. |
+| **M** (medium) | Xteink X4 Pro **[VERIFY: exists / specs]** | ESP32-S3, PSRAM **[VERIFY]** | `esp32` | Touch. Xtensa toolchain via `espup`. |
+| **L** (large) | Kobo, Kindle (jailbroken), PocketBook, reMarkable | ARM Linux, ≥ 256 MB RAM | `linux-fb` | Touch, frontlight, Wi-Fi, vendor-specific e-ink refresh. Colour models exist (Kobo Libra/Clara Colour, Kindle Colorsoft, PocketBook Era Color, reMarkable Paper Pro). |
+| **L** | Boox & other Android e-readers | Android, ≥ 1 GB RAM | `android` | Thin Java/Kotlin shim only where vendor SDKs require it. Monochrome and colour models. |
+| **Dev** | Desktop Linux, Windows, macOS | — | `desktop` (= emulator) | Primary development environment. |
+| **Dev** | Web browser | WASM | `web` | Public online demo (GitHub Pages) + emulator. |
+
+### 2.1 First devices
+
+Hardware on hand:
+
+- **Boox Go 7** — monochrome, Android **[VERIFY version]**
+- **Boox Air 6C** — colour, Android 16 **[VERIFY]**
+- **Xteink X4** — on order
+
+1. **Desktop emulator** — everything starts here (see §9).
+2. **Xteink X4** — the hardest constraint; proves the architecture.
+3. **Boox Go 7 / Air 6C** (Android) — available now, covers monochrome *and*
+   colour; pulled forward if the X4 arrives late.
+4. **Kobo** — easiest real Linux device (runs custom software without jailbreak),
+   then Kindle, PocketBook, reMarkable.
+
+---
+
+## 3. Key technical decisions
+
+### 3.1 Language: Rust — **decided**
+
+| Criterion | Rust | C++ (on top of CrossPoint) |
+|-----------|------|----------------------------|
+| Runs on ESP32-C3 without runtime | ✅ `no_std` + `alloc`, `riscv32imc-unknown-none-elf` is a stable upstream target | ✅ |
+| One codebase for all targets | ✅ Cargo workspace + features, trivial cross-compiling (incl. WASM, Android, static musl) | ⚠️ CMake/PlatformIO/NDK/Emscripten build zoo |
+| Memory safety with untrusted input (books, plugins) | ✅ | ⚠️ parsers are a classic attack surface |
+| Plugin system | ✅ traits for built-in plugins, `wasmi` (pure Rust) for runtime plugins | ⚠️ |
+| Head start | ⚠️ write from scratch | ✅ reuse CrossPoint's EPUB/render code |
+| Community familiarity | ✅ growing in embedded | ✅ |
+
+**Decision: Rust.** CrossPoint Reader (MIT) remains a valuable reference:
+its algorithms and hardware knowledge (display init, waveforms, button
+mapping) can be ported with attribution.
+
+### 3.2 License: Apache-2.0 — **decided**
+
+The license limits which libraries we may use. Options considered:
+
+| Option | Pros | Cons |
+|--------|------|------|
+| **Apache-2.0** | Permissive, maximum adoption; explicit patent grant protects contributors and users. Compatible with GPL-3.0 (one-way). | Cannot link GPL-2.0-only or AGPL libraries into distributed binaries under Apache terms. |
+| MIT OR Apache-2.0 (Rust ecosystem default) | Same, plus MIT simplicity. | Dual licensing adds little for an application. |
+| **GPL-3.0-or-later** | Can use FBInk, DjVuLibre; forks must stay open. | Cannot use MuPDF (AGPL) unless AGPL; less attractive for embedding. |
+| **AGPL-3.0** (like KOReader) | Can use MuPDF, FBInk, DjVuLibre; could reuse KOReader code. | Strongest copyleft; least permissive. |
+
+**Decision: Apache-2.0** for core, shells and first-party plugins.
+Contributions are accepted under the same license (inbound = outbound, DCO
+sign-off). **Copyleft libraries are only allowed inside optional plugins** that
+are distributed separately under their own license (e.g. a `pdf-mupdf` plugin
+under AGPL). PDF can alternatively use `pdfium` (BSD/Apache). FBInk (GPL) is
+not linked; the Linux shell implements the vendor ioctls itself.
+
+License compliance is enforced in CI with `cargo-deny`.
+
+### 3.3 Sans-I/O core
+
+The core is a pure state machine:
+
+```text
+           ┌──────────── Shell (platform) ────────────┐
+ events ──▶│  core.handle(Event) -> Vec<Effect>       │──▶ effects
+           └──────────────────────────────────────────┘
+ Event  = Input(Action) | Timer | StorageReady | NetResponse | Power(…) | …
+ Effect = Refresh(region, mode) | ScheduleTimer | Read/Write | HttpRequest | Sleep | …
+```
+
+- No threads, no async runtime and no OS calls in the core.
+- Shells decide *how* to execute effects (Embassy on ESP32, epoll on Linux,
+  Android looper, browser event loop).
+- Deterministic → reproducible tests, input replay, snapshot testing.
+
+### 3.4 Rendering via display lists
+
+Layout produces a **display list** per page (positioned glyph runs, rules,
+images) instead of pixels.
+
+- Small and serializable → can be cached on storage.
+- Rasterized **in horizontal bands**, so the smallest devices never need a full
+  high-depth framebuffer in RAM (bands are streamed to the display controller).
+- Dirty-region diffing between display lists → minimal partial refreshes.
+
+### 3.5 Reading positions are content-based, not page-based
+
+Note: pixel-identical pagination only holds for identical screen size, font and
+settings. Devices differ, so positions are stored as **locators** that point
+into the content:
+
+```text
+Locator { spine_index, node_path, char_offset }   // EPUB/HTML/FB2
+Locator { byte_offset }                           // TXT
+Locator { page_index }                            // fixed-layout (PDF, CBZ)
+```
+
+Locators convert to/from **KOReader xpointers** (e.g.
+`/body/DocFragment[3]/body/div/p[5]/text().42`) and percentage, so progress
+syncs with KOReader devices via the kosync protocol. Pagination caches map
+locators ↔ page numbers per device profile.
+
+### 3.6 Crate naming
+
+The crate name `quire` is already taken on crates.io, so all crates use the
+prefix `quireink-`.
+
+### 3.7 Colour e-ink
+
+Colour e-readers (Kaleido 3 and successors, Gallery 3, …) are supported on
+Tier L. Design rules:
+
+- **Pixel format is a parameter**, like resolution and DPI. The rasterizer works
+  on an abstract pixel format; colour formats are a Cargo feature that is
+  compiled out on Tier S to save flash and RAM.
+- **Text stays sharp:** colour-filter panels have a lower effective colour
+  resolution (typically half the monochrome resolution). Text is rendered in
+  full-resolution grayscale; colour is used where it adds value.
+- **Where colour is used:** book covers, images in EPUBs, comics/manga (CBZ),
+  PDFs, highlight colours, optional UI accent colour. The UI must remain fully
+  usable in monochrome — colour is never the only carrier of information.
+- **Colour pipeline:** per-panel colour profile (saturation boost, gamma) and
+  dithering adapted to the colour filter layout; tunable in settings.
+- **Refresh modes:** colour panels need dedicated waveforms (e.g. a slower
+  colour-accurate mode vs. fast monochrome mode for page turns); the
+  `RefreshMode` set is extended per device.
+- The emulator gets colour panel profiles that simulate the reduced colour
+  resolution and muted saturation.
+
+---
+
+## 4. Architecture
+
+> **Design rule #1 — the core is a kernel, the product is plugins.**
+> The core contains *no* product UI and *no* product logic. Home screen,
+> library, reader, menus, settings screens, file formats, themes, key maps and
+> translations are all **first-party plugins** that use exactly the same public
+> SDK as community plugins. If a built-in feature can be written as a plugin,
+> it must be. This guarantees that the SDK is always powerful enough to
+> replace anything QuireInk ships with.
+
+### 4.1 Layers
+
+```text
+┌─────────────────────────────────────────────────────────────────────┐
+│ Plugins (first-party and community — same SDK, same rights)         │
+│  ui-home · ui-files · ui-reader · ui-settings · ui-menu · theme-*   │
+│  format-txt/epub/fb2/… · sync-kosync · source-opds · lang-de · …    │
+├─────────────────────────────────────────────────────────────────────┤
+│ SDK (quireink-sdk) — the only API plugins may use; SemVer-versioned │
+│  ids · manifest · contributions · services · events · widgets ·     │
+│  canvas · settings · i18n · storage namespaces                      │
+├─────────────────────────────────────────────────────────────────────┤
+│ Kernel (quireink-core, no_std + alloc)                              │
+│  plugin host · registries · slot bindings · input → action routing  │
+│  event bus · service locator · settings store · refresh manager     │
+│  widget runtime · render engine (display lists, rasterizer)         │
+├─────────────────────────────────────────────────────────────────────┤
+│ Platform vocabulary (quireink-platform)                             │
+│  display info · raw input events · pixel formats · Display trait …  │
+├──────────────┬──────────────┬──────────────┬───────────┬────────────┤
+│ esp32 shell  │ linux-fb     │ android      │ desktop   │ web        │
+└──────────────┴──────────────┴──────────────┴───────────┴────────────┘
+```
+
+Dependency rules (enforced in CI):
+
+- Plugins depend on `quireink-sdk` only — never on `quireink-core` internals.
+- The kernel depends on the SDK (it implements the host side) and never on a
+  plugin.
+- Shells depend on the kernel plus the plugins they bundle.
+
+### 4.2 Workspace layout
+
+```text
+quireink/
+├─ crates/
+│  ├─ quireink-platform/      # shell-facing vocabulary (no_std, no alloc)
+│  ├─ quireink-config/        # human-editable config format (no_std)
+│  ├─ quireink-i18n/          # message catalogs, plural rules (no_std)
+│  ├─ quireink-graphics/      # framebuffer, canvas, later display lists (no_std)
+│  ├─ quireink-sdk/           # THE plugin API (no_std)
+│  ├─ quireink-core/          # kernel (no_std)
+│  ├─ quireink-text/          # line breaking, hyphenation, fonts      (later)
+│  ├─ quireink-zip/           # streaming ZIP reader                    (later)
+│  └─ quireink-xml/           # streaming XML/HTML tokenizer            (later)
+├─ plugins/                   # first-party plugins, one crate each
+│  ├─ diagnostics/            # M0 test screen
+│  ├─ ui-home/  ui-files/  ui-reader/  ui-settings/  ui-menu/
+│  ├─ theme-default/  keymap-default/  lang-de/
+│  ├─ format-txt/  format-epub/  …
+│  └─ sync-kosync/  source-opds/  …
+├─ shells/
+│  ├─ desktop/                # emulator with device profiles
+│  └─ esp32/  linux-fb/  android/  web/
+├─ tools/                     # fontgen, hyphgen, plugin packager
+├─ assets/                    # default fonts, icons, hyphenation data
+└─ docs/                      # PLANNING.md, adr/, sdk/
+```
+
+### 4.3 Platform interfaces (sketch)
+
+```rust
+pub struct DisplayInfo {
+    pub width: u16, pub height: u16, pub dpi: u16,
+    pub format: PixelFormat,        // Mono1, Gray2, Gray4, Gray8, Rgb565, Rgb888
+    pub color: Option<ColorPanel>,  // colour filter layout + effective colour resolution
+    pub rotation: Rotation,
+}
+
+pub enum RefreshMode { Fast, Partial, Full }
+
+pub trait Display {
+    fn info(&self) -> DisplayInfo;
+    fn refresh(&mut self, frame: FrameView<'_>, region: Rect, mode: RefreshMode);
+}
+```
+
+Shells deliver **raw, device-neutral input events** — named buttons and touch
+gestures — *not* actions:
+
+```text
+Button("page-forward", Pressed) · Button("page-forward", Released)
+Pointer(Down, x, y, finger) · Pointer(Move, …) · Pointer(Up, …)
+```
+
+The kernel resolves them to actions through **layered key maps** (see §7.4),
+so mapping works the same on every device and is fully user-configurable.
+
+---
+
+## 5. Memory and performance strategy (Tier S)
+
+Budget for the ESP32-C3 (≈ 380 KB SRAM total; Wi-Fi alone needs a large share
+while active):
+
+| Item | Budget (target) | Technique |
+|------|-----------------|-----------|
+| Framebuffer | ≤ 48 KB | 800×480 at 1 bpp; grayscale via band rendering / multi-pass **[VERIFY controller]** |
+| Glyph cache | 16–32 KB | LRU of pre-rendered bitmap glyphs, fonts stored in flash/SD |
+| Layout working set | ≤ 32 KB | Lay out one page at a time from a locator |
+| ZIP inflate | ~ 32 KB window + state | Streamed, one entry at a time |
+| XML parsing | few KB | Zero-copy tokenizer, no DOM |
+| Wi-Fi + TLS | on demand only | Freed when sync is done |
+
+Rules:
+
+- **Streaming everywhere** — never load a whole file or chapter into RAM.
+- **Precompute, then cache** — a background pass paginates chapters and stores
+  page-break locators on storage (`.quireink/cache/…`). Page turn = read one
+  locator + lay out one page.
+- **No hidden allocation in hot paths**; fixed-capacity collections
+  (`heapless`) where sizes are known.
+- The emulator enforces the same heap cap (see §9.2).
+- Only translation catalogs of the active language chain are kept in RAM
+  (M0 still loads all; measured: ≈14 KiB kernel overhead besides the 94 KiB
+  framebuffer in the X4 profile).
+
+---
+
+## 6. User interface
+
+The kernel draws the complete UI, so it looks and behaves the same on every
+device and is designed for e-ink from the start. But the kernel does not
+*define* the UI: every screen is a plugin contribution.
+
+### 6.1 Slots: every screen is replaceable
+
+The UI is organised in **slots** — named roles that are bound to a screen
+contributed by some plugin:
+
+| Slot | Default binding (first-party plugin) | Examples of alternatives |
+|------|--------------------------------------|--------------------------|
+| `core.boot` | open last book, else `core.home` | always home, a specific collection |
+| `core.home` | `ui-home.dashboard` | plain file browser, "bookshelf", minimalist "one book" screen, stats dashboard |
+| `core.library` | `ui-files.browser` | tag/collection browser, Calibre view, series view |
+| `core.reader` | `ui-reader.paged` | scroll mode, RSVP speed reader, comic panel view |
+| `core.reader-menu` | `ui-menu.overlay` | radial menu, bottom bar, button-only menu |
+| `core.settings` | `ui-settings.tree` | simplified settings for beginners |
+| `core.sleep` | `ui-home.cover-sleep` | clock, quote, custom image, calendar |
+| `core.keyboard` | `ui-input.keyboard` | other layouts, T9 for button devices |
+| `core.dialog` | `ui-dialog.default` | — |
+
+Bindings are configuration (`[slots] core.home = ui-files.browser`). Plugins
+may add **new slots** (e.g. a dictionary plugin adds `dictionary.popup`, which
+another plugin may then replace).
+
+### 6.2 Declarative layouts and widgets
+
+Screens such as the home dashboard are **layouts**: trees of widgets described
+in data files, so users can rearrange them without programming:
+
+```text
+home.layout:
+  column
+    widget ui-home.continue-reading   size=large
+    widget ui-home.recent-books       rows=1
+    row
+      widget ui-home.collections
+      widget stats.reading-time        # contributed by a community plugin
+```
+
+- Every widget type is a contribution (`ui-home.recent-books`, `stats.reading-time`, …).
+- Multiple home pages (swipe or button to switch) are just multiple layouts.
+- The layout file syntax is decided in an ADR before M2 **[OPEN: tree syntax]**.
+
+### 6.3 Data and presentation are separated
+
+Replaceable screens are only possible if the data behind them is *not* owned
+by a screen. Therefore the library is a **service** (index, metadata,
+collections, reading state, covers, recent books) with a query API. The file
+browser, the dashboard and any community "bookshelf" are just different views
+of the same service.
+
+### 6.4 Interaction rules (defaults, all configurable)
+
+- Works with **buttons only** (X4) *and* touch: every widget is focusable and
+  navigable with Up/Down/Confirm/Back.
+- Default tap zones: left third = previous, right third = next, centre = menu.
+- Max two levels deep from the reader; every screen has an obvious "back".
+- Large targets, high contrast, no animations, no spinners that force refreshes.
+- Partial refresh by default, configurable full refresh every *n* pages.
+- UI scale and a "night mode" (inverted) as first-class settings.
+
+### 6.5 Themes
+
+No widget hard-codes visual values. Fonts, sizes, spacing, borders, corner
+radii, icon sets, accent colour and refresh preferences are **design tokens**
+from the active theme (data). Themes can inherit from other themes and be
+overridden per screen.
+
+### 6.6 Languages
+
+- UI languages at launch: **English** (built-in fallback) and **German**.
+- Translations are catalog files in the config format (`i18n/<lang>.ini`), one
+  per language and plugin; adding a language means adding files, not code.
+- Lookup goes through a fallback chain (e.g. `de-AT` → `de` → `en` → key), so a
+  missing string never breaks the UI.
+- Plural rules are named in the catalog (`plural = one-other`); new rule
+  families are a few lines in `quireink-i18n`.
+- CI checks every catalog against English (missing/unknown keys, placeholders).
+
+---
+
+## 7. Extensibility
+
+> **Design rule #2 — everything that varies between users is a contribution,
+> identified by a namespaced id, and can be added, replaced, reconfigured or
+> removed.**
+
+### 7.1 What was wrong in the first draft
+
+| First draft | Problem | Now |
+|-------------|---------|-----|
+| Fixed set of screens in the core | Home/library could not be replaced | Screens are contributions bound to slots (§6.1) |
+| `Action` as a closed enum | Plugins could not add commands | Actions are namespaced ids in a registry |
+| Shells translate keys to actions | Key maps differ per shell, not user-editable everywhere | Shells send raw input; the kernel owns layered key maps |
+| Three plugin "levels" with different APIs | Three APIs to keep stable, uneven power | One plugin model; code is optional and has two backends |
+| Plugins only at a few "extension points" | Everything else was fixed | Uniform registries + services + events + filters |
+| Library index inside the core/file browser | Alternative home screens had no data | Library is a service (§6.3) |
+| Built-ins could use internal APIs | SDK would lag behind built-in features | Built-ins depend on the SDK only (§4.1) |
+
+### 7.2 One plugin model
+
+A plugin is a **manifest** plus optional **code**:
+
+```ini
+# plugin.ini
+[plugin]
+id = stats
+name = Reading statistics
+version = 1.2.0
+sdk = 0.1                 # required SDK version (SemVer compatible)
+requires = ui-home >=0.1  # optional dependencies on other plugins
+permissions = storage.plugin, events.reading
+
+[contributes]             # declarative contributions, no code needed
+translations = i18n/
+keymaps = keymap.ini
+settings = settings.ini
+layouts = layouts/
+```
+
+| Part | Tier S (ESP32-C3) | Tier M/L |
+|------|-------------------|----------|
+| Manifest + declarative contributions (layouts, themes, key maps, settings schemas, translations, fonts, CSS) | ✅ loaded from SD card at runtime | ✅ |
+| Native code (Rust crate using the SDK) | ✅ compiled into the firmware (selected per build) | ✅ compiled in |
+| WebAssembly code (any language, sandboxed via `wasmi`, fuel-metered) | ❌ | ✅ installed at runtime |
+
+Native Rust plugins are never loaded dynamically (`.so`/`.dll`): Rust has no
+stable ABI, and WASM is the safer runtime format. For Tier S, a **web firmware
+builder** produces firmware with the user's choice of native plugins
+(ESP Web Tools + CI-built variants).
+
+### 7.3 Building blocks
+
+| Block | What it is | Examples |
+|-------|-----------|----------|
+| **Contributions** | Named things registered in kernel registries | actions, screens, slots, widgets, layouts, themes, key maps, gesture maps, settings, menu entries, status-bar items, formats, fonts, hyphenation, translations, sleep screens |
+| **Services** | Versioned interfaces provided by one plugin and consumed by others | `library` (index, metadata, collections), `reading-state`, `bookmarks`, `dictionary`, `sync`, `network`, `book-source` |
+| **Events** | Notifications a plugin can subscribe to | `book.opened`, `page.turned`, `book.finished`, `library.changed`, `device.sleep`, `settings.changed` |
+| **Filters** | Ordered chains that may inspect and modify data | input before key-map lookup, document content before layout, display list before rasterizing (overlays, highlights), refresh decisions |
+
+Every contribution can be **overridden** (higher priority or an explicit user
+binding wins) or **disabled** (`[disable] ui-menu.entry.toc = true`), so
+removing things is as easy as adding them.
+
+### 7.4 Input routing
+
+```text
+raw input ─▶ input filters ─▶ focused widget ─▶ key map layers ─▶ action ─▶ handler
+                                                (screen → slot → global)
+```
+
+- Key maps are layered: *user* overrides *device* overrides *plugin defaults*.
+- Maps bind buttons, long presses, button chords, tap zones (3×3 grid or
+  custom rectangles) and gestures to **action ids**.
+- Any plugin may contribute actions; users can bind any action to any input.
+
+### 7.5 Reading pipeline — every stage is replaceable
+
+```text
+book source ─▶ format decoder ─▶ content events ─▶ content filters ─▶ layout
+ (VFS, OPDS)    (format-*)                         (CSS overrides,     (line breaker,
+                                                    typography,         fonts)
+                                                    hyphenation)
+   ─▶ display list ─▶ overlays ─▶ rasterizer ─▶ refresh policy
+      (per page)      (highlights, annotations,   (per device / screen)
+                       header/footer)
+```
+
+### 7.6 SDK rules that keep this maintainable
+
+1. **Namespaced ids everywhere** (`plugin-id.name`); `core.*` is reserved.
+2. **SemVer for the SDK**; plugins declare the SDK version they need. Until
+   1.0, breaking changes are allowed but batched and documented.
+3. **Message-friendly APIs:** every SDK call must be expressible over a
+   message boundary (serializable arguments, no borrowed host data kept across
+   calls), so the WASM backend offers the same power as native plugins.
+4. **Zero cost when unused:** hooks run at coarse granularity (per event,
+   per page, per screen) — never per glyph or per pixel.
+5. **Fault isolation:** WASM plugins are sandboxed and fuel-limited; a
+   misbehaving plugin is disabled, not the device. **Safe mode** (hold a
+   button at boot) starts with first-party plugins only.
+6. **Permissions** are declared in the manifest and granted by the user
+   (network, storage outside the plugin's namespace, reading data).
+7. **Per-plugin storage namespace** for data and settings
+   (`.quireink/plugins/<id>/`).
+8. **Shareable setups:** a "setup" bundles configuration, layouts, themes and
+   a plugin list, so users can share complete customisations.
+
+### 7.7 Feature check: can it be built as a plugin?
+
+The architecture is validated against features e-reader users commonly ask
+for. Each must be buildable as a plugin **without changing the kernel**.
+Where the first draft could not support a feature, the gap was added to the
+architecture (G1–G12 below).
+
+| Feature users want | Built from | Gap |
+|--------------------|-----------|-----|
+| Dictionary lookup on long-press, Wikipedia, translation | gesture on page → hit test → word; `dictionary` service; popup overlay | G1, G5 |
+| Highlights, notes, annotation export (Markdown, Readwise, Obsidian) | selection + locators; `annotations` service; display-list overlay filter; network/storage | G5 |
+| Footnote popups, internal links | link hit test; overlay | G1, G5 |
+| Reading statistics, streaks, goals, time-left estimates | `page.turned` events with timestamps; plugin storage; home widgets | G4 |
+| Custom fonts, margins, spacing, hyphenation, justification | font/hyphenation contributions; reader settings | — |
+| Per-book / per-publisher style tweaks | content filters; **per-book settings** | G3 |
+| Scroll mode, RSVP speed reading, two-page spreads | alternative reader screen in `core.reader` reusing the layout engine | G8 |
+| Comics/manga: panel zoom, right-to-left | fixed-layout reader screen; RTL key map layer | G8 |
+| Rotation / landscape | runtime display reconfiguration | G7 |
+| Custom home screens, shelves, dashboards | slots, layouts, widgets, library service | — |
+| Collections, tags, series, smart shelves, metadata editing | library service with plugin-defined metadata fields and metadata providers | G10 |
+| Library from Calibre / OPDS / Wallabag / RSS / web articles | `book-source` contributions; background jobs; network | G4 |
+| Wireless transfer ("send to device" from a browser) | HTTP server provided by the shell as a platform service | G2 |
+| Progress sync (KOReader, Readest, …), Goodreads/StoryGraph updates | `sync` service; events; network | G4 |
+| Full-text search in book and library | search service; index jobs | G4 |
+| Sleep screen: cover, clock, quote, calendar | `core.sleep` slot; power events | G7 |
+| Frontlight / warmth control and schedules | frontlight platform service; timers | G2, G4 |
+| Gestures: swipes, multi-finger, corners, button chords | raw pointer stream; gesture recognizers as contributions | G6 |
+| Pen notes, handwriting, sketching (reMarkable, Boox) | pointer capture with pressure; fast refresh; ink layer | G6 |
+| Text-to-speech, audiobooks sync | audio/TTS platform service | G2 |
+| Bluetooth page turners | shell maps them to named buttons; on Tier L input-source contributions | G2 |
+| Multiple users, parental lock | settings scopes + storage namespaces per profile | G3 |
+| Mini apps: notes, calendar, to-do, games (sudoku, chess) | screens + storage + home layout entries | — |
+| Accessibility: large UI, high contrast, screen reader | theme tokens; **widget semantics tree** | G11 |
+| Plugin store, enable/disable, updates | plugin management service + UI plugin | G9 |
+| Backup/restore and sharing of setups | settings serialization; setups | G9 |
+| Language learning: interlinear translations, vocabulary trainer | content filters; dictionary events; storage | — |
+| Plugins extending other plugins (e.g. status-bar items for the reader) | **plugin-defined extension points** | G12 |
+
+#### Gaps and how they are closed
+
+| # | Gap | Architecture change | When |
+|---|-----|--------------------|------|
+| G1 | Only full screens existed | **Layers**: popups, dialogs, menus, toasts and keyboards are partial-screen surfaces stacked above screens (also slot-bound). Without a compositing buffer, the screen below redraws only the uncovered region. | M2 |
+| G2 | Hardware features had no plugin API | **Platform services**: shells register services (frontlight, battery, network, HTTP server, audio/TTS, Bluetooth, USB) through the same service registry plugins use. | M2–M6 |
+| G3 | One global settings level | **Settings scopes**: global → device → user profile → collection → book; the most specific value wins. | M3 |
+| G4 | No time, no background work | **Time + jobs**: every kernel call carries a timestamp, `WakeAt` effects drive timers (done in M0); cooperative background jobs with progress and cancellation; network requests as effects. | M0 ✅ / M5 |
+| G5 | Rendered pages were opaque | **Content access**: display lists keep a mapping to content locators, so plugins can hit-test words and links, select text and decorate ranges. | M3 |
+| G6 | Shells pre-interpreted input | **Raw input**: shells send button down/up and pointer samples; the kernel recognizes long presses and gestures; screens can capture pointers (done in M0). Gesture recognizers become contributions. | M0 ✅ / M5 |
+| G7 | Display and power were static | **Lifecycle events**: rotation/resolution changes, suspend/resume, low battery, charging, USB. | M4 |
+| G8 | Reader was one monolith | Reader split into **layout engine service** and interchangeable reader screens. | M3 |
+| G9 | Plugins could not be managed at runtime | **Plugin management service** (list, enable, disable, install, update) and config write-back. | M5 |
+| G10 | Fixed library schema | Library service with **plugin-defined metadata fields** and metadata providers; the library service itself is replaceable. | M2–M5 |
+| G11 | Widgets were pixels only | **Widget semantics** (role, label, state) for accessibility, automation and tests. | M2 |
+| G12 | Only the kernel could define extension points | **Plugin-defined extension points**: a plugin publishes a service through which others contribute; a second init phase (`activate`) runs after all plugins registered. | M5 |
+
+**Rule derived from this check:** before a feature is added to a first-party
+plugin, ask whether a community plugin could build the same feature with the
+public SDK. If not, the SDK is extended first.
+
+---
+
+## 8. File formats
+
+Formats are plugins; availability depends on tier.
+
+| Format | Tier S | Tier L | Notes / library candidates |
+|--------|:------:|:------:|----------------------------|
+| TXT (UTF-8, legacy encodings) | ✅ | ✅ | First format — proves the pipeline |
+| EPUB 2/3 (reflowable) | ✅ | ✅ | Streaming ZIP + SAX + CSS subset |
+| FB2 / FB2.zip | ✅ | ✅ | XML, similar pipeline to EPUB |
+| Markdown | ✅ | ✅ | `pulldown-cmark` (no_std-capable **[VERIFY]**) |
+| HTML (single file) | ✅ | ✅ | Shared with EPUB |
+| XTC/XTCH (Xteink native) **[VERIFY]** | ✅ | ✅ | Pre-rendered pages, compatibility with stock firmware |
+| CBZ (images) | ⚠️ later | ✅ | Strip-wise JPEG/PNG decoding on Tier S |
+| MOBI / AZW3 (DRM-free) | ⚠️ | ✅ | Convert to internal model |
+| RTF, DOCX, ODT | ❌ | ✅ | Later |
+| PDF | ❌ | ✅ | `pdfium` (permissive) or MuPDF (AGPL, separate plugin) |
+| DjVu | ❌ | ✅ | DjVuLibre (GPL → separate plugin) |
+| CBR | ❌ | ✅ | unrar license is restrictive → evaluate alternatives |
+
+### 8.1 Text rendering
+
+- **Tier S:** pre-rendered **bitmap font packs** (2-bit anti-aliased, compressed,
+  per size), generated by `tools/fontgen`; greedy line breaking; Liang
+  hyphenation from compact tries.
+- **Tier L:** TrueType/OpenType rasterization (`fontdue`/`swash`), shaping
+  with `rustybuzz` for complex scripts, optional Knuth-Plass line breaking.
+- CJK on Tier S: subset fonts on SD card **[evaluate]**.
+
+---
+
+## 9. Emulator and testing
+
+### 9.1 Desktop emulator (`shells/desktop`)
+
+- Window via `winit` + `softbuffer` (no SDL dependency, works on Windows).
+- **Device profiles**: resolution, DPI, pixel format (incl. colour panels),
+  rotation, input type,
+  RAM budget — e.g. `xteink-x4`, `kobo-clara-bw`, `kindle-pw5`, `boox-note`.
+- **E-ink simulation**: exact grayscale quantization of the target, visible
+  partial vs. full refresh, configurable refresh latency, optional ghosting.
+- Input: keyboard maps to device buttons; mouse = touch/tap zones.
+- Debug overlay: dirty regions, heap usage, layout timings.
+
+### 9.2 Memory budget enforcement
+
+A counting global allocator with a hard cap (e.g. the X4 profile's heap budget)
+and peak tracking. Running the emulator with `--profile xteink-x4` fails
+exactly where the device would run out of memory.
+
+### 9.3 Automated tests (CI)
+
+| Kind | What |
+|------|------|
+| Unit tests | Parsers, layout, locators, config |
+| Snapshot tests | Headless rendering of sample books → PNG, compared with golden images per device profile |
+| Input replay | Scripted action sequences (`open book → next ×10 → menu → toc`) |
+| Fuzzing | `cargo-fuzz` on ZIP, XML, EPUB, FB2 parsers (untrusted input!) |
+| Build matrix | `riscv32imc-unknown-none-elf`, `wasm32`, `armv7-unknown-linux-musleabihf`, `aarch64-linux-android`, desktop |
+| Size/RAM report | Firmware size and peak heap per PR, regressions flagged |
+| ESP32 smoke test | Espressif QEMU (ESP32-C3) or Wokwi in CI **[evaluate]** — display not emulated, boot + logic only |
+
+### 9.4 Web demo
+
+The `web` shell compiles the same core to WASM → an online demo on GitHub
+Pages ("try QuireInk in your browser"), also handy for UI reviews.
+
+---
+
+## 10. Platform shells — details
+
+### 10.1 ESP32 (Xteink)
+
+- `esp-hal` + Embassy (async) inside the shell; core stays synchronous.
+- SPI display driver, button GPIO/ADC, SD card (FAT via `embedded-sdmmc`),
+  battery ADC, deep/light sleep between interactions.
+- Wi-Fi via `esp-wifi`/`esp-radio` **[VERIFY current crate]**, only on demand.
+- Flashing: `espflash`; OTA updates later.
+- QuireInk **replaces** the stock firmware (like CrossPoint); flashing tools
+  must back up the original firmware and allow restoring it.
+
+### 10.2 Linux framebuffer (Kobo, Kindle, PocketBook, reMarkable)
+
+- **Fully static musl binaries** (`armv7-unknown-linux-musleabihf`, `aarch64`)
+  → sidesteps old-glibc issues on Kindle.
+- E-ink refresh: own Rust module for the vendor ioctls (mxcfb, sunxi, …);
+  FBInk serves as documentation only, it is not linked (§3.2).
+- Input via `/dev/input/event*` (evdev), per-model rotation and button maps.
+- Device database (model → screen, rotation, input quirks, suspend method),
+  modelled after KOReader's device layer.
+- Power: suspend/resume and Wi-Fi handling per device.
+- Launchers: KFMon/NickelMenu (Kobo), KUAL (Kindle), app menu (PocketBook),
+  Toltec/launcher (reMarkable).
+
+### 10.3 Android (Boox & co.)
+
+- `android-activity` (NativeActivity/GameActivity) → no UI in Kotlin.
+- Thin JNI shim only for vendor SDKs (Onyx EPD refresh modes).
+- Built with `cargo-ndk`; APK via Gradle wrapper; F-Droid-compatible.
+
+---
+
+## 11. Data and configuration
+
+- Plain, human-editable config files on storage (`quireink.cfg`), parsed by our
+  own tiny no_std parser — users can edit settings on the SD card.
+- Per-book data next to the library: `.quireink/books/<hash>/` containing
+  progress, bookmarks, highlights and pagination caches.
+- Book identity = KOReader-compatible partial MD5 → sync compatibility.
+- Library index built incrementally and cached; rebuilt on demand.
+
+---
+
+## 12. Roadmap
+
+If the X4 has not arrived by the end of M3, M6 (Boox) is done before M4.
+
+| Milestone | Content | Exit criteria |
+|-----------|---------|---------------|
+| **M0 Foundation** ✅ | Workspace, CI, license, ADRs, platform vocabulary, config + i18n crates, SDK 0.1 with plugin/registry/slot/action/key-map model, raw input + gesture recognition, timers, kernel, emulator with device profiles and heap cap, `diagnostics` plugin | Emulator shows the diagnostics screen contributed by a plugin; CI green on all targets |
+| **M1 Plain text** | TXT plugin, bitmap fonts + `fontgen`, layout, pagination cache, locators, progress | Read a 5 MB TXT in the X4 profile within the heap budget |
+| **M2 UI** | Widget runtime, themes, layout files, library service, first-party plugins `ui-home`, `ui-files`, `ui-menu`, `ui-settings` | Full button-only flow in the emulator; home screen replaceable by config; snapshot tests |
+| **M3 EPUB** | Streaming ZIP, XML tokenizer, CSS subset, TOC, images (dithered) | Standard Ebooks / Gutenberg test corpus renders correctly |
+| **M4 Xteink X4** | ESP32 shell: display, buttons, SD, sleep, firmware backup/restore | Read an EPUB on real hardware; battery measurement |
+| **M5 Plugins v1** | SDK 0.1 published + docs, plugin manifests loaded from storage, events/filters/services complete, kosync, OPDS | Progress syncs with KOReader; a sample community plugin lives outside the repo |
+| **M6 Boox** | Android shell, colour rendering path | APK runs on Go 7 (mono) and Air 6C (colour) |
+| **M7 Kobo** | linux-fb shell, device DB, touch, frontlight, suspend | Daily-driver usable on one Kobo |
+| **M8 Expansion** | Runtime WASM plugins, PDF/CBZ/…, Kindle, PocketBook, reMarkable, web demo | — |
+
+---
+
+## 13. Repository and project hygiene
+
+- `README.md`, `LICENSE`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`,
+  `SECURITY.md`, `CHANGELOG.md` (from first release).
+- Architecture Decision Records in `docs/adr/` (one file per decision).
+- GitHub Actions: `fmt`, `clippy -D warnings`, tests, build matrix, `cargo-deny`
+  (licenses + advisories), snapshot tests, size report.
+- Conventional Commits; SemVer for releases and for the plugin API.
+- Issue/PR templates; labels per tier, shell and plugin.
+- All code, comments, docs and commit messages in English.
+
+---
+
+## 14. Risks
+
+| Risk | Impact | Mitigation |
+|------|--------|-----------|
+| ESP32-C3 RAM too tight (esp. Wi-Fi + TLS + EPUB) | High | Budget allocator from M0; streaming; sync in a separate "mode" that frees reader memory |
+| Display controller / grayscale details of the X4 unknown | Medium | Study CrossPoint; get hardware early |
+| Vendor e-ink quirks per Linux device | Medium | Device DB; learn from KOReader; Kobo first |
+| License contamination | High | Decide license first; `cargo-deny`; copyleft only in separate plugins |
+| Scope creep ("everything KOReader can") | High | Strict milestones; formats as plugins; tiers |
+| Kindle jailbreak availability changes | Low | Kindle is a late target |
+| Plugin API churn breaks community plugins | Medium | Keep API small; version it; experimental flag until 1.0 |
+| Over-engineering the extension system slows progress | Medium | Structure (ids, slots, registries, SDK boundary) from day one; each concrete extension point is built when the first first-party plugin needs it |
+
+---
+
+## 15. Open questions
+
+1. X4 hardware details: display controller, grayscale, SD card, RAM left for
+   apps (clarify via CrossPoint sources and once the device arrives).
+2. Android version of the Boox Go 7; exact Boox Air 6C specs (panel, resolution).
+3. Tree syntax for layout files (§6.2) — decide before M2.
+4. Scripting for small user tweaks on Tier L in addition to WASM (e.g. Lua or
+   Rhai), or WASM only? Current plan: WASM only.

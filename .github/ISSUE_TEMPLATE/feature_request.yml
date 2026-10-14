@@ -1,0 +1,28 @@
+name: Feature request
+description: Suggest a feature or a plugin idea
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What would you like to do?
+      description: Describe the use case rather than a specific solution.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: How could it work?
+  - type: dropdown
+    id: plugin
+    attributes:
+      label: Could this be a plugin?
+      description: QuireInk's core stays small; most features are plugins.
+      options:
+        - Yes, as a plugin
+        - It needs a new SDK capability
+        - Not sure
+  - type: input
+    id: devices
+    attributes:
+      label: Devices you would use it on

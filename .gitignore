@@ -1,0 +1,13 @@
+/target/
+**/*.rs.bk
+
+# Emulator output
+/out/
+*.screenshot.png
+
+# Editors and OS files
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
