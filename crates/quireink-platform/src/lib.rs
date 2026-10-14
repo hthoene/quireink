@@ -15,6 +15,7 @@ pub mod display;
 pub mod geometry;
 pub mod input;
 pub mod pixel;
+pub mod storage;
 
 pub use display::{ColorPanel, Display, DisplayInfo, FrameView, RefreshMode, Rotation};
 pub use geometry::{Point, Rect};
@@ -22,6 +23,7 @@ pub use input::{
     ButtonState, InputCaps, InputEvent, Instant, PointerEvent, PointerPhase, PointerTool, buttons,
 };
 pub use pixel::{Color, PixelFormat};
+pub use storage::{DirEntry, NoStorage, Storage, StorageError};
 
 /// Static description of a device, provided by its shell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

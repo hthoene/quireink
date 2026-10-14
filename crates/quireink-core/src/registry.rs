@@ -7,7 +7,8 @@ use alloc::vec::Vec;
 
 use quireink_i18n::Catalog;
 use quireink_sdk::{
-    ActionSpec, FontSpec, Id, Priority, RegisterError, Registrar, ScreenSpec, SettingSpec, SlotSpec,
+    ActionSpec, EventHandler, FontSpec, FormatSpec, Id, Priority, RegisterError, Registrar,
+    ScreenSpec, SettingSpec, SlotSpec,
 };
 
 /// A candidate screen for a slot, proposed by a plugin.
@@ -58,7 +59,7 @@ impl Registry {
 
 /// Contributions of one plugin, collected during `register` and merged only
 /// if the whole registration succeeds — a failing plugin leaves no traces.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub(crate) struct Staging {
     actions: Vec<ActionSpec>,
     screens: Vec<ScreenSpec>,
@@ -69,6 +70,8 @@ pub(crate) struct Staging {
     pub(crate) catalogs: Vec<Catalog>,
     pub(crate) fonts: Vec<FontSpec>,
     pub(crate) font_roles: Vec<(Id, Id, Priority)>,
+    pub(crate) formats: Vec<FormatSpec>,
+    pub(crate) subscriptions: Vec<(Id, EventHandler)>,
 }
 
 impl Staging {
@@ -110,7 +113,6 @@ impl Staging {
 }
 
 /// The [`Registrar`] handed to a plugin.
-#[derive(Debug)]
 pub(crate) struct PluginRegistrar<'a> {
     plugin: Id,
     staging: &'a mut Staging,
@@ -192,6 +194,18 @@ impl Registrar for PluginRegistrar<'_> {
 
     fn bind_font(&mut self, role: Id, font: Id, priority: Priority) -> Result<(), RegisterError> {
         self.staging.font_roles.push((role, font, priority));
+        Ok(())
+    }
+
+    fn add_format(&mut self, format: FormatSpec) -> Result<(), RegisterError> {
+        self.check_namespace(&format.id)?;
+        Self::check_unique(self.staging.formats.iter().map(|f| &f.id), &format.id)?;
+        self.staging.formats.push(format);
+        Ok(())
+    }
+
+    fn subscribe(&mut self, event: Id, handler: EventHandler) -> Result<(), RegisterError> {
+        self.staging.subscriptions.push((event, handler));
         Ok(())
     }
 

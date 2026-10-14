@@ -1130,6 +1130,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "quireink-document"
+version = "0.1.0"
+dependencies = [
+ "quireink-platform",
+]
+
+[[package]]
 name = "quireink-emulator"
 version = "0.1.0"
 dependencies = [
@@ -1137,7 +1144,10 @@ dependencies = [
  "quireink-core",
  "quireink-platform",
  "quireink-plugin-diagnostics",
+ "quireink-plugin-files",
  "quireink-plugin-fonts-default",
+ "quireink-plugin-format-txt",
+ "quireink-plugin-reader",
  "softbuffer",
  "winit",
 ]
@@ -1164,11 +1174,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "quireink-layout"
+version = "0.1.0"
+dependencies = [
+ "quireink-document",
+ "quireink-text",
+]
+
+[[package]]
 name = "quireink-platform"
 version = "0.1.0"
 
 [[package]]
 name = "quireink-plugin-diagnostics"
+version = "0.1.0"
+dependencies = [
+ "quireink-i18n",
+ "quireink-sdk",
+]
+
+[[package]]
+name = "quireink-plugin-files"
 version = "0.1.0"
 dependencies = [
  "quireink-i18n",
@@ -1185,11 +1211,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "quireink-plugin-format-txt"
+version = "0.1.0"
+dependencies = [
+ "quireink-i18n",
+ "quireink-sdk",
+]
+
+[[package]]
+name = "quireink-plugin-reader"
+version = "0.1.0"
+dependencies = [
+ "quireink-i18n",
+ "quireink-sdk",
+]
+
+[[package]]
 name = "quireink-sdk"
 version = "0.1.0"
 dependencies = [
+ "quireink-config",
+ "quireink-document",
  "quireink-graphics",
  "quireink-i18n",
+ "quireink-layout",
  "quireink-platform",
  "quireink-text",
 ]

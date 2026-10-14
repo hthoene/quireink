@@ -2,7 +2,9 @@ use alloc::borrow::Cow;
 use core::fmt;
 
 use crate::action::ActionSpec;
+use crate::event::EventHandler;
 use crate::fonts::FontSpec;
+use crate::formats::FormatSpec;
 use crate::id::Id;
 use crate::screen::ScreenSpec;
 use crate::settings::SettingSpec;
@@ -90,6 +92,14 @@ pub trait Registrar {
     /// Proposes a font for a role such as
     /// [`builtin::fonts::UI`](crate::builtin::fonts::UI).
     fn bind_font(&mut self, role: Id, font: Id, priority: Priority) -> Result<(), RegisterError>;
+
+    /// Adds a file format.
+    fn add_format(&mut self, format: FormatSpec) -> Result<(), RegisterError>;
+
+    /// Subscribes to an event, e.g.
+    /// [`builtin::events::STARTED`](crate::builtin::events::STARTED) or one
+    /// defined by another plugin.
+    fn subscribe(&mut self, event: Id, handler: EventHandler) -> Result<(), RegisterError>;
 
     /// Adds a translation catalog (see `quireink-i18n`).
     fn add_translations(&mut self, source: Cow<'static, str>) -> Result<(), RegisterError>;

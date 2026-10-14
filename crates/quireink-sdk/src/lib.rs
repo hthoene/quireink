@@ -14,6 +14,7 @@
 //!   adds contributions through a [`Registrar`].
 //! - **Contributions**: actions ([`ActionSpec`]), screens ([`ScreenSpec`]),
 //!   slots ([`SlotSpec`]), settings ([`SettingSpec`]), fonts ([`FontSpec`]),
+//!   file formats ([`FormatSpec`]), event subscriptions ([`EventHandler`]),
 //!   key maps and translations (data in the QuireInk config format).
 //! - **Slots**: named UI roles such as [`builtin::slots::HOME`]. Any plugin
 //!   may bind a screen to any slot; the user's configuration has the final
@@ -31,9 +32,13 @@ mod action;
 pub mod builtin;
 mod command;
 mod env;
+mod event;
 mod fonts;
+mod formats;
 mod gesture;
 mod id;
+mod memory_storage;
+mod params;
 mod plugin;
 mod screen;
 mod settings;
@@ -42,9 +47,13 @@ mod version;
 pub use action::{ActionHandler, ActionSpec};
 pub use command::Command;
 pub use env::{Env, Metrics};
+pub use event::EventHandler;
 pub use fonts::{FontHandle, FontSpec, Fonts};
+pub use formats::{FormatOpener, FormatSpec, Formats};
 pub use gesture::{Direction, Gesture, GestureKind};
 pub use id::{Id, InvalidId};
+pub use memory_storage::{MemoryStorage, read_file};
+pub use params::Params;
 pub use plugin::{Manifest, Plugin, Priority, RegisterError, Registrar, SlotSpec};
 pub use screen::{Cx, Handled, Output, Screen, ScreenFactory, ScreenSpec};
 pub use settings::{SettingError, SettingKind, SettingSpec, SettingValue, Settings};
@@ -56,4 +65,21 @@ pub use quireink_platform::{
     Color, DeviceInfo, DisplayInfo, InputCaps, Instant, PixelFormat, Point, PointerEvent,
     PointerPhase, PointerTool, Rect, RefreshMode,
 };
+pub use quireink_platform::{DirEntry, NoStorage, Storage, StorageError};
+
+/// The human-editable config format (see `quireink-config`), for plugins
+/// that store their own data as text files.
+pub mod config {
+    pub use quireink_config::*;
+}
+
+/// The format-independent document model (see `quireink-document`).
+pub mod document {
+    pub use quireink_document::*;
+}
+
+/// Page layout engine (see `quireink-layout`), usable by any reader plugin.
+pub mod layout {
+    pub use quireink_layout::*;
+}
 pub use quireink_text::{Font, FontError, LineMetrics};

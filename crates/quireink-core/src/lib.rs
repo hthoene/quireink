@@ -46,13 +46,13 @@ use core::mem;
 use quireink_graphics::{Framebuffer, GraphicsError};
 use quireink_i18n::Translator;
 use quireink_platform::{
-    Color, DeviceInfo, FrameView, InputEvent, Instant, PointerEvent, PointerPhase, Rect,
-    RefreshMode,
+    Color, DeviceInfo, FrameView, InputEvent, Instant, NoStorage, PointerEvent, PointerPhase, Rect,
+    RefreshMode, Storage,
 };
-use quireink_sdk::builtin::{GLOBAL_KEYMAP_LAYER, settings as core_settings, slots};
+use quireink_sdk::builtin::{GLOBAL_KEYMAP_LAYER, events, settings as core_settings, slots};
 use quireink_sdk::{
-    Command, Cx, Env, Fonts, GestureKind, Handled, Id, Manifest, Metrics, Output, Plugin,
-    RegisterError, SDK_VERSION, Screen, Settings,
+    Command, Cx, Env, EventHandler, Fonts, Formats, GestureKind, Handled, Id, Manifest, Metrics,
+    Output, Params, Plugin, RegisterError, SDK_VERSION, Screen, Settings,
 };
 
 use crate::core_plugin::{CORE, CorePlugin};
@@ -165,6 +165,7 @@ pub struct KernelBuilder {
     device_keymap: Option<Cow<'static, str>>,
     user_config: Option<String>,
     glyph_cache: usize,
+    storage: Option<Box<dyn Storage>>,
 }
 
 impl fmt::Debug for KernelBuilder {
@@ -196,6 +197,13 @@ impl KernelBuilder {
         self
     }
 
+    /// The device's storage (books, settings, plugin data). Without it the
+    /// kernel runs with an empty, read-only storage.
+    pub fn storage(mut self, storage: impl Storage + 'static) -> Self {
+        self.storage = Some(Box::new(storage));
+        self
+    }
+
     /// Memory for glyphs rasterized at runtime (default 32 KiB). Bitmap font
     /// packs do not use it.
     pub fn glyph_cache(mut self, bytes: usize) -> Self {
@@ -208,13 +216,19 @@ impl KernelBuilder {
         let framebuffer = Framebuffer::new(display.width, display.height, display.format)
             .map_err(KernelError::Graphics)?;
         let mut kernel = Kernel {
-            device: self.device,
+            shared: Shared {
+                device: self.device,
+                settings: Settings::new(),
+                translator: Translator::new(),
+                fonts: Fonts::new(self.glyph_cache),
+                formats: Formats::new(),
+                storage: self.storage.unwrap_or_else(|| Box::new(NoStorage)),
+            },
             framebuffer,
             registry: Registry::default(),
             keymap: Keymap::default(),
-            settings: Settings::new(),
-            translator: Translator::new(),
-            fonts: Fonts::new(self.glyph_cache),
+            subscriptions: Vec::new(),
+            screen_timer: None,
             recognizer: Recognizer::default(),
             captured: Vec::new(),
             stack: Vec::new(),
@@ -252,12 +266,16 @@ impl KernelBuilder {
             kernel.apply_user_config(source);
         }
         kernel.validate();
-        kernel
+        let shared = &mut kernel.shared;
+        shared
             .translator
-            .set_language(kernel.settings.text(core_settings::LANGUAGE.as_str()));
-        kernel
-            .framebuffer
-            .set_inverted(kernel.settings.bool(core_settings::NIGHT_MODE.as_str()));
+            .set_language(shared.settings.text(core_settings::LANGUAGE.as_str()));
+        kernel.framebuffer.set_inverted(
+            kernel
+                .shared
+                .settings
+                .bool(core_settings::NIGHT_MODE.as_str()),
+        );
         Ok(kernel)
     }
 }
@@ -272,13 +290,13 @@ struct ActiveScreen {
 
 /// The QuireInk kernel. See the [crate documentation](crate).
 pub struct Kernel {
-    device: DeviceInfo,
+    shared: Shared,
     framebuffer: Framebuffer,
     registry: Registry,
     keymap: Keymap,
-    settings: Settings,
-    translator: Translator,
-    fonts: Fonts,
+    subscriptions: Vec<(Id, EventHandler)>,
+    /// When the active screen wants `on_timer`.
+    screen_timer: Option<Instant>,
     recognizer: Recognizer,
     /// Pointer ids captured by the active screen.
     captured: Vec<u8>,
@@ -293,7 +311,7 @@ pub struct Kernel {
 impl fmt::Debug for Kernel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Kernel")
-            .field("device", &self.device.id)
+            .field("device", &self.shared.device.id)
             .field("plugins", &self.plugins)
             .field(
                 "stack",
@@ -311,13 +329,18 @@ impl Kernel {
             device_keymap: None,
             user_config: None,
             glyph_cache: DEFAULT_GLYPH_CACHE,
+            storage: None,
         }
     }
 
-    /// Opens the home slot. Call once after building.
+    /// Opens the home slot and emits [`events::STARTED`]. Call once after
+    /// building.
     pub fn start(&mut self, now: Instant) -> Effects {
         self.now = now;
-        self.output.commands.push(Command::OpenSlot(slots::HOME));
+        self.output.commands.push(Command::open_slot(slots::HOME));
+        self.output
+            .commands
+            .push(Command::Emit(events::STARTED, Params::new()));
         self.finish()
     }
 
@@ -343,6 +366,13 @@ impl Kernel {
         for recognized in self.recognizer.tick(now, &thresholds) {
             self.recognized(recognized);
         }
+        if self.screen_timer.is_some_and(|at| at <= now) {
+            self.screen_timer = None;
+            self.with_top(|screen, cx| {
+                screen.on_timer(cx);
+                Handled::Yes
+            });
+        }
         self.finish()
     }
 
@@ -352,19 +382,23 @@ impl Kernel {
     }
 
     pub fn device(&self) -> &DeviceInfo {
-        &self.device
+        &self.shared.device
     }
 
     pub fn settings(&self) -> &Settings {
-        &self.settings
+        &self.shared.settings
     }
 
     pub fn translator(&self) -> &Translator {
-        &self.translator
+        &self.shared.translator
     }
 
     pub fn fonts(&self) -> &Fonts {
-        &self.fonts
+        &self.shared.fonts
+    }
+
+    pub fn formats(&self) -> &Formats {
+        &self.shared.formats
     }
 
     /// Manifests of all successfully registered plugins, `core` first.
@@ -421,7 +455,7 @@ impl Kernel {
     /// Merges a plugin's contributions — all of them or none.
     fn merge(&mut self, mut staging: Staging) -> Result<(), RegisterError> {
         for setting in &staging.settings {
-            if self.settings.get(setting.id.as_str()).is_some() {
+            if self.shared.settings.get(setting.id.as_str()).is_some() {
                 return Err(RegisterError::Duplicate {
                     id: setting.id.clone(),
                 });
@@ -435,31 +469,45 @@ impl Kernel {
         if let Some(font) = staging
             .fonts
             .iter()
-            .find(|f| self.fonts.contains(f.id.as_str()))
+            .find(|f| self.shared.fonts.contains(f.id.as_str()))
         {
             return Err(RegisterError::Duplicate {
                 id: font.id.clone(),
             });
         }
+        if let Some(format) = staging
+            .formats
+            .iter()
+            .find(|f| self.shared.formats.contains(f.id.as_str()))
+        {
+            return Err(RegisterError::Duplicate {
+                id: format.id.clone(),
+            });
+        }
         staging.merge_into(&mut self.registry)?;
         for setting in staging.settings.drain(..) {
             // Cannot fail: checked above.
-            let _ = self.settings.define(setting);
+            let _ = self.shared.settings.define(setting);
         }
         for source in &staging.keymaps {
             // Validated by the registrar.
             self.keymap.load(source, Origin::Plugin, true);
         }
         for catalog in staging.catalogs.drain(..) {
-            self.translator.add(catalog);
+            self.shared.translator.add(catalog);
         }
         for font in staging.fonts.drain(..) {
             // Cannot fail: checked above.
-            let _ = self.fonts.add(font);
+            let _ = self.shared.fonts.add(font);
         }
         for (role, font, priority) in staging.font_roles.drain(..) {
-            self.fonts.propose(role, font, priority);
+            self.shared.fonts.propose(role, font, priority);
         }
+        for format in staging.formats.drain(..) {
+            // Cannot fail: checked above.
+            let _ = self.shared.formats.add(format);
+        }
+        self.subscriptions.append(&mut staging.subscriptions);
         Ok(())
     }
 
@@ -482,8 +530,8 @@ impl Kernel {
                 "plugins" => {}
                 section if section.starts_with("keymap.") => {}
                 "fonts" => match (Id::parse(entry.key), Id::parse(&value)) {
-                    (Ok(role), Ok(font)) if self.fonts.contains(font.as_str()) => {
-                        self.fonts.bind_user(role, font);
+                    (Ok(role), Ok(font)) if self.shared.fonts.contains(font.as_str()) => {
+                        self.shared.fonts.bind_user(role, font);
                     }
                     (Ok(_), Ok(font)) => self.warn(
                         WarningSource::UserConfig,
@@ -511,7 +559,7 @@ impl Kernel {
                 ),
                 section => {
                     let id = format!("{section}.{}", entry.key);
-                    if let Err(error) = self.settings.set_from_text(&id, &value) {
+                    if let Err(error) = self.shared.settings.set_from_text(&id, &value) {
                         self.warn(WarningSource::UserConfig, line, format!("`{id}`: {error}"));
                     }
                 }
@@ -554,9 +602,10 @@ impl Kernel {
     // ---- Input --------------------------------------------------------
 
     fn thresholds(&self) -> Thresholds {
-        let metrics = Metrics::new(self.device.display.dpi);
+        let metrics = Metrics::new(self.shared.device.display.dpi);
         Thresholds {
             long_press_ms: self
+                .shared
                 .settings
                 .int(core_settings::LONG_PRESS_MS.as_str())
                 .max(0) as u64,
@@ -600,7 +649,7 @@ impl Kernel {
                 if self.with_top(|screen, cx| screen.on_gesture(gesture, cx)) == Handled::Yes {
                     return;
                 }
-                let display = self.device.display;
+                let display = self.shared.device.display;
                 let zone = Zone::of(gesture.start, display.width, display.height);
                 let key = match gesture.kind {
                     GestureKind::Tap => InputKey::Tap(zone),
@@ -640,13 +689,7 @@ impl Kernel {
         match self.registry.actions.get(&action) {
             Some(spec) => {
                 if let Some(handler) = &spec.handler {
-                    let env = env(
-                        &self.device,
-                        self.now,
-                        &self.settings,
-                        &self.translator,
-                        &self.fonts,
-                    );
+                    let env = self.shared.env(self.now);
                     handler(&env, &mut self.output.commands);
                 }
             }
@@ -663,13 +706,7 @@ impl Kernel {
         let Some(top) = self.stack.last_mut() else {
             return Handled::No;
         };
-        let env = env(
-            &self.device,
-            self.now,
-            &self.settings,
-            &self.translator,
-            &self.fonts,
-        );
+        let env = self.shared.env(self.now);
         let mut cx = Cx::new(&env, self.framebuffer.canvas(), &mut self.output);
         f(top.screen.as_mut(), &mut cx)
     }
@@ -685,6 +722,7 @@ impl Kernel {
         let mut effects = Effects::default();
         if let Some(dirty) = self.framebuffer.take_dirty() {
             let interval = self
+                .shared
                 .settings
                 .int(core_settings::FULL_REFRESH_INTERVAL.as_str())
                 .clamp(0, i64::from(u32::MAX)) as u32;
@@ -693,7 +731,14 @@ impl Kernel {
             let (mode, region) = self.refresh.decide(requested, dirty, screen, interval);
             effects.refresh = Some((region, mode));
         }
-        effects.wake_at = self.recognizer.next_deadline(&self.thresholds());
+        if let Some(at) = self.output.wake_at.take() {
+            self.screen_timer = Some(self.screen_timer.map_or(at, |t| t.min(at)));
+        }
+        let input = self.recognizer.next_deadline(&self.thresholds());
+        effects.wake_at = match (input, self.screen_timer) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        };
         effects
     }
 
@@ -718,7 +763,7 @@ impl Kernel {
 
     fn apply(&mut self, command: Command) {
         match command {
-            Command::OpenSlot(slot) => {
+            Command::OpenSlot(slot, params) => {
                 let open = self
                     .stack
                     .iter()
@@ -731,7 +776,7 @@ impl Kernel {
                     return;
                 }
                 match self.registry.resolve_slot(slot.as_str()).cloned() {
-                    Some(screen) => self.open(screen, Some(slot)),
+                    Some(screen) => self.open(screen, Some(slot), &params),
                     None => self.warn(
                         WarningSource::Runtime,
                         None,
@@ -739,14 +784,20 @@ impl Kernel {
                     ),
                 }
             }
-            Command::OpenScreen(screen) => self.open(screen, None),
+            Command::OpenScreen(screen, params) => self.open(screen, None, &params),
+            Command::Emit(event, params) => {
+                let env = self.shared.env(self.now);
+                for (_, handler) in self.subscriptions.iter().filter(|(id, _)| *id == event) {
+                    handler(&env, &params, &mut self.output.commands);
+                }
+            }
             Command::Back => {
                 if self.stack.len() > 1 {
                     self.stack.pop();
                     self.screen_changed();
                 }
             }
-            Command::SetSetting(id, value) => match self.settings.set(id.as_str(), value) {
+            Command::SetSetting(id, value) => match self.shared.settings.set(id.as_str(), value) {
                 Ok(()) => self.setting_changed(&id),
                 Err(error) => {
                     self.warn(WarningSource::Runtime, None, format!("`{id}`: {error}"));
@@ -760,7 +811,7 @@ impl Kernel {
         }
     }
 
-    fn open(&mut self, id: Id, slot: Option<Id>) {
+    fn open(&mut self, id: Id, slot: Option<Id>, params: &Params) {
         let Some(spec) = self.registry.screens.get(&id) else {
             return self.warn(
                 WarningSource::Runtime,
@@ -768,31 +819,32 @@ impl Kernel {
                 format!("unknown screen `{id}`"),
             );
         };
-        let env = env(
-            &self.device,
-            self.now,
-            &self.settings,
-            &self.translator,
-            &self.fonts,
-        );
-        let screen = (spec.factory)(&env);
+        let env = self.shared.env(self.now);
+        let screen = (spec.factory)(&env, params);
         self.stack.push(ActiveScreen { id, slot, screen });
         self.screen_changed();
     }
 
     fn screen_changed(&mut self) {
         self.captured.clear();
+        self.screen_timer = None;
+        self.output.wake_at = None;
         self.output.redraw = true;
         self.output.request_refresh(RefreshMode::Full);
+        self.with_top(|screen, cx| {
+            screen.on_show(cx);
+            Handled::Yes
+        });
     }
 
     fn setting_changed(&mut self, id: &Id) {
         if *id == core_settings::LANGUAGE {
-            self.translator
-                .set_language(self.settings.text(id.as_str()));
+            self.shared
+                .translator
+                .set_language(self.shared.settings.text(id.as_str()));
         } else if *id == core_settings::NIGHT_MODE {
             self.framebuffer
-                .set_inverted(self.settings.bool(id.as_str()));
+                .set_inverted(self.shared.settings.bool(id.as_str()));
         }
         self.output.redraw = true;
         self.output.request_refresh(RefreshMode::Full);
@@ -802,13 +854,7 @@ impl Kernel {
         let Some(top) = self.stack.last_mut() else {
             return;
         };
-        let env = env(
-            &self.device,
-            self.now,
-            &self.settings,
-            &self.translator,
-            &self.fonts,
-        );
+        let env = self.shared.env(self.now);
         let mut canvas = self.framebuffer.canvas();
         canvas.clear(Color::WHITE);
         top.screen.draw(&mut canvas, &env);
@@ -832,20 +878,27 @@ fn disabled_plugins(source: &str) -> Vec<String> {
         .collect()
 }
 
-/// The read-only environment handed to plugins.
-fn env<'a>(
-    device: &'a DeviceInfo,
-    now: Instant,
-    settings: &'a Settings,
-    translator: &'a Translator,
-    fonts: &'a Fonts,
-) -> Env<'a> {
-    Env {
-        device,
-        now,
-        metrics: Metrics::new(device.display.dpi),
-        settings,
-        i18n: translator,
-        fonts,
+/// Everything plugins can read through [`Env`].
+struct Shared {
+    device: DeviceInfo,
+    settings: Settings,
+    translator: Translator,
+    fonts: Fonts,
+    formats: Formats,
+    storage: Box<dyn Storage>,
+}
+
+impl Shared {
+    fn env(&self, now: Instant) -> Env<'_> {
+        Env {
+            device: &self.device,
+            now,
+            metrics: Metrics::new(self.device.display.dpi),
+            settings: &self.settings,
+            i18n: &self.translator,
+            fonts: &self.fonts,
+            formats: &self.formats,
+            storage: self.storage.as_ref(),
+        }
     }
 }

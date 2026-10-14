@@ -8,6 +8,7 @@ use quireink_platform::{InputEvent, Instant};
 use crate::budget;
 use crate::panel::Panel;
 use crate::profiles::Profile;
+use crate::storage::DirStorage;
 
 /// A running device. All kernel calls go through here, so they are
 /// counted against the profile's heap budget.
@@ -32,12 +33,17 @@ impl Device {
     pub fn new(
         profile: &'static Profile,
         user_config: Option<String>,
+        storage: DirStorage,
         simulated_time: bool,
     ) -> Result<Self, KernelError> {
         budget::set_limit(profile.heap_budget);
         let kernel = budget::track(|| {
             let mut builder = Kernel::builder(profile.device)
+                .storage(storage)
                 .plugin(quireink_plugin_fonts_default::DefaultFonts)
+                .plugin(quireink_plugin_format_txt::TxtFormat)
+                .plugin(quireink_plugin_reader::Reader)
+                .plugin(quireink_plugin_files::Files)
                 .plugin(quireink_plugin_diagnostics::Diagnostics);
             // Copy the configuration inside the tracked scope so that its
             // allocation and release are both accounted for.

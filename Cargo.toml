@@ -6,10 +6,15 @@ members = [
     "crates/quireink-i18n",
     "crates/quireink-graphics",
     "crates/quireink-text",
+    "crates/quireink-document",
+    "crates/quireink-layout",
     "crates/quireink-sdk",
     "crates/quireink-core",
     "plugins/diagnostics",
     "plugins/fonts-default",
+    "plugins/format-txt",
+    "plugins/reader",
+    "plugins/files",
     "shells/desktop",
     "tools/fontgen",
 ]
@@ -29,9 +34,14 @@ quireink-config = { path = "crates/quireink-config", version = "0.1.0" }
 quireink-i18n = { path = "crates/quireink-i18n", version = "0.1.0" }
 quireink-graphics = { path = "crates/quireink-graphics", version = "0.1.0" }
 quireink-text = { path = "crates/quireink-text", version = "0.1.0" }
+quireink-document = { path = "crates/quireink-document", version = "0.1.0" }
+quireink-layout = { path = "crates/quireink-layout", version = "0.1.0" }
 quireink-sdk = { path = "crates/quireink-sdk", version = "0.1.0" }
 quireink-core = { path = "crates/quireink-core", version = "0.1.0" }
 quireink-plugin-diagnostics = { path = "plugins/diagnostics", version = "0.1.0" }
+quireink-plugin-files = { path = "plugins/files", version = "0.1.0" }
+quireink-plugin-reader = { path = "plugins/reader", version = "0.1.0" }
+quireink-plugin-format-txt = { path = "plugins/format-txt", version = "0.1.0" }
 quireink-plugin-fonts-default = { path = "plugins/fonts-default", version = "0.1.0", default-features = false }
 
 [workspace.lints.rust]

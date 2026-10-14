@@ -48,7 +48,7 @@ impl Plugin for Diagnostics {
         r.add_screen(ScreenSpec {
             id: SCREEN,
             title: Cow::Borrowed("diagnostics.title"),
-            factory: Box::new(|env| Box::new(DiagnosticsScreen::new(env))),
+            factory: Box::new(|env, _| Box::new(DiagnosticsScreen::new(env))),
         })?;
         r.bind_slot(slots::HOME, SCREEN, Priority::FALLBACK)?;
         r.add_action(ActionSpec {

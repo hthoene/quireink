@@ -144,6 +144,11 @@ impl<'a> FontHandle<'a> {
         self.font().line_metrics(size)
     }
 
+    /// Horizontal advance of one character in pixels.
+    pub fn advance(&self, size: f32, ch: char) -> f32 {
+        self.font().advance(ch, size)
+    }
+
     /// Width of a single line of text in pixels.
     pub fn measure(&self, size: f32, text: &str) -> f32 {
         quireink_text::measure(self.font(), size, text)

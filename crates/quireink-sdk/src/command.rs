@@ -1,4 +1,5 @@
 use crate::id::Id;
+use crate::params::Params;
 use crate::settings::SettingValue;
 use quireink_platform::RefreshMode;
 
@@ -9,15 +10,24 @@ use quireink_platform::RefreshMode;
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Command {
-    /// Shows the screen bound to a slot. If that slot is already open, the
-    /// screens above it are closed.
-    OpenSlot(Id),
+    /// Shows the screen bound to a slot, passing `Params` to it. If that
+    /// slot is already open, the screens above it are closed.
+    OpenSlot(Id, Params),
     /// Opens a specific screen on top of the current one.
-    OpenScreen(Id),
+    OpenScreen(Id, Params),
     /// Closes the current screen (no-op on the root screen).
     Back,
     /// Changes a setting; invalid values are rejected with a warning.
     SetSetting(Id, SettingValue),
     /// Redraws the current screen completely.
     Redraw(RefreshMode),
+    /// Notifies all subscribers of an event.
+    Emit(Id, Params),
+}
+
+impl Command {
+    /// Opens a slot without parameters.
+    pub fn open_slot(slot: Id) -> Command {
+        Command::OpenSlot(slot, Params::new())
+    }
 }

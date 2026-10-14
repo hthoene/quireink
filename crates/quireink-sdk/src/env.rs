@@ -1,11 +1,14 @@
+use core::fmt;
+
 use quireink_i18n::Translator;
-use quireink_platform::{DeviceInfo, Instant};
+use quireink_platform::{DeviceInfo, Instant, Storage};
 
 use crate::fonts::Fonts;
+use crate::formats::Formats;
 use crate::settings::Settings;
 
 /// Read-only view of the environment a plugin runs in.
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub struct Env<'a> {
     pub device: &'a DeviceInfo,
     /// Time of the event being handled.
@@ -14,6 +17,27 @@ pub struct Env<'a> {
     pub settings: &'a Settings,
     pub i18n: &'a Translator,
     pub fonts: &'a Fonts,
+    pub formats: &'a Formats,
+    /// The device's storage. Plugins keep their own files below
+    /// [`Env::plugin_dir`].
+    pub storage: &'a dyn Storage,
+}
+
+impl fmt::Debug for Env<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Env")
+            .field("device", &self.device.id)
+            .field("now", &self.now)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Env<'_> {
+    /// The directory where plugin `plugin` keeps its data, e.g.
+    /// `.quireink/plugins/reader`.
+    pub fn plugin_dir(plugin: &str) -> alloc::string::String {
+        alloc::format!(".quireink/plugins/{plugin}")
+    }
 }
 
 /// Converts physical lengths to pixels for the current screen, so layouts

@@ -1,5 +1,8 @@
 * text=auto eol=lf
 
+# Sample books are kept byte-for-byte as published.
+samples/library/books/** -text
+
 *.png binary
 *.bin binary
 *.epub binary

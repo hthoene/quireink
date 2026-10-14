@@ -9,6 +9,7 @@ mod gui;
 mod headless;
 mod panel;
 mod profiles;
+mod storage;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -33,6 +34,8 @@ OPTIONS:
     --headless            Run without a window
     --script <steps>      Input steps, e.g. \"page-forward,long:confirm,tap:100:200\"
     --screenshot <file>   Save a PNG of the panel after the script (headless)
+    --library <dir>       Folder emulating the device storage
+                          (default: samples/library)
     --screenshot-dir <d>  Where F12 saves screenshots (default: out)
     -h, --help            Show this help
 
@@ -54,6 +57,7 @@ struct Options {
     script: Option<String>,
     screenshot: Option<PathBuf>,
     screenshot_dir: Option<PathBuf>,
+    library: Option<PathBuf>,
 }
 
 fn main() -> ExitCode {
@@ -74,7 +78,13 @@ fn run() -> Result<(), String> {
     let profile = profiles::find(profile_id)
         .ok_or_else(|| format!("unknown profile `{profile_id}` (see --list-profiles)"))?;
 
-    let mut device = Device::new(profile, user_config(&options)?, options.headless)
+    let library = options
+        .library
+        .clone()
+        .unwrap_or_else(|| PathBuf::from("samples/library"));
+    let storage = storage::DirStorage::new(&library)
+        .map_err(|e| format!("library {}: {e}", library.display()))?;
+    let mut device = Device::new(profile, user_config(&options)?, storage, options.headless)
         .map_err(|e| format!("{}: {e}", profile.device.id))?;
 
     if options.headless {
@@ -155,6 +165,7 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Option<Options>,
             "--headless" => options.headless = true,
             "--script" => options.script = Some(value("--script")?),
             "--screenshot" => options.screenshot = Some(PathBuf::from(value("--screenshot")?)),
+            "--library" => options.library = Some(PathBuf::from(value("--library")?)),
             "--screenshot-dir" => {
                 options.screenshot_dir = Some(PathBuf::from(value("--screenshot-dir")?));
             }

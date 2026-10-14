@@ -49,8 +49,7 @@ fn run_step(device: &mut Device, step: &str) -> Result<(), String> {
     match parts.as_slice() {
         ["wait", ms] => {
             let ms: u64 = ms.parse().map_err(|_| format!("`{ms}` is not a number"))?;
-            device.advance(ms);
-            device.tick_if_due();
+            hold(device, ms);
         }
         ["long", name] => press(device, button(device, name)?, LONG_MS),
         ["tap", x, y] => touch(device, Point::new(number(x)?, number(y)?), None, 60),
@@ -110,13 +109,20 @@ fn touch(device: &mut Device, start: Point, end: Option<Point>, hold_ms: u64) {
 }
 
 /// Lets time pass in small steps so due long presses fire on time.
+/// Lets `millis` of simulated time pass, waking the kernel at every time it
+/// asked for — exactly like a device would.
 fn hold(device: &mut Device, millis: u64) {
-    let mut left = millis;
-    while left > 0 {
-        let step = left.min(50);
-        device.advance(step);
+    let end = device.now().add_millis(millis);
+    loop {
+        let now = device.now();
+        let next = device.wake_at.filter(|&at| at < end).unwrap_or(end);
+        // At least 1 ms per round, so "as soon as possible" requests cannot
+        // stall simulated time.
+        device.advance(next.since(now).max(1));
         device.tick_if_due();
-        left -= step;
+        if next >= end {
+            return;
+        }
     }
 }
 

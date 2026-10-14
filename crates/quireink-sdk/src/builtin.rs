@@ -29,6 +29,25 @@ pub mod slots {
     /// The start screen. The default is a dashboard, but any screen can be
     /// bound here — a file browser, a bookshelf, a single "continue" button.
     pub const HOME: Id = Id::new_static("core.home");
+    /// Shows a book. Opened with the parameter [`PATH`](super::params::PATH).
+    pub const READER: Id = Id::new_static("core.reader");
+    /// Browses the library.
+    pub const LIBRARY: Id = Id::new_static("core.library");
+}
+
+/// Standard parameter names.
+pub mod params {
+    /// A storage path, e.g. of the book to open.
+    pub const PATH: &str = "path";
+}
+
+/// Events emitted by the kernel.
+pub mod events {
+    use crate::Id;
+
+    /// After the home screen has been opened at start-up. Plugins use it to
+    /// e.g. reopen the last book.
+    pub const STARTED: Id = Id::new_static("core.started");
 }
 
 /// Standard screens.

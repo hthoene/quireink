@@ -57,7 +57,7 @@ impl Plugin for CorePlugin {
                 actions::HOME,
                 "core.action.home",
                 Box::new(|_: &Env<'_>, out: &mut Vec<Command>| {
-                    out.push(Command::OpenSlot(slots::HOME));
+                    out.push(Command::open_slot(slots::HOME));
                 }),
             ),
             (
@@ -80,17 +80,23 @@ impl Plugin for CorePlugin {
             })?;
         }
 
-        r.add_slot(SlotSpec {
-            id: slots::HOME,
-            title: Cow::Borrowed("core.slot.home"),
-        })?;
+        for (id, title) in [
+            (slots::HOME, "core.slot.home"),
+            (slots::READER, "core.slot.reader"),
+            (slots::LIBRARY, "core.slot.library"),
+        ] {
+            r.add_slot(SlotSpec {
+                id: id.clone(),
+                title: Cow::Borrowed(title),
+            })?;
+            // Lowest possible priority: any real screen wins.
+            r.bind_slot(id, screens::PLACEHOLDER, Priority(i16::MIN))?;
+        }
         r.add_screen(ScreenSpec {
             id: screens::PLACEHOLDER,
             title: Cow::Borrowed("core.screen.placeholder"),
-            factory: Box::new(|_| Box::new(PlaceholderScreen)),
+            factory: Box::new(|_, _| Box::new(PlaceholderScreen)),
         })?;
-        // Lowest possible priority: any real screen wins.
-        r.bind_slot(slots::HOME, screens::PLACEHOLDER, Priority(i16::MIN))?;
 
         r.add_setting(SettingSpec {
             id: settings::LANGUAGE,

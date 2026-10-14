@@ -1,0 +1,18 @@
+[package]
+name = "quireink-document"
+description = "Format-independent document model for QuireInk: locators, blocks, documents (no_std)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+categories = ["no-std", "text-processing"]
+keywords = ["e-reader", "ebook", "document"]
+
+[dependencies]
+quireink-platform.workspace = true
+
+[lints]
+workspace = true

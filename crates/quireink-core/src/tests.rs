@@ -84,7 +84,7 @@ impl Plugin for TestPlugin {
         r.add_screen(ScreenSpec {
             id: self.screen_id(),
             title: Cow::Borrowed("test.screen"),
-            factory: Box::new(move |_| {
+            factory: Box::new(move |_, _| {
                 Box::new(TestScreen {
                     name,
                     log: log.clone(),
@@ -454,4 +454,107 @@ core.font-reading = nope.font
     let warnings = kernel.take_warnings();
     assert_eq!(warnings.len(), 1);
     assert!(warnings[0].message.contains("unknown font `nope.font`"));
+}
+
+/// Subscribes to `core.started`, opens its screen with parameters and runs
+/// a timer started in `on_show`.
+struct LifecyclePlugin {
+    log: Log,
+}
+
+struct LifecycleScreen {
+    log: Log,
+    ticks: u32,
+}
+
+impl Screen for LifecycleScreen {
+    fn draw(&mut self, _: &mut Canvas<'_>, _: &Env<'_>) {}
+
+    fn on_action(&mut self, _: &Id, _: &mut Cx<'_, '_>) -> Handled {
+        Handled::No
+    }
+
+    fn on_show(&mut self, cx: &mut Cx<'_, '_>) {
+        self.log.borrow_mut().push(String::from("show"));
+        let at = cx.env().now.add_millis(10);
+        cx.wake_at(at);
+    }
+
+    fn on_timer(&mut self, cx: &mut Cx<'_, '_>) {
+        self.ticks += 1;
+        self.log.borrow_mut().push(alloc::format!(
+            "timer {} at {}",
+            self.ticks,
+            cx.env().now.millis()
+        ));
+        if self.ticks < 2 {
+            let at = cx.env().now.add_millis(10);
+            cx.wake_at(at);
+        }
+    }
+}
+
+impl Plugin for LifecyclePlugin {
+    fn manifest(&self) -> Manifest {
+        Manifest {
+            id: Id::new_static("life"),
+            name: Cow::Borrowed("Lifecycle"),
+            version: Version::new(1, 0, 0),
+            sdk: SDK_VERSION,
+        }
+    }
+
+    fn register(&self, r: &mut dyn Registrar) -> Result<(), RegisterError> {
+        let log = self.log.clone();
+        r.add_screen(ScreenSpec {
+            id: Id::new_static("life.screen"),
+            title: Cow::Borrowed("life"),
+            factory: Box::new(move |_, params| {
+                log.borrow_mut()
+                    .push(alloc::format!("open {}", params.get("path").unwrap_or("-")));
+                Box::new(LifecycleScreen {
+                    log: log.clone(),
+                    ticks: 0,
+                })
+            }),
+        })?;
+        r.subscribe(
+            quireink_sdk::builtin::events::STARTED,
+            Box::new(|_, _, out| {
+                out.push(quireink_sdk::Command::OpenScreen(
+                    Id::new_static("life.screen"),
+                    quireink_sdk::Params::new().with("path", "books/a.txt"),
+                ));
+            }),
+        )?;
+        Ok(())
+    }
+}
+
+#[test]
+fn events_open_screens_with_params_and_timers_run() {
+    let log = log();
+    let mut kernel = Kernel::builder(DEVICE)
+        .plugin(LifecyclePlugin { log: log.clone() })
+        .build()
+        .unwrap();
+    let effects = kernel.start(Instant(100));
+    assert_eq!(kernel.active_screen().map(Id::as_str), Some("life.screen"));
+    assert_eq!(effects.wake_at(), Some(Instant(110)));
+
+    // Too early: nothing happens.
+    kernel.tick(Instant(105));
+    let effects = kernel.tick(Instant(110));
+    assert_eq!(effects.wake_at(), Some(Instant(120)));
+    let effects = kernel.tick(Instant(120));
+    assert_eq!(effects.wake_at(), None);
+    assert_eq!(
+        *log.borrow(),
+        [
+            "open books/a.txt",
+            "show",
+            "timer 1 at 110",
+            "timer 2 at 120"
+        ]
+    );
 }

@@ -3,6 +3,8 @@
 
 # Emulator output
 /out/
+# Reading progress and page indexes written by the emulator
+/samples/library/.quireink/
 *.screenshot.png
 
 # Editors and OS files

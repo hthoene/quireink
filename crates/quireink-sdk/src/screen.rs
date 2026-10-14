@@ -4,15 +4,17 @@ use alloc::vec::Vec;
 use core::fmt;
 
 use quireink_graphics::Canvas;
-use quireink_platform::{PointerEvent, RefreshMode};
+use quireink_platform::{Instant, PointerEvent, RefreshMode};
 
 use crate::command::Command;
 use crate::env::Env;
 use crate::gesture::Gesture;
 use crate::id::Id;
+use crate::params::Params;
 
-/// Creates a screen instance when it is opened.
-pub type ScreenFactory = Box<dyn Fn(&Env<'_>) -> Box<dyn Screen>>;
+/// Creates a screen instance when it is opened, with the parameters of the
+/// command that opened it (e.g. the path of a book).
+pub type ScreenFactory = Box<dyn Fn(&Env<'_>, &Params) -> Box<dyn Screen>>;
 
 /// A screen contribution.
 pub struct ScreenSpec {
@@ -66,6 +68,20 @@ pub trait Screen {
         let _ = (event, cx);
         Handled::No
     }
+
+    /// Called whenever the screen becomes the visible one — after it was
+    /// opened and when the screens above it were closed. A good place to
+    /// start background work with [`Cx::wake_at`].
+    fn on_show(&mut self, cx: &mut Cx<'_, '_>) {
+        let _ = cx;
+    }
+
+    /// Called when a time requested with [`Cx::wake_at`] has come. Long
+    /// work (e.g. paginating a book) is split into steps that each request
+    /// the next wake-up, so input stays responsive.
+    fn on_timer(&mut self, cx: &mut Cx<'_, '_>) {
+        let _ = cx;
+    }
 }
 
 /// What a plugin asked the kernel to do during an event.
@@ -76,6 +92,8 @@ pub struct Output {
     pub refresh: Option<RefreshMode>,
     /// Whether the whole screen should be redrawn.
     pub redraw: bool,
+    /// When the active screen wants [`Screen::on_timer`] to be called.
+    pub wake_at: Option<Instant>,
 }
 
 impl Output {
@@ -126,5 +144,11 @@ impl<'a, 'e> Cx<'a, 'e> {
     /// Requests a complete redraw via [`Screen::draw`].
     pub fn request_redraw(&mut self) {
         self.output.redraw = true;
+    }
+
+    /// Requests a call to [`Screen::on_timer`] at `at` (the earliest
+    /// request wins). Use `cx.env().now` for "as soon as possible".
+    pub fn wake_at(&mut self, at: Instant) {
+        self.output.wake_at = Some(self.output.wake_at.map_or(at, |w| w.min(at)));
     }
 }
