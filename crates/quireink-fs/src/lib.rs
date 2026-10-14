@@ -1,4 +1,5 @@
-//! Storage backed by a directory on the host (the emulated SD card).
+//! Storage backed by a directory of the host file system: the emulated SD
+//! card of the desktop emulator, or an app's folder on Android.
 
 use std::cell::RefCell;
 use std::fs::{self, File, OpenOptions};

@@ -9,7 +9,6 @@ mod gui;
 mod headless;
 mod panel;
 mod profiles;
-mod storage;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -88,7 +87,7 @@ fn run() -> Result<(), String> {
         .library
         .clone()
         .unwrap_or_else(|| PathBuf::from("samples/library"));
-    let storage = storage::DirStorage::new(&library)
+    let storage = quireink_fs::DirStorage::new(&library)
         .map_err(|e| format!("library {}: {e}", library.display()))?;
     if options.heap_report {
         if !options.headless {

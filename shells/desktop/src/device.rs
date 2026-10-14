@@ -9,7 +9,7 @@ use quireink_platform::{InputEvent, Instant};
 use crate::budget;
 use crate::panel::Panel;
 use crate::profiles::Profile;
-use crate::storage::DirStorage;
+use quireink_fs::DirStorage;
 
 /// A running device. All kernel calls go through here, so they are
 /// counted against the profile's heap budget.
@@ -43,25 +43,18 @@ impl Device {
     ) -> Result<Self, KernelError> {
         budget::set_limit(profile.heap_budget);
         let kernel = budget::track(|| {
-            let mut builder = Kernel::builder(profile.device)
+            let fonts = if profile.font_packs {
+                quireink_app::Fonts::Packs
+            } else {
+                quireink_app::Fonts::Outline
+            };
+            let builder = Kernel::builder(profile.device)
                 .storage(storage)
-                .glyph_cache(profile.glyph_cache)
-                .plugin(quireink_plugin_format_txt::TxtFormat)
-                .plugin(quireink_plugin_format_epub::EpubFormat)
-                .plugin(quireink_plugin_reader::Reader)
-                .plugin(quireink_plugin_files::Files)
-                .plugin(quireink_plugin_home::Home)
-                .plugin(quireink_plugin_menu::Menu)
-                .plugin(quireink_plugin_settings::SettingsPlugin)
-                .plugin(quireink_plugin_diagnostics::Diagnostics);
+                .glyph_cache(profile.glyph_cache);
+            let mut builder = quireink_app::install(builder, fonts);
             if let Some(rows) = profile.frame_rows {
                 builder = builder.frame_rows(rows);
             }
-            builder = if profile.font_packs {
-                builder.plugin(quireink_plugin_fonts_default::DefaultFontPacks)
-            } else {
-                builder.plugin(quireink_plugin_fonts_default::DefaultFonts)
-            };
             for (id, value) in profile.settings {
                 builder = builder.setting_default(id, value);
             }

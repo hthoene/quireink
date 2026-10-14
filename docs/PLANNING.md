@@ -752,7 +752,7 @@ If the X4 has not arrived by the end of M3, M6 (Boox) is done before M4.
 | **M3 EPUB** 🔶 | ✅ streaming ZIP (`quireink-zip`), incremental XML tokenizer (`quireink-xml`), EPUB 2/3 package, spine, metadata, TOC (nav + NCX) with anchors, chapter conversion into a block cache (ADR 0011), TOC screen + `reader.goto`, `DocumentError::OutOfMemory` · ⬜ CSS subset (bold, italic, alignment, headings), images (dithered), fuzzing | Standard Ebooks / Gutenberg test corpus renders correctly; Gutenberg EPUBs within the X4 budget (✅ peak 115 of 192 KiB with banded rendering, ADR 0012) |
 | **M4 Xteink X4** | ESP32 shell: display, buttons, SD, sleep, firmware backup/restore | Read an EPUB on real hardware; battery measurement |
 | **M5 Plugins v1** | SDK 0.1 published + docs, plugin manifests loaded from storage, events/filters/services complete, kosync, OPDS | Progress syncs with KOReader; a sample community plugin lives outside the repo |
-| **M6 Boox** | Android shell, colour rendering path | APK runs on Go 7 (mono) and Air 6C (colour) |
+| **M6 Boox** 🔶 | ✅ native activity in Rust without Java or Gradle (`shells/android`, `build-apk.sh`, APK as CI artifact), touch, page/volume keys, sample books, system language, shared `quireink-app` plugin set and `quireink-fs` storage · ⬜ Onyx SDK for e-ink refresh modes, colour rendering path, frontlight, access to the shared storage's book folders, app icon | APK runs on Go 7 (mono) ✅ (2026-10-14: library, EPUB, page keys, swipes, reopening the last book) and Air 6C (colour) ⬜ |
 | **M7 Kobo** | linux-fb shell, device DB, touch, frontlight, suspend | Daily-driver usable on one Kobo |
 | **M8 Expansion** | Runtime WASM plugins, PDF/CBZ/…, Kindle, PocketBook, reMarkable, web demo | — |
 

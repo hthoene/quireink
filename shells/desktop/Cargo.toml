@@ -15,18 +15,11 @@ name = "quireink-emu"
 path = "src/main.rs"
 
 [dependencies]
+quireink-app = { workspace = true, features = ["outline", "packs"] }
 quireink-core = { workspace = true, features = ["color", "outline"] }
+quireink-fs.workspace = true
 quireink-graphics = { workspace = true, features = ["color"] }
 quireink-platform.workspace = true
-quireink-plugin-diagnostics.workspace = true
-quireink-plugin-files.workspace = true
-quireink-plugin-format-epub.workspace = true
-quireink-plugin-format-txt.workspace = true
-quireink-plugin-home.workspace = true
-quireink-plugin-menu.workspace = true
-quireink-plugin-settings.workspace = true
-quireink-plugin-reader.workspace = true
-quireink-plugin-fonts-default = { workspace = true, features = ["outline", "packs"] }
 png = "0.17"
 softbuffer = "0.4"
 # Without client-side decorations on Wayland: they pull in the unmaintained

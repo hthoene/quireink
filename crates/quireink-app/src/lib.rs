@@ -1,0 +1,40 @@
+//! The standard QuireInk app: the first-party plugins every shell installs.
+//!
+//! The kernel itself has no product features; a shell decides which plugins
+//! it ships. This crate keeps that list in one place, so the emulator, the
+//! Android app and the firmware ship the same app. Shells can still add,
+//! leave out or replace any plugin.
+
+#![no_std]
+
+use quireink_core::KernelBuilder;
+
+/// How the default fonts are shipped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Fonts {
+    /// Scalable fonts rendered at runtime (needs the `outline` feature).
+    #[cfg(feature = "outline")]
+    Outline,
+    /// Bitmap font packs read in place, for small devices.
+    #[cfg(any(feature = "packs", not(feature = "outline")))]
+    Packs,
+}
+
+/// Adds the first-party plugins to `builder`.
+pub fn install(builder: KernelBuilder, fonts: Fonts) -> KernelBuilder {
+    let builder = match fonts {
+        #[cfg(feature = "outline")]
+        Fonts::Outline => builder.plugin(quireink_plugin_fonts_default::DefaultFonts),
+        #[cfg(any(feature = "packs", not(feature = "outline")))]
+        Fonts::Packs => builder.plugin(quireink_plugin_fonts_default::DefaultFontPacks),
+    };
+    builder
+        .plugin(quireink_plugin_format_txt::TxtFormat)
+        .plugin(quireink_plugin_format_epub::EpubFormat)
+        .plugin(quireink_plugin_reader::Reader)
+        .plugin(quireink_plugin_files::Files)
+        .plugin(quireink_plugin_home::Home)
+        .plugin(quireink_plugin_menu::Menu)
+        .plugin(quireink_plugin_settings::SettingsPlugin)
+        .plugin(quireink_plugin_diagnostics::Diagnostics)
+}

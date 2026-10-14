@@ -1,0 +1,32 @@
+[package]
+name = "quireink-android"
+description = "QuireInk Android shell: a native activity for Android e-readers (Boox and others)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+publish = false
+
+[lib]
+# The library Android loads (`libquireink.so`, see AndroidManifest.xml).
+name = "quireink"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+quireink-app = { workspace = true, features = ["outline"] }
+quireink-core = { workspace = true, features = ["color", "outline"] }
+quireink-fs.workspace = true
+quireink-graphics = { workspace = true, features = ["color"] }
+quireink-platform.workspace = true
+
+[target.'cfg(target_os = "android")'.dependencies]
+android-activity = { version = "0.6", features = ["native-activity"] }
+android_logger = { version = "0.15", default-features = false }
+log = "0.4"
+ndk = "0.9"
+
+[lints]
+workspace = true

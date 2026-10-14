@@ -1,0 +1,17 @@
+[package]
+name = "quireink-fs"
+description = "QuireInk storage on a host file system directory, for shells with std (desktop, Android, Linux)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+categories = ["filesystem"]
+
+[dependencies]
+quireink-platform.workspace = true
+
+[lints]
+workspace = true

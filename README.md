@@ -4,8 +4,9 @@
 380 KB microcontroller to Linux and Android e-readers, from one codebase.**
 
 > **Status: early development.** EPUB and plain text books can be read in
-> the emulator — with a table of contents, menus, a settings screen, page
-> index, saved reading position and reopening of the last book. See the
+> the emulator and on Android e-readers (tested on a Boox Go 7) — with a
+> table of contents, menus, a settings screen, page index, saved reading
+> position and reopening of the last book. See the
 > [project plan](docs/PLANNING.md)
 > and the [roadmap](docs/PLANNING.md#12-roadmap).
 
@@ -117,9 +118,12 @@ cargo run -p quireink-emulator -- --headless --profile boox-go-7 --set core.lang
 | `crates/quireink-xml` | Incremental XML/XHTML tokenizer |
 | `crates/quireink-sdk` | **The plugin SDK** — the only API plugins use |
 | `crates/quireink-core` | The kernel: plugin host, registries, input routing, refresh policy |
+| `crates/quireink-app` | The standard app: the first-party plugin set shells install |
+| `crates/quireink-fs` | Storage in a host directory, for shells with an operating system |
 | `plugins/` | First-party plugins: home screen, reader, file browser, menu, settings, EPUB and TXT formats, default fonts, diagnostics |
 | `tools/fontgen` | Converts fonts into bitmap font packs for small devices |
 | `shells/desktop` | Desktop emulator with device profiles |
+| `shells/android` | Android app for e-readers such as Boox ([build and install](shells/android/README.md)) |
 | `samples/` | Emulator library with public-domain books |
 | `docs/` | [Plan](docs/PLANNING.md) and [architecture decisions](docs/adr/) |
 

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- QuireInk for Android: a native activity without Java code. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="io.github.hthoene.quireink">
+
+    <application
+        android:label="QuireInk"
+        android:hasCode="false"
+        android:extractNativeLibs="true"
+        android:allowBackup="true">
+
+        <activity
+            android:name="android.app.NativeActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:screenOrientation="portrait"
+            android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale">
+            <meta-data
+                android:name="android.app.lib_name"
+                android:value="quireink" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

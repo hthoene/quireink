@@ -112,6 +112,30 @@ jobs:
           name: emulator-screenshots
           path: out/*.png
 
+  android:
+    name: Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo install cargo-ndk --locked
+      - name: Lint the Android shell
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_LATEST_HOME }}
+        run: cargo ndk -t arm64-v8a --platform 26 clippy -p quireink-android
+      - name: Build the APK
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_LATEST_HOME }}
+        run: shells/android/build-apk.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: quireink-android-apk
+          path: target/android/quireink.apk
+
   deny:
     name: Licenses and advisories
     runs-on: ubuntu-latest

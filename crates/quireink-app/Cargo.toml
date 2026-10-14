@@ -1,0 +1,33 @@
+[package]
+name = "quireink-app"
+description = "The standard QuireInk app: the first-party plugin set that shells install into the kernel"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+categories = ["no-std"]
+
+[features]
+default = []
+# Scalable default fonts (needs atomics: not on the ESP32-C3).
+outline = ["quireink-plugin-fonts-default/outline"]
+# Bitmap font packs next to the scalable fonts.
+packs = ["quireink-plugin-fonts-default/packs"]
+
+[dependencies]
+quireink-core.workspace = true
+quireink-plugin-diagnostics.workspace = true
+quireink-plugin-files.workspace = true
+quireink-plugin-fonts-default = { workspace = true, default-features = false }
+quireink-plugin-format-epub.workspace = true
+quireink-plugin-format-txt.workspace = true
+quireink-plugin-home.workspace = true
+quireink-plugin-menu.workspace = true
+quireink-plugin-reader.workspace = true
+quireink-plugin-settings.workspace = true
+
+[lints]
+workspace = true
