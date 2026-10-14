@@ -14,3 +14,9 @@
 *.swp
 .DS_Store
 Thumbs.db
+
+# Fuzzing (cargo fuzz)
+/fuzz/target/
+/fuzz/corpus/
+/fuzz/artifacts/
+/fuzz/coverage/

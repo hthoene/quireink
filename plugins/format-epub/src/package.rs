@@ -276,6 +276,15 @@ pub(crate) fn toc_entry(storage: &dyn Storage, cache: &str, index: u32) -> Optio
     })
 }
 
+/// `text` cut to at most `max` bytes, at a character boundary.
+fn truncate(text: &str, max: usize) -> &str {
+    let mut cut = text.len().min(max);
+    while !text.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    &text[..cut]
+}
+
 /// Writes table of contents records to the cache in small chunks.
 struct TocWriter<'a> {
     storage: &'a dyn Storage,
@@ -306,14 +315,9 @@ impl<'a> TocWriter<'a> {
     }
 
     fn push(&mut self, level: u8, section: u32, fragment: Option<&str>, title: &str) {
-        let fragment = fragment.unwrap_or_default();
-        let fragment = &fragment[..fragment.len().min(255)];
-        // Titles are shown on one line; very long ones are cut.
-        let mut cut = title.len().min(1024);
-        while !title.is_char_boundary(cut) {
-            cut -= 1;
-        }
-        let title = &title[..cut];
+        // Longer ids cannot match an anchor; titles are shown on one line.
+        let fragment = truncate(fragment.unwrap_or_default(), 255);
+        let title = truncate(title, 1024);
         self.index.extend_from_slice(&self.written.to_le_bytes());
         self.data.push(level);
         self.data.extend_from_slice(&section.to_le_bytes());

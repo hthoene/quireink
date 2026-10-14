@@ -136,6 +136,30 @@ jobs:
           name: quireink-android-apk
           path: target/android/quireink.apk
 
+  fuzz:
+    name: Fuzz parsers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz
+      - run: cargo install cargo-fuzz --locked
+      - name: One minute per target, seeded with the sample books
+        run: |
+          mkdir -p fuzz/corpus/epub fuzz/corpus/txt
+          cp samples/library/books/*.epub fuzz/corpus/epub/
+          cp samples/library/books/*.txt fuzz/corpus/txt/
+          for target in epub txt xml hyphen; do
+            cargo fuzz run "$target" -- -max_total_time=60 -rss_limit_mb=1024
+          done
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: fuzz-crashes
+          path: fuzz/artifacts
+
   deny:
     name: Licenses and advisories
     runs-on: ubuntu-latest

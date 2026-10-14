@@ -230,6 +230,17 @@ impl ZipArchive {
         self.index.is_empty()
     }
 
+    /// All entries, read from the central directory one at a time (in no
+    /// particular order), e.g. to list the images of a comic archive.
+    pub fn entries<'a>(
+        &'a self,
+        storage: &'a dyn Storage,
+    ) -> impl Iterator<Item = Result<Entry, ZipError>> + 'a {
+        self.index
+            .iter()
+            .map(move |&(_, offset)| self.entry_by_record(storage, offset))
+    }
+
     /// The entry named `name` (exact, case-sensitive path inside the
     /// archive), read from the central directory.
     pub fn entry(&self, storage: &dyn Storage, name: &str) -> Result<Option<Entry>, ZipError> {

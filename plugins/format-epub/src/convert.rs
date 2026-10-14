@@ -325,16 +325,15 @@ impl Converter<'_> {
 
     /// Emits the first part of an overlong block at a space.
     fn split(&mut self) {
-        let cut = self.text[..LIMIT.min(self.text.len())]
+        // The last character boundary within the limit.
+        let mut limit = LIMIT.min(self.text.len());
+        while !self.text.is_char_boundary(limit) {
+            limit -= 1;
+        }
+        let cut = self.text[..limit]
             .rfind([' ', '\n'])
             .filter(|&i| i > 0)
-            .unwrap_or_else(|| {
-                let mut i = LIMIT.min(self.text.len());
-                while !self.text.is_char_boundary(i) {
-                    i -= 1;
-                }
-                i
-            });
+            .unwrap_or(limit);
         let kind = self.kind;
         self.write_record(kind, cut);
         // Keep the rest in place, so the buffer is never reallocated.

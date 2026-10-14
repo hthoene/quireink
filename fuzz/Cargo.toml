@@ -1,0 +1,48 @@
+[package]
+name = "quireink-fuzz"
+description = "Fuzz targets for QuireInk's parsers (cargo fuzz, Linux and nightly Rust)"
+version = "0.0.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+quireink-sdk = { path = "../crates/quireink-sdk" }
+quireink-plugin-format-epub = { path = "../plugins/format-epub" }
+quireink-plugin-format-txt = { path = "../plugins/format-txt" }
+quireink-hyphen = { path = "../crates/quireink-hyphen" }
+
+# Not part of the main workspace.
+[workspace]
+
+[[bin]]
+name = "epub"
+path = "fuzz_targets/epub.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "txt"
+path = "fuzz_targets/txt.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "xml"
+path = "fuzz_targets/xml.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "hyphen"
+path = "fuzz_targets/hyphen.rs"
+test = false
+doc = false
+bench = false

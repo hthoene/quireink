@@ -20,5 +20,9 @@ testing = []
 quireink-platform.workspace = true
 miniz_oxide = { version = "0.8", default-features = false, features = ["with-alloc"] }
 
+[dev-dependencies]
+# The integration tests build archives with ZipBuilder.
+quireink-zip = { path = ".", features = ["testing"] }
+
 [lints]
 workspace = true
