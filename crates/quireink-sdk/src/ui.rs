@@ -4,6 +4,9 @@
 //! setting, so every plugin's UI looks consistent and scales together when
 //! the user chooses larger text.
 
+#[path = "choice.rs"]
+pub mod choice;
+
 use alloc::borrow::Cow;
 use alloc::format;
 use alloc::string::{String, ToString};

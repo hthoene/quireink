@@ -43,6 +43,12 @@ pub struct Env<'a> {
     /// the system has a clipboard, in another app; read it with
     /// [`Command::ReadClipboard`](crate::Command::ReadClipboard).
     pub clipboard: bool,
+    /// The slots some screen is bound to (see [`Env::has_slot`]).
+    pub slots: &'a [crate::Id],
+    /// The folders reading fonts are found in at start-up, the first one
+    /// QuireInk's own (where new fonts go); empty where the device has
+    /// only its built-in fonts.
+    pub font_dirs: &'a [alloc::string::String],
     /// The device's storage. Plugins keep their own files below
     /// [`Env::plugin_dir`].
     pub storage: &'a dyn Storage,
@@ -58,6 +64,13 @@ impl fmt::Debug for Env<'_> {
 }
 
 impl Env<'_> {
+    /// Whether a screen is bound to `slot`, e.g. whether a browser is
+    /// there to open links to the web
+    /// ([`slots::BROWSER`](crate::builtin::slots::BROWSER)).
+    pub fn has_slot(&self, slot: &crate::Id) -> bool {
+        self.slots.contains(slot)
+    }
+
     /// The directory where plugin `plugin` keeps its data, e.g.
     /// `.quireink/plugins/reader`.
     pub fn plugin_dir(plugin: &str) -> alloc::string::String {

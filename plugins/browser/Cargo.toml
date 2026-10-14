@@ -1,0 +1,20 @@
+[package]
+name = "quireink-plugin-browser"
+description = "QuireInk browser: reads web pages like books and fetches books and fonts from the web"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+categories = ["no-std"]
+
+[dependencies]
+quireink-sdk.workspace = true
+
+[dev-dependencies]
+quireink-i18n.workspace = true
+
+[lints]
+workspace = true

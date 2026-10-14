@@ -664,6 +664,21 @@ impl ReaderScreen {
         let Ok(book) = &mut self.book else {
             return Handled::No;
         };
+        if quireink_sdk::document::is_external(href) {
+            // To the web, if a browser is there.
+            if !env.has_slot(&slots::BROWSER) {
+                return Handled::No;
+            }
+            // Told apart by the time, so a page asked for again is loaded
+            // again rather than the open browser just brought forward.
+            cx.command(Command::OpenSlot(
+                slots::BROWSER,
+                Params::new()
+                    .with(params::URL, href.to_string())
+                    .with(params::ID, format!("{}", env.now.0)),
+            ));
+            return Handled::Yes;
+        }
         let Some(target) = book.document.link_target(env.storage, href) else {
             return Handled::No;
         };
@@ -1118,8 +1133,10 @@ impl Book {
 
     /// Where *Back* is offered on the page a link led to: a small button
     /// in the top margin, on the left.
+    /// On web pages it is always there: back to the page before.
     fn back_area(&self, env: &Env<'_>) -> Option<Rect> {
-        if self.returns.is_empty() || self.landed != Some(self.page.start) {
+        let landed = !self.returns.is_empty() && self.landed == Some(self.page.start);
+        if !landed && !self.web() {
             return None;
         }
         let style = UiStyle::new(env);
@@ -1169,8 +1186,14 @@ impl Book {
     }
 
     /// Links underlined thinly, so they can be found without standing out.
-    fn draw_links(&self, canvas: &mut Canvas<'_>, words: &[WordBox]) {
-        for b in selection::line_boxes(words, |i| self.link_of(&words[i]).is_some()) {
+    /// Links to the web only if a browser is there to open them.
+    fn draw_links(&self, canvas: &mut Canvas<'_>, env: &Env<'_>, words: &[WordBox]) {
+        let web = env.has_slot(&slots::BROWSER);
+        let followed = |i: usize| {
+            self.link_of(&words[i])
+                .is_some_and(|link| web || !quireink_sdk::document::is_external(&link.href))
+        };
+        for b in selection::line_boxes(words, followed) {
             canvas.fill_rect(
                 i32::from(b.x),
                 b.bottom() as i32 - 2,
@@ -1368,7 +1391,7 @@ impl Screen for ReaderScreen {
         };
         book.draw_highlights(canvas, &words);
         book.draw_page(canvas, env);
-        book.draw_links(canvas, &words);
+        book.draw_links(canvas, env, &words);
         book.draw_back(canvas, env);
         book.draw_status(canvas, env);
         if book.bookmarked() {
@@ -1537,7 +1560,12 @@ impl Screen for ReaderScreen {
                     .is_some_and(|area| area.contains(gesture.start)) =>
             {
                 if let Ok(book) = &mut self.book {
-                    book.go_back(cx);
+                    if book.returns.is_empty() {
+                        // Out of the web page, to the one before.
+                        cx.command(Command::Back);
+                    } else {
+                        book.go_back(cx);
+                    }
                 }
                 Handled::Yes
             }

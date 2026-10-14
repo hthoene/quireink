@@ -316,6 +316,36 @@ fn incompatible_and_disabled_plugins_are_skipped() {
 }
 
 #[test]
+fn plugins_can_ship_switched_off() {
+    let log = log();
+    let enabled = |config: &str| {
+        let kernel = Kernel::builder(DEVICE)
+            .plugin_off(TestPlugin::new("web", &log))
+            .user_config(config)
+            .build()
+            .unwrap();
+        kernel.shared.plugins.get("web").map(|info| info.enabled)
+    };
+    assert_eq!(enabled(""), Some(false), "listed, but off");
+    assert_eq!(
+        enabled(
+            "[plugins]
+web = on
+"
+        ),
+        Some(true)
+    );
+    assert_eq!(
+        enabled(
+            "[plugins]
+web = off
+"
+        ),
+        Some(false)
+    );
+}
+
+#[test]
 fn user_settings_are_applied_and_validated() {
     let log = log();
     let mut kernel = Kernel::builder(DEVICE)

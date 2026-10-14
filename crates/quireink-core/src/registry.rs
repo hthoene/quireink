@@ -43,6 +43,22 @@ impl Registry {
     /// The screen bound to `slot`: the user's choice if that screen exists,
     /// otherwise the candidate with the highest priority (the later
     /// registration wins a tie).
+    /// Every slot some screen is bound to.
+    pub(crate) fn bound_slots(&self) -> Vec<Id> {
+        let mut slots: Vec<Id> = Vec::new();
+        for slot in self
+            .candidates
+            .iter()
+            .map(|c| &c.slot)
+            .chain(self.user_bindings.iter().map(|(slot, _)| slot))
+        {
+            if !slots.contains(slot) && self.resolve_slot(slot.as_str()).is_some() {
+                slots.push(slot.clone());
+            }
+        }
+        slots
+    }
+
     pub(crate) fn resolve_slot(&self, slot: &str) -> Option<&Id> {
         if let Some(screen) = self.user_bindings.get(slot)
             && self.screens.contains_key(screen)

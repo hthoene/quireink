@@ -15,8 +15,6 @@
 
 extern crate alloc;
 
-mod choice;
-
 use alloc::borrow::Cow;
 use alloc::boxed::Box;
 use alloc::format;
@@ -24,6 +22,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use quireink_sdk::builtin::{actions, groups, menus, params, slots};
+use quireink_sdk::ui::choice::{self, Choice};
 use quireink_sdk::ui::{self, ListChange, ListView, UiStyle};
 use quireink_sdk::{
     ActionSpec, Arg, Canvas, Color, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Manifest,
@@ -44,6 +43,8 @@ const CHOICE: Id = Id::new_static("file-manager.choice");
 const CHOSEN: Id = Id::new_static("file-manager.chosen");
 const RENAMED: Id = Id::new_static("file-manager.renamed");
 const FOLDER_NAMED: Id = Id::new_static("file-manager.folder-named");
+/// Translation keys of the choices: this, then the option.
+const OPTION_LABELS: &str = "file-manager.option.";
 
 /// What was picked to be moved or copied.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -103,7 +104,7 @@ impl Plugin for FileManager {
         r.add_screen(ScreenSpec {
             id: CHOICE,
             title: Cow::Borrowed("file-manager.title"),
-            factory: Box::new(|env, params| Box::new(choice::Choice::new(env, params))),
+            factory: Box::new(|env, params| Box::new(Choice::new(env, params))),
         })?;
         r.add_action(ActionSpec {
             id: OPEN,
@@ -256,7 +257,14 @@ impl Browser {
             options.push("open");
         }
         options.extend(["rename", "move", "copy", "delete"]);
-        cx.command(choice::open(CHOICE, &entry.name, &path, &options));
+        cx.command(choice::open(
+            CHOICE,
+            CHOSEN,
+            &entry.name,
+            &path,
+            OPTION_LABELS,
+            &options,
+        ));
     }
 
     fn press(&mut self, button: Button, cx: &mut Cx<'_, '_>) {
@@ -346,8 +354,10 @@ impl Browser {
                     .format("file-manager.delete-question", &[("name", Arg::Str(&name))]);
                 cx.command(choice::open(
                     CHOICE,
+                    CHOSEN,
                     &title,
                     path,
+                    OPTION_LABELS,
                     &["delete-yes", "cancel"],
                 ));
             }

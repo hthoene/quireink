@@ -192,6 +192,8 @@ impl core::error::Error for KernelError {}
 pub struct KernelBuilder {
     device: DeviceInfo,
     plugins: Vec<Box<dyn Plugin>>,
+    /// Plugins shipped switched off, until the user switches them on.
+    off: Vec<String>,
     device_keymap: Option<Cow<'static, str>>,
     user_config: Option<String>,
     glyph_cache: usize,
@@ -218,6 +220,13 @@ impl KernelBuilder {
     pub fn plugin(mut self, plugin: impl Plugin + 'static) -> Self {
         self.plugins.push(Box::new(plugin));
         self
+    }
+
+    /// Adds a plugin that is off until the user switches it on (e.g. in
+    /// the plugin manager), for features not everyone wants.
+    pub fn plugin_off(mut self, plugin: impl Plugin + 'static) -> Self {
+        self.off.push(String::from(plugin.manifest().id.as_str()));
+        self.plugin(plugin)
     }
 
     /// Key bindings specific to the device (e.g. its physical buttons).
@@ -316,6 +325,8 @@ impl KernelBuilder {
                 network: self.network,
                 clipboard: String::new(),
                 system_clipboard: false,
+                slots: Vec::new(),
+                font_dirs: Vec::new(),
                 storage: self.storage.unwrap_or_else(|| Box::new(NoStorage)),
             },
             pending: None,
@@ -356,7 +367,16 @@ impl KernelBuilder {
             .into_iter()
             .flatten()
             .collect();
-        let disabled: Vec<String> = configs.iter().flat_map(|c| disabled_plugins(c)).collect();
+        let mut disabled: Vec<String> = configs
+            .iter()
+            .flat_map(|c| plugin_switches(c, false))
+            .collect();
+        // Shipped off, unless switched on.
+        let on: Vec<String> = configs
+            .iter()
+            .flat_map(|c| plugin_switches(c, true))
+            .collect();
+        disabled.extend(self.off.into_iter().filter(|id| !on.contains(id)));
         let core: Box<dyn Plugin> = Box::new(CorePlugin);
         for plugin in core::iter::once(core).chain(self.plugins) {
             kernel.add_plugin(plugin.as_ref(), &disabled);
@@ -386,6 +406,7 @@ impl KernelBuilder {
         {
             kernel.add_plugin(&plugin, &disabled);
         }
+        kernel.shared.font_dirs = self.font_dirs;
         kernel.find_required_plugins();
 
         if let Some(source) = self.device_keymap {
@@ -465,6 +486,7 @@ impl KernelBuilder {
                 .bool(core_settings::NIGHT_MODE.as_str()),
         );
         kernel.shrink_to_fit();
+        kernel.shared.slots = kernel.registry.bound_slots();
         Ok(kernel)
     }
 }
@@ -564,6 +586,7 @@ impl Kernel {
         KernelBuilder {
             device,
             plugins: Vec::new(),
+            off: Vec::new(),
             device_keymap: None,
             user_config: None,
             glyph_cache: DEFAULT_GLYPH_CACHE,
@@ -1059,7 +1082,7 @@ impl Kernel {
                 params = params.with(quireink_sdk::http_params::CONTENT_TYPE, content_type);
             }
             if let Some(url) = response.url {
-                params = params.with(quireink_sdk::http_params::URL, url);
+                params = params.with(quireink_sdk::http_params::FINAL_URL, url);
             }
             self.output.commands.push(Command::Emit(reply, params));
         }
@@ -2185,11 +2208,12 @@ fn read_config(storage: &dyn Storage) -> Option<String> {
     String::from_utf8(data).ok()
 }
 
-/// Plugin ids switched off in the `[plugins]` section of a user config.
-fn disabled_plugins(source: &str) -> Vec<String> {
+/// Plugin ids switched on (`on`) or off in the `[plugins]` section of a
+/// user config.
+fn plugin_switches(source: &str, on: bool) -> Vec<String> {
     quireink_config::parse(source)
         .filter_map(Result::ok)
-        .filter(|entry| entry.section == "plugins" && entry.value.as_bool() == Some(false))
+        .filter(|entry| entry.section == "plugins" && entry.value.as_bool() == Some(on))
         .map(|entry| String::from(entry.key))
         .collect()
 }
@@ -2213,6 +2237,10 @@ struct Shared {
     /// The system's clipboard has text (see
     /// [`Kernel::set_clipboard_available`]).
     system_clipboard: bool,
+    /// Slots some screen is bound to.
+    slots: Vec<Id>,
+    /// Folders fonts are read from.
+    font_dirs: Vec<String>,
     storage: Box<dyn Storage>,
 }
 
@@ -2234,6 +2262,8 @@ impl Shared {
             status_items: &self.status_items,
             network: self.network,
             clipboard: self.system_clipboard || !self.clipboard.is_empty(),
+            slots: &self.slots,
+            font_dirs: &self.font_dirs,
             storage: self.storage.as_ref(),
         }
     }

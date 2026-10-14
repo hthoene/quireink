@@ -96,8 +96,9 @@ pub mod http_params {
     /// The response's `Content-Type` header, if it had one, e.g.
     /// `text/html; charset=utf-8`.
     pub const CONTENT_TYPE: &str = "content-type";
-    /// Where the answer came from, if redirected elsewhere.
-    pub const URL: &str = "url";
+    /// Where the answer came from, if redirected elsewhere (named apart
+    /// from a request's own parameters, which come back too).
+    pub const FINAL_URL: &str = "final-url";
 }
 
 /// A request from a plugin to the kernel.

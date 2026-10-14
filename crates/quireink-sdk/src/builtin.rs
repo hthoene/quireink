@@ -70,6 +70,12 @@ pub mod slots {
     /// can pass along anything it needs to know (e.g. which setting). Bind
     /// another screen here for a different keyboard, handwriting or voice.
     pub const KEYBOARD: Id = Id::new_static("core.keyboard");
+    /// Shows a web page: parameter [`URL`](super::params::URL), and
+    /// [`ID`](super::params::ID) different for every request (opening a
+    /// slot with the parameters it is open with only brings it forward).
+    /// The reader opens links out of a book this way, if a browser is
+    /// bound here ([`Env::has_slot`](crate::Env::has_slot)).
+    pub const BROWSER: Id = Id::new_static("core.browser");
 }
 
 /// Standard menus. Plugins add entries with
@@ -116,6 +122,8 @@ pub mod params {
     pub const WORD: &str = "word";
     /// A BCP 47 language tag, e.g. of the book a word is from.
     pub const LANGUAGE: &str = "language";
+    /// A web address, e.g. for [`slots::BROWSER`](super::slots::BROWSER).
+    pub const URL: &str = "url";
 }
 
 /// Events emitted by the kernel.
