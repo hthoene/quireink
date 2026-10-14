@@ -46,7 +46,7 @@ pub(crate) struct TocScreen {
     /// The entries of the visible page.
     visible: Vec<TocEntry>,
     style: UiStyle,
-    header: Rect,
+    header: ui::Header,
     list: ListView,
 }
 
@@ -59,8 +59,8 @@ impl TocScreen {
             .map_or(0, |d| d.toc_len(env.storage) as usize);
         let style = UiStyle::new(env);
         let display = env.device.display;
-        let header = Rect::new(0, 0, display.width, style.header as u16);
-        let top = header.height + style.gap as u16;
+        let header = ui::Header::new(env, &style, true);
+        let top = header.area.height + style.gap as u16;
         let area = Rect::new(0, top, display.width, display.height.saturating_sub(top));
         let mut screen = Self {
             path,
@@ -153,15 +153,13 @@ impl Screen for TocScreen {
     fn draw(&mut self, canvas: &mut Canvas<'_>, env: &Env<'_>) {
         let style = self.style;
         let len = self.len;
-        let note = (self.list.pages(len) > 1)
-            .then(|| alloc::format!("{} / {}", self.list.page() + 1, self.list.pages(len)));
-        ui::draw_header(
+        self.header.draw(
             canvas,
             env,
             &style,
-            self.header,
             env.i18n.tr("reader.toc"),
-            note.as_deref(),
+            None,
+            self.list.paging(len),
         );
         if len == 0 {
             ui::draw_message(
@@ -217,6 +215,12 @@ impl Screen for TocScreen {
     fn on_gesture(&mut self, gesture: Gesture, cx: &mut Cx<'_, '_>) -> Handled {
         if gesture.kind != GestureKind::Tap {
             return Handled::No;
+        }
+        let env = *cx.env();
+        let paging = self.list.paging(self.len);
+        if let Some(action) = self.header.tap(&env, &self.style, gesture.start, paging) {
+            cx.command(Command::RunAction(action));
+            return Handled::Yes;
         }
         match self.list.hit(gesture.start, self.len) {
             Some(index) => {

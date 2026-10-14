@@ -70,6 +70,8 @@ struct MenuScreen {
     style: UiStyle,
     region: Rect,
     list: ListView,
+    /// Shown when the items need more than one page.
+    pager: Option<ui::Pager>,
     /// The focused number is being changed with buttons.
     editing: bool,
 }
@@ -93,16 +95,26 @@ impl MenuScreen {
         let wanted = items.len().max(1) as u32 * style.row + 2 * style.gap + border;
         let height = wanted.min((f32::from(display.height) * MAX_SHARE) as u32) as u16;
         let region = Rect::new(0, display.height - height, display.width, height);
-        let list_area = Rect::new(
+        let mut list_area = Rect::new(
             0,
             region.y + (border + style.gap) as u16,
             display.width,
             height.saturating_sub((border + 2 * style.gap) as u16),
         );
+        // Too many items: a bar at the bottom shows that there are more
+        // pages and turns them.
+        let mut pager = None;
+        if wanted > u32::from(height) {
+            let bar = ui::Pager::height(&style);
+            list_area.height = list_area.height.saturating_sub(bar);
+            let area = Rect::new(0, region.y + region.height - bar, display.width, bar);
+            pager = Some(ui::Pager::new(env, area));
+        }
         Self {
             items,
             region,
             list: ListView::new(list_area, style.row),
+            pager,
             style,
             editing: false,
         }
@@ -221,11 +233,16 @@ impl Screen for MenuScreen {
                     None => {
                         let color = if focused { Color::WHITE } else { Color::BLACK };
                         let x = style.margin as f32;
-                        ui::draw_label(canvas, &font, style.text, x, rect, label, color);
+                        let width = f32::from(rect.width) - 2.0 * x;
+                        let label = ui::fit(&font, style.text, label, width);
+                        ui::draw_label(canvas, &font, style.text, x, rect, &label, color);
                     }
                 }
             },
         );
+        if let (Some(pager), Some(page)) = (&self.pager, self.list.paging(items.len())) {
+            pager.draw(canvas, env, &style, page);
+        }
     }
 
     fn on_action(&mut self, action: &Id, cx: &mut Cx<'_, '_>) -> Handled {
@@ -285,8 +302,13 @@ impl Screen for MenuScreen {
         if gesture.kind != GestureKind::Tap {
             return Handled::No;
         }
+        if let Some(action) = self.pager.and_then(|pager| pager.tap(gesture.start)) {
+            cx.command(Command::RunAction(action));
+            return Handled::Yes;
+        }
         let Some(index) = self.list.hit(gesture.start, self.items.len()) else {
-            return Handled::No;
+            // Taps between the items do nothing; outside, they close it.
+            return Handled::Yes;
         };
         let env = *cx.env();
         let number = self.items.get(index).and_then(|(id, _)| {

@@ -12,8 +12,8 @@ use alloc::vec::Vec;
 use quireink_sdk::builtin::actions;
 use quireink_sdk::ui::{self, ListChange, ListView, UiStyle};
 use quireink_sdk::{
-    Arg, Canvas, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Params, Rect, RefreshMode,
-    Screen, SettingValue,
+    Canvas, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Params, Rect, RefreshMode, Screen,
+    SettingValue,
 };
 
 use crate::listing::{Entry, Listing};
@@ -42,7 +42,7 @@ pub(crate) struct FolderChooser {
     page: Vec<Entry>,
     first: usize,
     style: UiStyle,
-    header: Rect,
+    header: ui::Header,
     list: ListView,
 }
 
@@ -61,8 +61,8 @@ impl FolderChooser {
         };
         let style = UiStyle::new(env);
         let display = env.device.display;
-        let header = Rect::new(0, 0, display.width, style.header as u16);
-        let top = header.height + style.gap as u16;
+        let header = ui::Header::new(env, &style, true);
+        let top = header.area.height + style.gap as u16;
         let area = Rect::new(0, top, display.width, display.height.saturating_sub(top));
         let mut chooser = Self {
             setting,
@@ -201,19 +201,10 @@ impl Screen for FolderChooser {
         } else {
             self.dir.clone()
         };
-        let note = (self.list.pages(len) > 1).then(|| {
-            env.i18n.format(
-                "files.page",
-                &[
-                    ("page", Arg::Int(self.list.page() as i64 + 1)),
-                    ("pages", Arg::Int(self.list.pages(len) as i64)),
-                ],
-            )
-        });
         let title = match style.font(env) {
             // Long paths keep their end, which tells where one is.
             Some(font) => {
-                let width = f32::from(self.header.width) * 0.75;
+                let width = f32::from(self.header.area.width) * 0.6;
                 if font.measure(style.title, &title) > width {
                     let tail: String = title.chars().rev().collect();
                     let fitted = ui::fit(&font, style.title, &tail, width);
@@ -224,7 +215,8 @@ impl Screen for FolderChooser {
             }
             None => title,
         };
-        ui::draw_header(canvas, env, &style, self.header, &title, note.as_deref());
+        self.header
+            .draw(canvas, env, &style, &title, None, self.list.paging(len));
         let this = &*self;
         let rows: Vec<(usize, String, &str)> = (0..len)
             .skip(this.list.page() * this.list.rows())
@@ -282,6 +274,14 @@ impl Screen for FolderChooser {
     fn on_gesture(&mut self, gesture: Gesture, cx: &mut Cx<'_, '_>) -> Handled {
         if gesture.kind != GestureKind::Tap {
             return Handled::No;
+        }
+        let paging = self.list.paging(self.len());
+        let tapped = self
+            .header
+            .tap(cx.env(), &self.style, gesture.start, paging);
+        if let Some(action) = tapped {
+            cx.command(Command::RunAction(action));
+            return Handled::Yes;
         }
         match self.list.hit(gesture.start, self.len()) {
             Some(index) => {

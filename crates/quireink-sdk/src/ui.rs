@@ -14,7 +14,7 @@ use quireink_graphics::Canvas;
 use quireink_image::GrayFile;
 use quireink_platform::{Color, Point, Rect, Storage};
 
-use crate::builtin::{fonts, settings};
+use crate::builtin::{actions, fonts, settings};
 use crate::env::Env;
 use crate::fonts::FontHandle;
 use crate::settings::{SettingKind, SettingSpec, SettingValue};
@@ -147,6 +147,306 @@ pub fn draw_header(
     );
 }
 
+/// A screen's header bar for touch screens too: a back arrow on the left
+/// and, for lists with several pages, arrows around the page number on the
+/// right — so every screen can be left and paged without buttons or hidden
+/// gestures. Without touch the arrows are left out (the buttons do that).
+///
+/// Screens draw it with [`Header::draw`] and pass taps to [`Header::tap`],
+/// which tells the action to run (`core.back`, `core.prev-page`,
+/// `core.next-page`); the screen handles paging like the page buttons.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Header {
+    pub area: Rect,
+    /// Shows the back arrow.
+    back: bool,
+    /// Shows arrows for paging.
+    arrows: bool,
+}
+
+/// The parts of a header, from [`Header::layout`].
+struct HeaderParts {
+    back: Option<Rect>,
+    /// Previous page, page label, next page.
+    pager: Option<(Rect, Rect, Rect)>,
+    title: Rect,
+}
+
+impl Header {
+    /// A header at the top of the screen; `back` is `false` for root
+    /// screens such as the home screen.
+    pub fn new(env: &Env<'_>, style: &UiStyle, back: bool) -> Self {
+        let touch = env.device.input.touch;
+        Self {
+            area: Rect::new(0, 0, env.device.display.width, style.header as u16),
+            back: back && touch,
+            arrows: touch,
+        }
+    }
+
+    fn page_label(page: (usize, usize)) -> String {
+        format!("{} / {}", page.0 + 1, page.1)
+    }
+
+    fn layout(&self, env: &Env<'_>, style: &UiStyle, page: Option<(usize, usize)>) -> HeaderParts {
+        let a = self.area;
+        let square = a.height;
+        let back = self.back.then(|| Rect::new(a.x, a.y, square, a.height));
+        let mut left = a.x
+            + if self.back {
+                square
+            } else {
+                style.margin as u16
+            };
+        let mut right = a.x + a.width;
+        let pager = match (page, style.font(env)) {
+            (Some(page), Some(font)) if page.1 > 1 => {
+                let label = font.measure(style.small, &Self::page_label(page)) as u16;
+                let arrow = if self.arrows { square * 4 / 5 } else { 0 };
+                let margin = if self.arrows { 0 } else { style.margin as u16 };
+                let next = Rect::new(right - arrow - margin, a.y, arrow, a.height);
+                let label = Rect::new(next.x - label, a.y, label, a.height);
+                let prev = Rect::new(label.x - arrow, a.y, arrow, a.height);
+                right = prev.x;
+                Some((prev, label, next))
+            }
+            _ => None,
+        };
+        if self.back {
+            left = left.min(right);
+        }
+        HeaderParts {
+            back,
+            pager,
+            title: Rect::new(left, a.y, right.saturating_sub(left), a.height),
+        }
+    }
+
+    /// Draws the header: the title, an optional note right of it (e.g. a
+    /// sort order) and the page number of a paged list (`page` is the
+    /// 0-based page and the number of pages).
+    pub fn draw(
+        &self,
+        canvas: &mut Canvas<'_>,
+        env: &Env<'_>,
+        style: &UiStyle,
+        title: &str,
+        note: Option<&str>,
+        page: Option<(usize, usize)>,
+    ) {
+        let parts = self.layout(env, style, page);
+        fill(canvas, self.area, Color::BLACK);
+        let Some(font) = style.font(env) else {
+            return;
+        };
+        let arrow = |canvas: &mut Canvas<'_>, area: Rect, left: bool, color: Color| {
+            let (x, y) = center(area);
+            draw_chevron(canvas, style, x, y, left, color);
+        };
+        if let Some(back) = parts.back {
+            arrow(canvas, back, true, Color::WHITE);
+        }
+        if let (Some((prev, label, next)), Some(page)) = (parts.pager, page) {
+            if self.arrows {
+                // At the first or last page, the arrow is gray.
+                let color = |end: bool| if end { Color::gray(110) } else { Color::WHITE };
+                arrow(canvas, prev, true, color(page.0 == 0));
+                arrow(canvas, next, false, color(page.0 + 1 >= page.1));
+            }
+            let text = Self::page_label(page);
+            draw_label(
+                canvas,
+                &font,
+                style.small,
+                f32::from(label.x),
+                label,
+                &text,
+                Color::WHITE,
+            );
+        }
+        let t = parts.title;
+        let margin = style.margin as f32;
+        let mut right = f32::from(t.x) + f32::from(t.width) - margin;
+        let mut canvas = canvas.clipped(t);
+        if let Some(note) = note {
+            right -= font.measure(style.small, note);
+            draw_label(
+                &mut canvas,
+                &font,
+                style.small,
+                right,
+                t,
+                note,
+                Color::WHITE,
+            );
+            right -= margin;
+        }
+        let title = fit(&font, style.title, title, right - f32::from(t.x));
+        draw_label(
+            &mut canvas,
+            &font,
+            style.title,
+            f32::from(t.x),
+            t,
+            &title,
+            Color::WHITE,
+        );
+    }
+
+    /// The action a tap at `point` stands for: back, or the previous or
+    /// next page. `None` outside the header or on its title.
+    pub fn tap(
+        &self,
+        env: &Env<'_>,
+        style: &UiStyle,
+        point: Point,
+        page: Option<(usize, usize)>,
+    ) -> Option<crate::Id> {
+        if !self.area.contains(point) {
+            return None;
+        }
+        let parts = self.layout(env, style, page);
+        if parts.back.is_some_and(|r| r.contains(point)) {
+            return Some(actions::BACK);
+        }
+        let (prev, label, next) = parts.pager.filter(|_| self.arrows)?;
+        if prev.contains(point) || (label.contains(point) && point.x < label_mid(label)) {
+            Some(actions::PREV_PAGE)
+        } else if next.contains(point) || label.contains(point) {
+            Some(actions::NEXT_PAGE)
+        } else {
+            None
+        }
+    }
+
+    /// Whether `point` is on the header's title (e.g. to open a menu).
+    pub fn on_title(
+        &self,
+        env: &Env<'_>,
+        style: &UiStyle,
+        point: Point,
+        page: Option<(usize, usize)>,
+    ) -> bool {
+        self.layout(env, style, page).title.contains(point)
+    }
+}
+
+/// A bar under a list without a header (a menu, a popup) that shows the
+/// page and, on touch screens, has arrows to turn pages.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Pager {
+    pub area: Rect,
+    arrows: bool,
+}
+
+impl Pager {
+    pub fn new(env: &Env<'_>, area: Rect) -> Self {
+        Self {
+            area,
+            arrows: env.device.input.touch,
+        }
+    }
+
+    /// The height of a pager.
+    pub fn height(style: &UiStyle) -> u16 {
+        (style.row * 3 / 4) as u16
+    }
+
+    /// Draws page `page.0` (0-based) of `page.1`.
+    pub fn draw(
+        &self,
+        canvas: &mut Canvas<'_>,
+        env: &Env<'_>,
+        style: &UiStyle,
+        page: (usize, usize),
+    ) {
+        let a = self.area;
+        fill(canvas, a, Color::WHITE);
+        canvas.fill_rect(
+            i32::from(a.x) + style.margin as i32,
+            i32::from(a.y),
+            u32::from(a.width).saturating_sub(style.margin * 2),
+            style.line.max(1),
+            Color::gray(150),
+        );
+        let Some(font) = style.font(env) else {
+            return;
+        };
+        let label = Header::page_label(page);
+        let x = f32::from(a.x) + (f32::from(a.width) - font.measure(style.small, &label)) / 2.0;
+        draw_label(canvas, &font, style.small, x, a, &label, Color::BLACK);
+        if self.arrows {
+            let side = i32::from(a.width) / 4;
+            let (_, y) = center(a);
+            let dim = |end: bool| if end { Color::gray(170) } else { Color::BLACK };
+            let x = i32::from(a.x);
+            draw_chevron(canvas, style, x + side, y, true, dim(page.0 == 0));
+            draw_chevron(
+                canvas,
+                style,
+                x + side * 3,
+                y,
+                false,
+                dim(page.0 + 1 >= page.1),
+            );
+        }
+    }
+
+    /// `core.prev-page` or `core.next-page` for a tap on the left or right
+    /// half; `None` outside.
+    pub fn tap(&self, point: Point) -> Option<crate::Id> {
+        if !self.arrows || !self.area.contains(point) {
+            return None;
+        }
+        Some(if point.x < label_mid(self.area) {
+            actions::PREV_PAGE
+        } else {
+            actions::NEXT_PAGE
+        })
+    }
+}
+
+fn center(area: Rect) -> (i32, i32) {
+    (
+        i32::from(area.x) + i32::from(area.width) / 2,
+        i32::from(area.y) + i32::from(area.height) / 2,
+    )
+}
+
+/// An arrow head pointing left or right, centred at `(x, y)` and as tall
+/// as a capital letter of titles. Drawn rather than taken from a font, so
+/// it is centred exactly and needs no special glyph.
+pub fn draw_chevron(
+    canvas: &mut Canvas<'_>,
+    style: &UiStyle,
+    x: i32,
+    y: i32,
+    left: bool,
+    color: Color,
+) {
+    let half = (style.title * 0.38) as i32;
+    let width = half * 4 / 5;
+    let thickness = (style.line * 3).max(3);
+    for dy in -half..=half {
+        let dx = width * dy.abs() / half.max(1);
+        let tip = if left {
+            x - width / 2 + dx
+        } else {
+            x + width / 2 - dx
+        };
+        let start = if left {
+            tip
+        } else {
+            tip - thickness as i32 + 1
+        };
+        canvas.fill_rect(start, y + dy, thickness, 1, color);
+    }
+}
+
+fn label_mid(label: Rect) -> i32 {
+    i32::from(label.x) + i32::from(label.width) / 2
+}
+
 /// Draws wrapped, centred message text in `area`.
 pub fn draw_message(
     canvas: &mut Canvas<'_>,
@@ -244,6 +544,11 @@ impl ListView {
     /// The page containing the focus (0-based).
     pub fn page(&self) -> usize {
         self.focus / self.rows()
+    }
+
+    /// The page and the number of pages, e.g. for [`Header::draw`].
+    pub fn paging(&self, len: usize) -> Option<(usize, usize)> {
+        Some((self.page(), self.pages(len)))
     }
 
     pub fn pages(&self, len: usize) -> usize {

@@ -29,11 +29,11 @@ use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use quireink_sdk::builtin::{actions, events, groups, menus, slots};
+use quireink_sdk::builtin::{actions, events, groups, menus, params, slots};
 use quireink_sdk::ui::{self, ListChange, ListView, UiStyle};
 use quireink_sdk::{
-    Arg, Canvas, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Level, Manifest, Params,
-    Plugin, Priority, Rect, RefreshMode, RegisterError, Registrar, SDK_VERSION, Screen, ScreenSpec,
+    Canvas, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Level, Manifest, Params, Plugin,
+    Priority, Rect, RefreshMode, RegisterError, Registrar, SDK_VERSION, Screen, ScreenSpec,
     SettingKind, SettingSpec, SettingValue, Version,
 };
 
@@ -46,6 +46,9 @@ pub const GROUP_SCREEN: Id = Id::new_static("settings.group");
 pub const CHOOSE_SCREEN: Id = Id::new_static("settings.choose");
 /// Show advanced settings too.
 pub const ADVANCED: Id = Id::new_static("settings.advanced");
+/// Emitted by the keyboard with a text setting's new value (parameters
+/// `id` and `text`).
+const TEXT_ENTERED: Id = Id::new_static("settings.text-entered");
 
 const ID: &str = "id";
 
@@ -99,6 +102,20 @@ impl Plugin for SettingsPlugin {
             .group(groups::SYSTEM)
             .description("settings.advanced.help"),
         )?;
+        r.subscribe(
+            TEXT_ENTERED,
+            Box::new(|env: &Env<'_>, params: &Params, out: &mut Vec<Command>| {
+                let id = params.get(ID).and_then(|id| Id::parse(id).ok());
+                if let (Some(id), Some(text)) = (id, params.get(params::TEXT))
+                    && env.settings.get(id.as_str()).is_some()
+                {
+                    out.push(Command::SetSetting(
+                        id,
+                        SettingValue::Text(Cow::Owned(text.trim().to_string())),
+                    ));
+                }
+            }),
+        )?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/en.ini")))?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/de.ini")))?;
         Ok(())
@@ -112,11 +129,11 @@ fn visible(env: &Env<'_>, spec: &SettingSpec) -> bool {
 
 /// The header, list area and list for a screen; rows have notes if
 /// `noted`.
-fn frame(env: &Env<'_>, noted: bool) -> (UiStyle, Rect, ListView) {
+fn frame(env: &Env<'_>, noted: bool) -> (UiStyle, ui::Header, ListView) {
     let style = UiStyle::new(env);
     let display = env.device.display;
-    let header = Rect::new(0, 0, display.width, style.header as u16);
-    let top = header.height + style.gap as u16;
+    let header = ui::Header::new(env, &style, true);
+    let top = header.area.height + style.gap as u16;
     let height = display.height.saturating_sub(top);
     let area = Rect::new(0, top, display.width, height);
     let row = if noted { style.noted_row() } else { style.row };
@@ -153,18 +170,6 @@ fn navigate(list: &mut ListView, len: usize, action: &Id) -> Option<ListChange> 
     Some(list.move_focus(delta, len))
 }
 
-fn page_note(env: &Env<'_>, list: &ListView, len: usize) -> Option<String> {
-    (list.pages(len) > 1).then(|| {
-        env.i18n.format(
-            "settings.page",
-            &[
-                ("page", Arg::Int(list.page() as i64 + 1)),
-                ("pages", Arg::Int(list.pages(len) as i64)),
-            ],
-        )
-    })
-}
-
 // ---- Main page: groups -------------------------------------------------
 
 #[derive(Debug)]
@@ -174,7 +179,7 @@ struct GroupList {
     /// Pages of other plugins: `(action, title)`.
     pages: Vec<(Id, String)>,
     style: UiStyle,
-    header: Rect,
+    header: ui::Header,
     list: ListView,
 }
 
@@ -237,14 +242,13 @@ impl Screen for GroupList {
     fn draw(&mut self, canvas: &mut Canvas<'_>, env: &Env<'_>) {
         let style = self.style;
         let len = self.len();
-        let note = page_note(env, &self.list, len);
-        ui::draw_header(
+        self.header.draw(
             canvas,
             env,
             &style,
-            self.header,
             env.i18n.tr("settings.title"),
-            note.as_deref(),
+            None,
+            self.list.paging(len),
         );
         let advanced = if env.settings.bool(ADVANCED.as_str()) {
             env.i18n.tr("settings.on")
@@ -294,6 +298,14 @@ impl Screen for GroupList {
         if gesture.kind != GestureKind::Tap {
             return Handled::No;
         }
+        let paging = self.list.paging(self.len());
+        let tapped = self
+            .header
+            .tap(cx.env(), &self.style, gesture.start, paging);
+        if let Some(action) = tapped {
+            cx.command(Command::RunAction(action));
+            return Handled::Yes;
+        }
         match self.list.hit(gesture.start, self.len()) {
             Some(index) => {
                 self.list.focus = index;
@@ -324,7 +336,7 @@ struct GroupPage {
     title: String,
     specs: Vec<SettingSpec>,
     style: UiStyle,
-    header: Rect,
+    header: ui::Header,
     list: ListView,
     /// The focused number is being edited.
     editing: bool,
@@ -418,7 +430,16 @@ impl GroupPage {
                     Params::new().with(ID, spec.id.as_str().to_string()),
                 ));
             }
-            // Text needs a keyboard (planned); edit it in quireink.ini.
+            SettingKind::Text => {
+                cx.command(Command::OpenSlot(
+                    slots::KEYBOARD,
+                    Params::new()
+                        .with(params::TITLE, env.i18n.tr(&spec.title).to_string())
+                        .with(params::TEXT, ui::setting_value(env, spec))
+                        .with(params::REPLY, TEXT_ENTERED.as_str())
+                        .with(ID, spec.id.as_str().to_string()),
+                ));
+            }
             _ => {}
         }
     }
@@ -428,14 +449,13 @@ impl Screen for GroupPage {
     fn draw(&mut self, canvas: &mut Canvas<'_>, env: &Env<'_>) {
         let style = self.style;
         let len = self.specs.len();
-        let note = page_note(env, &self.list, len);
-        ui::draw_header(
+        self.header.draw(
             canvas,
             env,
             &style,
-            self.header,
             &self.title,
-            note.as_deref(),
+            None,
+            self.list.paging(len),
         );
         let specs = &self.specs;
         let editing = self.editing;
@@ -510,6 +530,14 @@ impl Screen for GroupPage {
         if gesture.kind != GestureKind::Tap {
             return Handled::No;
         }
+        let paging = self.list.paging(self.specs.len());
+        let tapped = self
+            .header
+            .tap(cx.env(), &self.style, gesture.start, paging);
+        if let Some(action) = tapped {
+            cx.command(Command::RunAction(action));
+            return Handled::Yes;
+        }
         let Some(index) = self.list.hit(gesture.start, self.specs.len()) else {
             return Handled::No;
         };
@@ -573,7 +601,7 @@ struct Chooser {
     /// (value, display name)
     options: Vec<(String, String)>,
     style: UiStyle,
-    header: Rect,
+    header: ui::Header,
     list: ListView,
 }
 
@@ -625,8 +653,8 @@ impl Screen for Chooser {
             .spec
             .as_ref()
             .map_or("", |spec| env.i18n.tr(&spec.title));
-        let note = page_note(env, &self.list, len);
-        ui::draw_header(canvas, env, &style, self.header, title, note.as_deref());
+        self.header
+            .draw(canvas, env, &style, title, None, self.list.paging(len));
         let options = &self.options;
         let current = self
             .spec
@@ -655,6 +683,14 @@ impl Screen for Chooser {
     fn on_gesture(&mut self, gesture: Gesture, cx: &mut Cx<'_, '_>) -> Handled {
         if gesture.kind != GestureKind::Tap {
             return Handled::No;
+        }
+        let paging = self.list.paging(self.options.len());
+        let tapped = self
+            .header
+            .tap(cx.env(), &self.style, gesture.start, paging);
+        if let Some(action) = tapped {
+            cx.command(Command::RunAction(action));
+            return Handled::Yes;
         }
         match self.list.hit(gesture.start, self.options.len()) {
             Some(index) => {

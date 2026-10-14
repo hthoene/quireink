@@ -155,7 +155,7 @@ struct Browser {
     /// Just loaded: the first `on_show` need not load again.
     fresh: bool,
     style: UiStyle,
-    header: Rect,
+    header: ui::Header,
     list: ListView,
 }
 
@@ -169,8 +169,8 @@ impl Browser {
         let dir = params.get(params::PATH).unwrap_or(&root).to_string();
         let style = UiStyle::new(env);
         let display = env.device.display;
-        let header = Rect::new(0, 0, display.width, style.header as u16);
-        let top = header.height + style.gap as u16;
+        let header = ui::Header::new(env, &style, true);
+        let top = header.area.height + style.gap as u16;
         let area = Rect::new(0, top, display.width, display.height.saturating_sub(top));
         let mut browser = Self {
             root,
@@ -503,19 +503,15 @@ impl Screen for Browser {
         };
         // The order, which the menu changes (also by tapping the header).
         let order = env.i18n.tr(env.settings.text(SORT.as_str()));
-        let note = if self.list.pages(len) > 1 {
-            env.i18n.format(
-                "files.page-order",
-                &[
-                    ("page", Arg::Int(self.list.page() as i64 + 1)),
-                    ("pages", Arg::Int(self.list.pages(len) as i64)),
-                    ("order", Arg::Str(order)),
-                ],
-            )
-        } else {
-            format!("{order} ›")
-        };
-        ui::draw_header(canvas, env, &style, self.header, &title, Some(&note));
+        let note = format!("{order} ›");
+        self.header.draw(
+            canvas,
+            env,
+            &style,
+            &title,
+            Some(&note),
+            self.list.paging(len),
+        );
 
         if self.len == 0 {
             let message = format!(
@@ -612,7 +608,15 @@ impl Screen for Browser {
         if gesture.kind != GestureKind::Tap {
             return Handled::No;
         }
-        if self.header.contains(gesture.start) {
+        let paging = self.list.paging(self.len);
+        let tapped = self
+            .header
+            .tap(cx.env(), &self.style, gesture.start, paging);
+        if let Some(action) = tapped {
+            cx.command(Command::RunAction(action));
+            return Handled::Yes;
+        }
+        if self.header.area.contains(gesture.start) {
             Self::open_menu(cx);
             return Handled::Yes;
         }

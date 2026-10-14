@@ -90,7 +90,7 @@ struct PluginList {
     /// Plugin ids: the kernel first, then by name.
     plugins: Vec<Id>,
     style: UiStyle,
-    header: Rect,
+    header: ui::Header,
     list: ListView,
 }
 
@@ -98,8 +98,8 @@ impl PluginList {
     fn new(env: &Env<'_>) -> Self {
         let style = UiStyle::new(env);
         let display = env.device.display;
-        let header = Rect::new(0, 0, display.width, style.header as u16);
-        let top = header.height + style.gap as u16;
+        let header = ui::Header::new(env, &style, true);
+        let top = header.area.height + style.gap as u16;
         let height = display.height.saturating_sub(top);
         let area = Rect::new(0, top, display.width, height);
         let list = ListView::new(area, style.noted_row());
@@ -261,22 +261,13 @@ impl Screen for PluginList {
         let rows = self.rows(env);
         let len = rows.len();
         self.list.focus = self.list.focus.min(len.saturating_sub(1));
-        let note = (self.list.pages(len) > 1).then(|| {
-            env.i18n.format(
-                "plugin-manager.page",
-                &[
-                    ("page", Arg::Int(self.list.page() as i64 + 1)),
-                    ("pages", Arg::Int(self.list.pages(len) as i64)),
-                ],
-            )
-        });
-        ui::draw_header(
+        self.header.draw(
             canvas,
             env,
             &style,
-            self.header,
             env.i18n.tr("plugin-manager.title"),
-            note.as_deref(),
+            None,
+            self.list.paging(len),
         );
         self.list.draw(
             canvas,
@@ -327,6 +318,14 @@ impl Screen for PluginList {
     fn on_gesture(&mut self, gesture: Gesture, cx: &mut Cx<'_, '_>) -> Handled {
         if gesture.kind != GestureKind::Tap {
             return Handled::No;
+        }
+        let paging = self.list.paging(self.rows(cx.env()).len());
+        let tapped = self
+            .header
+            .tap(cx.env(), &self.style, gesture.start, paging);
+        if let Some(action) = tapped {
+            cx.command(Command::RunAction(action));
+            return Handled::Yes;
         }
         let env = *cx.env();
         let rows = self.rows(&env);
