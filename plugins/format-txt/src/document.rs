@@ -360,6 +360,7 @@ impl Document for TxtDocument {
                 align: Align::Auto,
                 indent: None,
                 space: None,
+                size: None,
                 image: None,
             }));
         }

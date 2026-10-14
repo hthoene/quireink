@@ -290,6 +290,7 @@ impl EpubDocument {
                 .filter(|&i| i != convert::NO_INDENT),
             space: Some(u16::from_le_bytes([entry[6], entry[7]]))
                 .filter(|&s| s != convert::NO_SPACE),
+            size: Some(u16::from_le_bytes([entry[8], entry[9]])).filter(|&s| s != 0),
             image,
         })
     }

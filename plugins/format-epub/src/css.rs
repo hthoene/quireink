@@ -4,7 +4,8 @@
 //! more complex (descendants, pseudo-classes, attributes) is skipped, as
 //! are `@` rules except `@font-face`. Properties: `text-align`,
 //! `font-weight`, `font-style`, `font-family`, `display: none`,
-//! `text-indent` and the vertical `margin` and `padding`. That covers how
+//! `text-indent`, `font-size` and the vertical `margin` and `padding`.
+//! That covers how
 //! books mark centred title pages, bold and italic classes, hidden
 //! elements, their embedded fonts, paragraphs without indent and the
 //! space around blocks.
@@ -36,7 +37,34 @@ pub(crate) struct Props {
     pub margin_bottom: Option<u16>,
     pub padding_top: Option<u16>,
     pub padding_bottom: Option<u16>,
+    /// `font-size`.
+    pub size: Option<FontSize>,
 }
+
+/// A `font-size`, in percent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FontSize {
+    /// Of the parent's size (`em`, `%`, `smaller`, …).
+    Relative(u16),
+    /// Of body text (`pt`, `px`, `rem`, `large`, …).
+    Absolute(u16),
+}
+
+impl FontSize {
+    /// The size in percent of body text, inside an element of `parent`
+    /// percent; limited to what stays readable and fits a page.
+    pub fn of(self, parent: u16) -> u16 {
+        let size = match self {
+            FontSize::Relative(percent) => u32::from(parent) * u32::from(percent) / 100,
+            FontSize::Absolute(percent) => u32::from(percent),
+        };
+        size.clamp(MIN_SIZE, MAX_SIZE) as u16
+    }
+}
+
+/// Text sizes taken from a book, in percent of body text.
+const MIN_SIZE: u32 = 50;
+const MAX_SIZE: u32 = 300;
 
 impl Props {
     pub fn is_empty(&self) -> bool {
@@ -55,6 +83,7 @@ impl Props {
         self.margin_bottom = other.margin_bottom.or(self.margin_bottom);
         self.padding_top = other.padding_top.or(self.padding_top);
         self.padding_bottom = other.padding_bottom.or(self.padding_bottom);
+        self.size = other.size.or(self.size);
     }
 
     /// Reads declarations such as `text-align: center; font-weight: bold`;
@@ -90,6 +119,7 @@ impl Props {
                     props.hidden = Some(value == "none");
                 }
                 "font-family" => props.family = Some(family_number(&value, families)),
+                "font-size" => props.size = font_size(&value).or(props.size),
                 "text-indent" => {
                     // Negative indents hang out of a margin, which is not
                     // supported: no indent instead.
@@ -133,6 +163,11 @@ impl Props {
         if let Some(indent) = self.indent {
             out.push_str(&alloc::format!(" t{indent}"));
         }
+        match self.size {
+            Some(FontSize::Relative(percent)) => out.push_str(&alloc::format!(" r{percent}")),
+            Some(FontSize::Absolute(percent)) => out.push_str(&alloc::format!(" z{percent}")),
+            None => {}
+        }
         for (key, value) in [
             ('m', self.margin_top),
             ('n', self.margin_bottom),
@@ -171,6 +206,8 @@ impl Props {
                 'n' => props.margin_bottom = item[1..].parse().ok(),
                 'p' => props.padding_top = item[1..].parse().ok(),
                 'q' => props.padding_bottom = item[1..].parse().ok(),
+                'r' => props.size = item[1..].parse().ok().map(FontSize::Relative),
+                'z' => props.size = item[1..].parse().ok().map(FontSize::Absolute),
                 _ => {}
             }
         }
@@ -204,6 +241,38 @@ pub(crate) fn length(value: &str) -> Option<i32> {
     // Rounded (no_std has no `f32::round`).
     let half = if em < 0.0 { -0.5 } else { 0.5 };
     Some((em * 100.0 + half) as i32)
+}
+
+/// A `font-size` value; `None` for what is not understood.
+fn font_size(value: &str) -> Option<FontSize> {
+    let keyword = match value.trim() {
+        "xx-small" => Some(FontSize::Absolute(60)),
+        "x-small" => Some(FontSize::Absolute(75)),
+        "small" => Some(FontSize::Absolute(89)),
+        "medium" => Some(FontSize::Absolute(100)),
+        "large" => Some(FontSize::Absolute(120)),
+        "x-large" => Some(FontSize::Absolute(150)),
+        "xx-large" => Some(FontSize::Absolute(200)),
+        "smaller" => Some(FontSize::Relative(83)),
+        "larger" => Some(FontSize::Relative(120)),
+        _ => None,
+    };
+    if keyword.is_some() {
+        return keyword;
+    }
+    let value = value.trim();
+    if let Some(percent) = value.strip_suffix('%') {
+        let percent: f32 = percent.trim().parse().ok()?;
+        return (percent > 0.0).then_some(FontSize::Relative((percent + 0.5) as u16));
+    }
+    let percent = u16::try_from(length(value)?).ok().filter(|&p| p > 0)?;
+    // Lengths in `em` are relative to the parent; `rem`, `pt` and `px` to
+    // body text.
+    Some(if value.ends_with("em") && !value.ends_with("rem") {
+        FontSize::Relative(percent)
+    } else {
+        FontSize::Absolute(percent)
+    })
 }
 
 /// A vertical margin or padding: not negative, limited.
@@ -620,6 +689,27 @@ mod tests {
         let hang = r.props("div", "hang");
         assert_eq!(hang.indent, Some(0));
         assert_eq!((hang.margin_top, hang.margin_bottom), (Some(50), Some(100)));
+        let copy = Rules::decode(&r.encode());
+        assert_eq!(copy.rules, r.rules);
+    }
+
+    #[test]
+    fn reads_font_sizes() {
+        let r = rules(
+            ".big { font-size: 1.3em } .half { font-size: 50% } .pt { font-size: 9pt } \
+             .k { font-size: x-large } .s { font-size: smaller } .bad { font-size: inherit }",
+        );
+        let size = |class| r.props("p", class).size;
+        assert_eq!(size("big"), Some(FontSize::Relative(130)));
+        assert_eq!(size("half"), Some(FontSize::Relative(50)));
+        assert_eq!(size("pt"), Some(FontSize::Absolute(75)));
+        assert_eq!(size("k"), Some(FontSize::Absolute(150)));
+        assert_eq!(size("s"), Some(FontSize::Relative(83)));
+        assert_eq!(size("bad"), None);
+        // Relative sizes compound, and all stay readable.
+        assert_eq!(FontSize::Relative(130).of(120), 156);
+        assert_eq!(FontSize::Absolute(75).of(200), 75);
+        assert_eq!(FontSize::Relative(50).of(50), 50);
         let copy = Rules::decode(&r.encode());
         assert_eq!(copy.rules, r.rules);
     }

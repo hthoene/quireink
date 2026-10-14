@@ -37,11 +37,14 @@ pub struct Face {
     pub style: TextStyle,
     /// 0 for body text, 1 (most important) to 6 for headings.
     pub heading: u8,
+    /// The book's text size in percent of body text; 0 for the reader's
+    /// (body text, or by heading level).
+    pub size: u16,
 }
 
 /// Changes whenever the same input is laid out differently, so readers
 /// rebuild page indexes they cached.
-pub const VERSION: u32 = 2;
+pub const VERSION: u32 = 3;
 
 /// Measures text for the layout engine; readers implement it with their
 /// fonts.
@@ -148,6 +151,7 @@ fn face_at(block: &Block, base: Face, index: usize) -> Face {
     Face {
         style: base.style.union(block.style_at(index)),
         heading: base.heading,
+        size: base.size,
     }
 }
 
@@ -190,8 +194,8 @@ fn line_runs(
 /// box, measuring text with `typesetter`; with `hyphenate`, words that do
 /// not fit at the end of a line are hyphenated.
 ///
-/// Headings are set in their own face, never indented or justified, and
-/// never left alone at the bottom of a page.
+/// Headings are set in their own face, never indented, justified or
+/// hyphenated, and never left alone at the bottom of a page.
 #[allow(clippy::too_many_arguments)]
 pub fn layout_page(
     document: &dyn Document,
@@ -275,14 +279,17 @@ pub fn layout_page(
                 TextStyle::REGULAR
             },
             heading,
+            size: block.size.unwrap_or(0),
         };
         let (ascent, line_height) = typesetter.line(base);
+        // The book's ems are those of the block's text.
+        let em = style.em * f32::from(block.size.unwrap_or(100)) / 100.0;
         let lines_before = page.lines.len();
         let had_content = !page.is_past_end();
         let at_block_start = from == 0 && !block.continues;
         // The book's space where it sets one; at the top of a page only
         // where a chapter starts (e.g. a title set lower).
-        let book_space = block.space.map(|s| f32::from(s) / 100.0 * style.em);
+        let book_space = block.space.map(|s| f32::from(s) / 100.0 * em);
         if page.is_past_end() && at_block_start && book_space.is_some() {
             let first = document.block_at(storage, Locator::new(at.section, 0))?;
             if first.is_some_and(|f| f.start == block.start) {
@@ -307,7 +314,7 @@ pub fn layout_page(
         {
             block
                 .indent
-                .map_or(style.indent, |i| f32::from(i) / 100.0 * style.em)
+                .map_or(style.indent, |i| f32::from(i) / 100.0 * em)
         } else {
             0.0
         };
@@ -316,7 +323,7 @@ pub fn layout_page(
             text,
             |n| if n == 0 { width - indent } else { width },
             |i, c| typesetter.advance(face_at(&block, base, from + i), c),
-            hyphenate,
+            hyphenate.filter(|_| heading == 0),
         );
 
         for (n, line) in lines.iter().enumerate() {
@@ -448,10 +455,11 @@ mod tests {
                 } else {
                     Align::Auto
                 },
-                // "~" marks a block the book sets without indent and with
-                // a space of 2 em above.
+                // "~" marks a block the book sets without indent, with a
+                // space of 2 em above and at 150 %.
                 indent: line.starts_with('~').then_some(0),
                 space: line.starts_with('~').then_some(200),
+                size: line.starts_with('~').then_some(150),
                 image: None,
             }))
         }
@@ -558,8 +566,11 @@ cc
         assert_eq!(page.lines[0].x, 3.0);
         assert_eq!(page.lines[1].x, 0.0, "the book's indent");
         assert_eq!(page.lines[2].x, 3.0);
-        // 2 em of 10 px above "~bb", the reader's spacing elsewhere.
-        assert_eq!(page.lines[1].baseline - page.lines[0].baseline, 30.0);
+        // 2 em above "~bb", which is set at 150 % (15 px ems); the reader's
+        // spacing elsewhere.
+        assert_eq!(page.lines[1].baseline - page.lines[0].baseline, 40.0);
+        assert_eq!(page.lines[1].runs[0].face.size, 150);
+        assert_eq!(page.lines[0].runs[0].face.size, 0);
         assert_eq!(page.lines[2].baseline - page.lines[1].baseline, 10.0);
         // At the top of a chapter's first page the space stays.
         let doc = Text::new(
@@ -567,7 +578,7 @@ cc
 ",
         );
         let page = layout(&doc, 0, 100.0, &style);
-        assert_eq!(page.lines[0].baseline, 28.0);
+        assert_eq!(page.lines[0].baseline, 38.0);
     }
 
     #[test]

@@ -11,7 +11,10 @@
 //!   go there (once for each position).
 //! - *Sync progress* in the reading menu's *More* does both at once.
 //! - The account (settings → *Progress sync*) keeps the user name in the
-//!   settings and only the MD5 of the password, as KOReader does.
+//!   settings and only the MD5 of the password, as KOReader does. Its
+//!   screen also sets the server: KOReader's or any compatible one, also
+//!   below a path (`https://example.org/kosync`) or over plain `http` in a
+//!   home network.
 //!
 //! Needs a device with network ([`Env::network`]).
 
@@ -257,14 +260,28 @@ fn device_name(env: &Env<'_>) -> String {
     format!("QuireInk ({})", env.device.name)
 }
 
-fn server(env: &Env<'_>) -> String {
-    let server = env.settings.text(SERVER.as_str()).trim();
-    let server = server.trim_end_matches('/');
+/// The server's base URL.
+pub(crate) fn server(env: &Env<'_>) -> String {
+    normalize_server(env.settings.text(SERVER.as_str()))
+}
+
+/// A server address as entered, as a base URL: `https://` unless another
+/// scheme is given, no `/` at the end, KOReader's server if empty.
+pub(crate) fn normalize_server(text: &str) -> String {
+    let server = text.trim().trim_end_matches('/');
     if server.is_empty() {
         DEFAULT_SERVER.to_string()
-    } else {
+    } else if server.contains("://") {
         server.to_string()
+    } else {
+        format!("https://{server}")
     }
+}
+
+/// A base URL as shown: without `https://` (but with `http://`, which is
+/// worth knowing).
+pub(crate) fn server_label(url: &str) -> &str {
+    url.strip_prefix("https://").unwrap_or(url)
 }
 
 /// A request to the sync server, authenticated as user and key (the MD5 of
@@ -590,6 +607,28 @@ mod tests {
         assert_eq!(found.at, Locator::new(3, 120));
         assert!((found.progress - 0.425).abs() < 1e-9);
         assert!(position(&Params::new().with(params::PATH, "a")).is_none());
+    }
+
+    #[test]
+    fn server_addresses_are_completed() {
+        assert_eq!(normalize_server(""), DEFAULT_SERVER);
+        assert_eq!(
+            normalize_server(" sync.example.org/ "),
+            "https://sync.example.org"
+        );
+        assert_eq!(
+            normalize_server("http://192.168.1.5:8081"),
+            "http://192.168.1.5:8081"
+        );
+        assert_eq!(
+            normalize_server("example.org/kosync"),
+            "https://example.org/kosync"
+        );
+        assert_eq!(
+            server_label("https://example.org/kosync"),
+            "example.org/kosync"
+        );
+        assert_eq!(server_label("http://nas:8081"), "http://nas:8081");
     }
 
     #[test]

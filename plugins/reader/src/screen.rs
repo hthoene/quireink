@@ -151,9 +151,11 @@ impl<'a> Faces<'a> {
     }
 
     fn size(&self, face: Face) -> f32 {
-        match face.heading {
-            0 => self.size,
-            level => self.size * HEADING_SCALE[usize::from(level.clamp(1, 6)) - 1],
+        match (face.size, face.heading) {
+            // The book's size wins.
+            (percent, _) if percent > 0 => self.size * f32::from(percent) / 100.0,
+            (_, 0) => self.size,
+            (_, level) => self.size * HEADING_SCALE[usize::from(level.clamp(1, 6)) - 1],
         }
     }
 }
@@ -187,7 +189,13 @@ impl Typesetter for Faces<'_> {
 
     fn line(&self, face: Face) -> (f32, f32) {
         if face.heading == 0 {
-            return (self.ascent, self.line_height);
+            // Body text the book sets larger or smaller keeps the line
+            // spacing chosen.
+            let scale = match face.size {
+                0 => 1.0,
+                percent => f32::from(percent) / 100.0,
+            };
+            return (self.ascent * scale, self.line_height * scale);
         }
         let size = self.size(face);
         let metrics = self.font(face).line_metrics(size);

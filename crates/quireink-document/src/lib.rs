@@ -201,6 +201,9 @@ pub struct Block {
     /// The book's space above the block, in hundredths of an em; `None`
     /// leaves it to the reader.
     pub space: Option<u16>,
+    /// The book's text size, in percent of body text; `None` leaves it to
+    /// the reader (body text, or by heading level).
+    pub size: Option<u16>,
     /// The image of an [`BlockKind::Image`] block.
     pub image: Option<ImageRef>,
 }
@@ -453,6 +456,7 @@ mod tests {
             align: Align::Auto,
             indent: None,
             space: None,
+            size: None,
             image: None,
         }
     }

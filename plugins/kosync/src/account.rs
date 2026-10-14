@@ -1,5 +1,6 @@
-//! The account screen: user name and password, then *Sign in* or *Create
-//! account*; *Sign out* once signed in. A line below tells what happened.
+//! The account screen: the server, user name and password, then *Sign in*
+//! or *Create account*; *Sign out* once signed in. A line below tells what
+//! happened. Another server signs out: accounts belong to their server.
 //!
 //! The password never leaves this screen: only its MD5 is sent and kept,
 //! as KOReader does.
@@ -16,9 +17,13 @@ use quireink_sdk::{
     Screen, SettingValue, http_params,
 };
 
-use crate::{ACCOUNT_CHANGED, USER, json, md5, save_key, server_request};
+use crate::{
+    ACCOUNT_CHANGED, SERVER, USER, json, md5, normalize_server, save_key, server, server_label,
+    server_request,
+};
 
 /// Replies of the keyboard and the server.
+const SERVER_ENTERED: Id = Id::new_static("kosync.server-entered");
 const USER_ENTERED: Id = Id::new_static("kosync.user-entered");
 const PASSWORD_ENTERED: Id = Id::new_static("kosync.password-entered");
 const AUTHORIZED: Id = Id::new_static("kosync.authorized");
@@ -26,6 +31,7 @@ const CREATED: Id = Id::new_static("kosync.created");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Row {
+    Server,
     User,
     Password,
     SignIn,
@@ -56,7 +62,7 @@ impl AccountScreen {
         let display = env.device.display;
         let header = ui::Header::new(env, &style, true);
         let top = header.area.height + style.gap as u16;
-        let rows = (style.row * 5) as u16;
+        let rows = (style.row * 6) as u16;
         let list = ListView::new(Rect::new(0, top, display.width, rows), style.row);
         let note_top = top + rows + style.gap as u16;
         let note = Rect::new(
@@ -83,7 +89,13 @@ impl AccountScreen {
     }
 
     fn rows(&self) -> Vec<Row> {
-        let mut rows = Vec::from([Row::User, Row::Password, Row::SignIn, Row::Create]);
+        let mut rows = Vec::from([
+            Row::Server,
+            Row::User,
+            Row::Password,
+            Row::SignIn,
+            Row::Create,
+        ]);
         if !self.signed_in.is_empty() {
             rows.push(Row::SignOut);
         }
@@ -97,8 +109,12 @@ impl AccountScreen {
         } else if self.signed_in.is_empty() {
             env.i18n.tr("kosync.signed-out").to_string()
         } else {
-            let user = Arg::Str(&self.signed_in);
-            env.i18n.format("kosync.signed-in", &[("user", user)])
+            let url = server(env);
+            let args = [
+                ("user", Arg::Str(&self.signed_in)),
+                ("server", Arg::Str(server_label(&url))),
+            ];
+            env.i18n.format("kosync.signed-in", &args)
         }
     }
 
@@ -111,6 +127,13 @@ impl AccountScreen {
     fn activate(&mut self, row: Row, cx: &mut Cx<'_, '_>) {
         let env = *cx.env();
         match row {
+            Row::Server => {
+                let request = Params::new()
+                    .with(params::TITLE, env.i18n.tr("kosync.server").to_string())
+                    .with(params::TEXT, server(&env))
+                    .with(params::REPLY, SERVER_ENTERED.as_str());
+                cx.command(Command::OpenSlot(slots::KEYBOARD, request));
+            }
             Row::User | Row::Password => {
                 let (title, reply) = if row == Row::User {
                     ("kosync.user", USER_ENTERED)
@@ -166,19 +189,22 @@ impl AccountScreen {
                 self.show(cx, env.i18n.tr("kosync.connecting").to_string());
             }
             Row::SignOut => {
-                save_key(&env, None);
-                self.signed_in.clear();
-                self.key = None;
-                cx.command(Command::SetSetting(
-                    USER,
-                    SettingValue::Text(Cow::Borrowed("")),
-                ));
-                cx.command(Command::Emit(ACCOUNT_CHANGED, Params::new()));
+                self.sign_out(cx);
                 self.list.focus = 0;
                 let message = self.state_message(&env);
                 self.show(cx, message);
             }
         }
+    }
+
+    fn sign_out(&mut self, cx: &mut Cx<'_, '_>) {
+        save_key(cx.env(), None);
+        self.signed_in.clear();
+        cx.command(Command::SetSetting(
+            USER,
+            SettingValue::Text(Cow::Borrowed("")),
+        ));
+        cx.command(Command::Emit(ACCOUNT_CHANGED, Params::new()));
     }
 
     /// The server's answer to signing in or creating the account.
@@ -225,7 +251,9 @@ impl Screen for AccountScreen {
             &style,
             rows.len(),
             |canvas, index, rect, focused| {
+                let url = server(env);
                 let (title, value) = match rows[index] {
+                    Row::Server => (i18n.tr("kosync.server"), server_label(&url).to_string()),
                     Row::User => (i18n.tr("kosync.user"), self.user.clone()),
                     Row::Password => {
                         let dots = if self.key.is_some() {
@@ -290,13 +318,32 @@ impl Screen for AccountScreen {
     fn on_event(&mut self, event: &Id, params: &Params, cx: &mut Cx<'_, '_>) {
         let text = params.get(params::TEXT).unwrap_or_default();
         let status = params.get(http_params::STATUS).unwrap_or("0");
-        if *event == USER_ENTERED {
+        if *event == SERVER_ENTERED {
+            let url = normalize_server(text);
+            if url != server(cx.env()) {
+                let changed = !self.signed_in.is_empty();
+                if changed {
+                    self.sign_out(cx);
+                }
+                let value = SettingValue::Text(Cow::Owned(url.clone()));
+                cx.command(Command::SetSetting(SERVER, value));
+                let key = if changed {
+                    "kosync.server-changed"
+                } else {
+                    "kosync.server-set"
+                };
+                let args = [("server", Arg::Str(server_label(&url)))];
+                self.message = cx.env().i18n.format(key, &args);
+            }
+            // Next: the user name.
+            self.list.focus = 1;
+        } else if *event == USER_ENTERED {
             self.user = text.trim().to_string();
             // Next: the password.
-            self.list.focus = 1;
+            self.list.focus = 2;
         } else if *event == PASSWORD_ENTERED {
             self.key = (!text.is_empty()).then(|| md5::of(text));
-            self.list.focus = 2;
+            self.list.focus = 3;
         } else if *event == AUTHORIZED {
             return self.answered(false, status, cx);
         } else if *event == CREATED {

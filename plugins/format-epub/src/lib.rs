@@ -441,6 +441,35 @@ mod tests {
     }
 
     #[test]
+    fn keeps_the_books_text_sizes() {
+        let ch2 = String::from(
+            "<html><head><style>.title { font-size: 1.3em } .note { font-size: 80% } \
+             div.small { font-size: small } h2 { font-size: 150% }</style></head><body>\
+             <p class=\"title\">Title</p><p>Body</p><div class=\"small\">\
+             <p class=\"note\">Note</p></div><h2>Part</h2></body></html>",
+        );
+        let storage = epub(ch2);
+        let doc = EpubDocument::open(&storage, "books/test.epub").unwrap();
+        let mut at = Locator::new(1, 0);
+        let mut found = Vec::new();
+        while let Some(block) = doc.block_at(&storage, at).unwrap() {
+            at = Locator::new(1, block.end);
+            found.push((block.text.clone(), block.size));
+        }
+        let row = |t: &str, s| (String::from(t), s);
+        assert_eq!(
+            found,
+            [
+                row("Title", Some(130)),
+                row("Body", None),
+                // 80 % of `small` (89 %).
+                row("Note", Some(71)),
+                row("Part", Some(150)),
+            ]
+        );
+    }
+
+    #[test]
     fn ignores_stylesheets_without_publisher_styles() {
         let ch2 = String::from(
             "<html><head><style>p.b { font-weight: bold }</style></head><body>\

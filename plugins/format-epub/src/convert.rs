@@ -7,6 +7,7 @@
 //! - `<n>.idx`: for every record, the offset of its text as u32 (for
 //!   binary search), the book's indent as i16 and the book's space above
 //!   as u16, in hundredths of an em ([`NO_INDENT`] and [`NO_SPACE`] if it
+//!   sets none), and its text size as u16 in percent of body text (0 if it
 //!   sets none). Kept apart from the text so positions in it stay the same
 //!   when more is stored per block.
 //! - `<n>.anc`: `id<TAB>offset` lines for anchors (table of contents).
@@ -34,7 +35,7 @@ use crate::package::error;
 /// Size of a record header.
 pub(crate) const HEADER: u32 = 8;
 /// Bytes per record in `<n>.idx`.
-pub(crate) const INDEX: u32 = 8;
+pub(crate) const INDEX: u32 = 10;
 /// A record without the book's indent or space.
 pub(crate) const NO_INDENT: i16 = i16::MIN;
 pub(crate) const NO_SPACE: u16 = u16::MAX;
@@ -112,6 +113,8 @@ struct Frame {
     align: Align,
     /// The book's indent, inherited as in CSS.
     indent: Option<i16>,
+    /// The book's text size in percent of body text, inherited.
+    size: Option<u16>,
     /// The margin and padding below the element, taken over by the next
     /// block.
     after: (Option<u16>, Option<u16>),
@@ -190,6 +193,8 @@ struct Converter<'a> {
     align: Option<Align>,
     /// The book's indent of the current block, set by its first character.
     indent: Option<i16>,
+    /// The book's text size of the current block, set likewise.
+    size: Option<u16>,
     /// The book's space above the next block, as in CSS: the largest of
     /// the margins met since the last block (margins collapse) plus all
     /// paddings.
@@ -237,6 +242,7 @@ impl Converter<'_> {
         if self.text.is_empty() {
             self.align.get_or_insert(align);
             self.indent = self.stack.last().and_then(|f| f.indent);
+            self.size = self.stack.last().and_then(|f| f.size);
             self.block_path = self.element_path();
         }
         let start = self.text.len() as u32;
@@ -339,6 +345,11 @@ impl Converter<'_> {
         let indent = props
             .indent
             .or_else(|| self.stack.last().and_then(|f| f.indent));
+        let parent_size = self.stack.last().and_then(|f| f.size);
+        let size = match props.size {
+            Some(size) => Some(size.of(parent_size.unwrap_or(100))),
+            None => parent_size,
+        };
         // Its number among its parent's children of the same name.
         let index = match self.stack.last_mut() {
             Some(parent) => match parent.children.iter_mut().find(|(t, _)| *t == tag) {
@@ -360,6 +371,7 @@ impl Converter<'_> {
             style: styled(style, &props),
             align: props.align.unwrap_or(align),
             indent,
+            size,
             after: (props.margin_bottom, props.padding_bottom),
             hides,
         });
@@ -504,6 +516,7 @@ impl Converter<'_> {
         self.runs.clear();
         self.align = None;
         self.indent = None;
+        self.size = None;
         self.kind = BlockKind::Paragraph;
         self.continues = false;
         self.space = false;
@@ -533,6 +546,8 @@ impl Converter<'_> {
             .extend_from_slice(&(self.length + HEADER).to_le_bytes());
         self.index.extend_from_slice(&indent.to_le_bytes());
         self.index.extend_from_slice(&space.to_le_bytes());
+        let size = self.size.filter(|&s| s != 100).unwrap_or(0);
+        self.index.extend_from_slice(&size.to_le_bytes());
         if self.index.len() >= FLUSH_SMALL {
             self.write_index();
         }
@@ -686,6 +701,7 @@ pub(crate) fn convert(
         runs: Vec::new(),
         align: None,
         indent: None,
+        size: None,
         margin: None,
         padding: None,
         stack: Vec::new(),
