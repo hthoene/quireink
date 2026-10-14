@@ -30,6 +30,8 @@ pub struct EpubDocument {
     metadata: Metadata,
     toc_len: u32,
     cache: String,
+    /// Archive path of the cover image.
+    cover: Option<String>,
 }
 
 fn fnv(text: &str) -> u64 {
@@ -79,6 +81,7 @@ impl EpubDocument {
             spine: package.spine,
             metadata,
             toc_len: package.toc_len,
+            cover: package.cover,
             archive,
             cache,
         })
@@ -231,6 +234,28 @@ impl EpubDocument {
 impl Document for EpubDocument {
     fn metadata(&self) -> &Metadata {
         &self.metadata
+    }
+
+    fn cover(&self, storage: &dyn Storage) -> Result<Option<ImageRef>, DocumentError> {
+        let Some(source) = &self.cover else {
+            return Ok(None);
+        };
+        let path = alloc::format!("{}/cover.gray", self.cache);
+        if GrayFile::open(storage, &path).is_none() {
+            convert::decode_image(
+                storage,
+                &self.archive,
+                source,
+                &path,
+                &self.cache,
+                convert::COVER_SIDE,
+            )?;
+        }
+        Ok(GrayFile::open(storage, &path).map(|image| ImageRef {
+            path: image.path,
+            width: image.width,
+            height: image.height,
+        }))
     }
 
     fn sections(&self) -> u32 {

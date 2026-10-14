@@ -348,6 +348,13 @@ pub trait Document {
         self.toc_entry(storage, index).map(|entry| entry.at)
     }
 
+    /// The cover as a small gray image in storage, decoded on first use;
+    /// `None` if the book has none (or the format no covers).
+    fn cover(&self, storage: &dyn Storage) -> Result<Option<ImageRef>, DocumentError> {
+        let _ = storage;
+        Ok(None)
+    }
+
     /// Reading progress of `at` from 0.0 to 1.0.
     fn progress(&self, at: Locator) -> f32 {
         let total: u64 = (0..self.sections())

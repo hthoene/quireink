@@ -142,6 +142,13 @@ impl MenuScreen {
             cx.command(Command::RunAction(id.clone()));
             return;
         };
+        if let Some(editor) = &spec.editor {
+            cx.command(Command::OpenScreen(
+                editor.clone(),
+                Params::new().with("id", spec.id.as_str().to_string()),
+            ));
+            return;
+        }
         match spec.kind {
             SettingKind::Int { .. } => {
                 self.editing = !self.editing;
@@ -204,7 +211,9 @@ impl Screen for MenuScreen {
                     }
                     Some(spec) => {
                         let mut value = ui::setting_value(env, spec);
-                        if matches!(spec.kind, SettingKind::Choice(_) | SettingKind::Language) {
+                        if spec.editor.is_some()
+                            || matches!(spec.kind, SettingKind::Choice(_) | SettingKind::Language)
+                        {
                             value.push_str(" ›");
                         }
                         ui::draw_value_row(canvas, env, &style, rect, focused, label, &value);

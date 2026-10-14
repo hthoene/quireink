@@ -84,6 +84,7 @@ impl FolderChooser {
             formats: env.formats,
             dir: &self.dir,
             folders_only: true,
+            rank: None,
         }
     }
 
@@ -160,10 +161,7 @@ impl FolderChooser {
         if self.dir.is_empty() {
             return false;
         }
-        let child = Entry {
-            name: self.dir.rsplit('/').next().unwrap_or_default().to_string(),
-            is_dir: true,
-        };
+        let child = Entry::folder(self.dir.rsplit('/').next().unwrap_or_default());
         self.dir = self
             .dir
             .rsplit_once('/')

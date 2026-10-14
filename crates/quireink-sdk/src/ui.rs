@@ -9,8 +9,10 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
+use quireink_document::ImageRef;
 use quireink_graphics::Canvas;
-use quireink_platform::{Color, Point, Rect};
+use quireink_image::GrayFile;
+use quireink_platform::{Color, Point, Rect, Storage};
 
 use crate::builtin::{fonts, settings};
 use crate::env::Env;
@@ -411,8 +413,9 @@ pub fn draw_value_row(
     let value_width = font.measure(style.text, value);
     let value_x = f32::from(rect.x) + f32::from(rect.width) - margin - value_width;
     draw_label(canvas, &font, style.text, value_x, rect, value, color);
-    let title = fit(&font, style.text, title, value_x - margin * 3.0);
-    draw_label(canvas, &font, style.text, margin, rect, &title, color);
+    let title_x = f32::from(rect.x) + margin;
+    let title = fit(&font, style.text, title, value_x - title_x - margin * 2.0);
+    draw_label(canvas, &font, style.text, title_x, rect, &title, color);
 }
 
 /// The − and + buttons of a focused number row, with room for `value`
@@ -544,6 +547,66 @@ pub fn next_value(env: &Env<'_>, spec: &SettingSpec, step: i64) -> Option<Settin
         }
         _ => return None,
     })
+}
+
+// ---- Images ------------------------------------------------------------
+
+/// Draws a decoded gray image (e.g. a book's cover or an illustration)
+/// scaled into `area`: each screen row reads one source row from storage,
+/// columns are averaged when the image is reduced, and only rows inside
+/// the canvas clip are read. Grays are dithered on two-level panels.
+pub fn draw_image(canvas: &mut Canvas<'_>, storage: &dyn Storage, image: &ImageRef, area: Rect) {
+    let file = GrayFile {
+        path: image.path.clone(),
+        width: image.width,
+        height: image.height,
+    };
+    let (left, top) = (i32::from(area.x), i32::from(area.y));
+    let (w, h) = (i32::from(area.width), i32::from(area.height));
+    if w <= 0 || h <= 0 || file.width == 0 || file.height == 0 {
+        return;
+    }
+    let clip = canvas.clip();
+    let first = top.max(i32::from(clip.y));
+    let last = (top + h).min(clip.bottom() as i32);
+    if first >= last {
+        return;
+    }
+    let mut source = alloc::vec![0u8; file.width as usize];
+    let mut row = alloc::vec![0u8; w as usize];
+    let mut loaded = None;
+    for y in first..last {
+        let sy = ((y - top) as u64 * u64::from(file.height) / h as u64) as u32;
+        if loaded != Some(sy) {
+            if !file.read_row(storage, sy, &mut source) {
+                return;
+            }
+            loaded = Some(sy);
+            let sw = file.width as usize;
+            for (x, out) in row.iter_mut().enumerate() {
+                let from = x * sw / w as usize;
+                let to = ((x + 1) * sw / w as usize).max(from + 1).min(sw);
+                let sum: u32 = source[from..to].iter().map(|&v| u32::from(v)).sum();
+                *out = (sum / (to - from) as u32) as u8;
+            }
+        }
+        canvas.draw_gray_row(left, y, &row);
+    }
+}
+
+/// The largest size of `image` that fits `width` × `height`, keeping its
+/// proportions.
+pub fn fit_image(image: &ImageRef, width: u16, height: u16) -> (u16, u16) {
+    if image.width == 0 || image.height == 0 {
+        return (0, 0);
+    }
+    let by_width = u64::from(width) * u64::from(image.height) / u64::from(image.width);
+    if by_width <= u64::from(height) {
+        (width, by_width as u16)
+    } else {
+        let w = u64::from(height) * u64::from(image.width) / u64::from(image.height);
+        (w as u16, height)
+    }
 }
 
 #[cfg(test)]

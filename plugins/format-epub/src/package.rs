@@ -27,7 +27,7 @@ use quireink_sdk::zip::ZipArchive;
 use crate::css;
 
 /// Bump when the cache format or the conversion changes.
-pub(crate) const CACHE_VERSION: u32 = 7;
+pub(crate) const CACHE_VERSION: u32 = 8;
 
 /// A chapter: where it is in the archive and its uncompressed size.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,6 +42,8 @@ pub(crate) struct Package {
     /// The spine in reading order.
     pub spine: Vec<Chapter>,
     pub toc_len: u32,
+    /// Archive path of the cover image, if the package names one.
+    pub cover: Option<String>,
 }
 
 /// A table of contents entry as stored in the cache.
@@ -177,6 +179,7 @@ pub(crate) fn load(storage: &dyn Storage, cache: &str, book_size: u64) -> Option
     let source = core::str::from_utf8(&data).ok()?;
     let mut metadata = Metadata::default();
     let (mut version, mut size, mut sections, mut toc_len) = (None, None, None, None);
+    let mut cover = None;
     for entry in config::parse(source) {
         let entry = entry.ok()?;
         match (entry.section, entry.key) {
@@ -189,6 +192,7 @@ pub(crate) fn load(storage: &dyn Storage, cache: &str, book_size: u64) -> Option
             ("book", "language") => metadata.language = Some(entry.value.as_str().into_owned()),
             ("book", "sections") => sections = entry.value.as_u32(),
             ("book", "toc") => toc_len = entry.value.as_u32(),
+            ("book", "cover") => cover = Some(entry.value.as_str().into_owned()),
             _ => {}
         }
     }
@@ -211,6 +215,7 @@ pub(crate) fn load(storage: &dyn Storage, cache: &str, book_size: u64) -> Option
         metadata,
         spine,
         toc_len: toc_len?,
+        cover,
     })
 }
 
@@ -382,6 +387,8 @@ pub(crate) fn build(
     let mut metadata = Metadata::default();
     let mut spine_ids: Vec<(u64, u32)> = Vec::new();
     let mut ncx_id: Option<u64> = None;
+    // EPUB 2 names the cover's manifest item in `<meta name="cover">`.
+    let mut cover_id: Option<u64> = None;
     let mut capture: Option<&'static str> = None;
     let mut text = String::new();
     tokenize(storage, archive, &opf_path, &mut |token| match token {
@@ -399,6 +406,9 @@ pub(crate) fn build(
                 text.clear();
             }
             "spine" => ncx_id = attrs.get("toc").map(|v| hash(&v)),
+            "meta" if attrs.get("name").as_deref() == Some("cover") => {
+                cover_id = attrs.get("content").map(|v| hash(&v));
+            }
             "itemref" => {
                 if let Some(id) = attrs.get("idref") {
                     let position = spine_ids.len() as u32;
@@ -438,6 +448,8 @@ pub(crate) fn build(
     let mut ncx: Option<String> = None;
     let mut ncx_by_type: Option<String> = None;
     let mut stylesheets: Vec<String> = Vec::new();
+    // EPUB 3 `cover-image` wins over EPUB 2's `<meta name="cover">`.
+    let mut cover: Option<(bool, String)> = None;
     let mut failed = None;
     tokenize(storage, archive, &opf_path, &mut |token| {
         let Token::Start { name, attrs, .. } = token else {
@@ -455,6 +467,15 @@ pub(crate) fn build(
         let media_type = get("media-type");
         let is_ncx_type = media_type == "application/x-dtbncx+xml";
         let is_css = media_type == "text/css";
+        let is_cover_image = get("properties")
+            .split_whitespace()
+            .any(|p| p == "cover-image");
+        if (is_cover_image || cover_id == Some(id))
+            && media_type.starts_with("image/")
+            && !cover.as_ref().is_some_and(|(declared, _)| *declared)
+        {
+            cover = Some((is_cover_image, resolve(&opf_dir, &get("href")).0));
+        }
         let mut positions = positions.peekable();
         if positions.peek().is_none() && !is_nav && !is_ncx && !is_ncx_type && !is_css {
             return;
@@ -571,12 +592,17 @@ pub(crate) fn build(
     for (i, author) in metadata.authors.iter().enumerate() {
         set("book", &alloc::format!("author.{}", i + 1), author);
     }
+    let cover = cover.map(|(_, path)| path);
+    if let Some(cover) = &cover {
+        set("book", "cover", cover);
+    }
     storage.write(&path(cache, "package.ini"), ini.as_bytes())?;
 
     Ok(Package {
         metadata,
         spine,
         toc_len,
+        cover,
     })
 }
 

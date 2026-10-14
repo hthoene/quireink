@@ -1,21 +1,27 @@
-//! A simple file browser for the library folder.
+//! The library: the books and folders of the library folder.
 //!
-//! It lists folders and every file a format plugin can open, and opens books
-//! in the `core.reader` slot. It is bound to `core.library`, and to
-//! `core.home` only as a fallback when no home screen plugin is installed.
+//! Each book shows its cover, title and author (read from the book the
+//! first time it is shown, then cached) and how far it has been read.
+//! Books are ordered by when they were last read, or by name; the library's
+//! menu switches the order. Folders come first and act as collections.
+//! Covers and details are read in the background for the visible rows
+//! only, and only one page of a folder is held in memory, so libraries of
+//! any size work on small devices.
 //!
 //! The library folder is a setting; its editor (`files.choose-folder`)
 //! browses the device's folders, so no path has to be typed.
 //!
 //! Works with buttons only (up/down or left/right move the selection,
-//! page buttons scroll, confirm opens, back goes to the parent folder) and
-//! with touch (tap a row). Only the visible page of a folder is held in
-//! memory, so folders of any size work on small devices.
+//! page buttons scroll, confirm opens, back goes to the parent folder, the
+//! menu button opens the library's menu) and with touch (tap a row; tap the
+//! header for the menu). Bound to `core.library`, and to `core.home` only
+//! as a fallback when no home screen plugin is installed.
 
 #![no_std]
 
 extern crate alloc;
 
+mod books;
 mod folders;
 mod listing;
 
@@ -23,24 +29,36 @@ use alloc::borrow::Cow;
 use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::{String, ToString};
+use alloc::vec::Vec;
 
-use listing::{Entry, Listing};
-use quireink_sdk::builtin::{actions, events, groups, params, slots};
+use books::Book;
+use listing::{Entry, Listing, UNRANKED};
+use quireink_sdk::builtin::{
+    actions as core_actions, events, groups, params, settings as core_settings, slots,
+};
 use quireink_sdk::ui::{self, ListChange, ListView, UiStyle};
 use quireink_sdk::{
-    Arg, Canvas, Color, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Manifest, Params,
-    Plugin, Priority, Rect, RefreshMode, RegisterError, Registrar, SDK_VERSION, Screen, ScreenSpec,
-    SettingKind, SettingSpec, SettingValue, Version,
+    Arg, Canvas, Color, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Manifest, MenuEntry,
+    Params, Plugin, Priority, Rect, RefreshMode, RegisterError, Registrar, SDK_VERSION, Screen,
+    ScreenSpec, SettingKind, SettingSpec, SettingValue, Version,
 };
 
 pub const PLUGIN: Id = Id::new_static("files");
 pub const SCREEN: Id = Id::new_static("files.browser");
 /// The library folder, relative to the storage root.
 pub const ROOT: Id = Id::new_static("files.root");
+/// The order of books: [`SORT_RECENT`] or [`SORT_NAME`].
+pub const SORT: Id = Id::new_static("files.sort");
+/// Recently read books first, then the others by name.
+pub const SORT_RECENT: &str = "files.sort.recent";
+/// By file name.
+pub const SORT_NAME: &str = "files.sort.name";
 /// Chooses a folder for the setting named by the parameter `id`.
 pub const CHOOSE_FOLDER: Id = Id::new_static("files.choose-folder");
+/// The library's menu.
+pub const MENU: Id = Id::new_static("files.menu");
 
-/// The file browser plugin.
+/// The library plugin.
 #[derive(Debug, Default)]
 pub struct Files;
 
@@ -61,8 +79,6 @@ impl Plugin for Files {
             title: Cow::Borrowed("files.title"),
             factory: Box::new(|env, params| Box::new(Browser::new(env, params))),
         })?;
-        // The library; also the start screen when no home screen plugin
-        // is installed.
         r.add_screen(ScreenSpec {
             id: CHOOSE_FOLDER,
             title: Cow::Borrowed("files.choose.title"),
@@ -81,22 +97,63 @@ impl Plugin for Files {
             .editor(CHOOSE_FOLDER)
             .description("files.setting.root.help"),
         )?;
+        r.add_setting(
+            SettingSpec::new(
+                SORT,
+                "files.setting.sort",
+                SettingKind::Choice(alloc::vec![
+                    Cow::Borrowed(SORT_RECENT),
+                    Cow::Borrowed(SORT_NAME),
+                ]),
+                SettingValue::Text(Cow::Borrowed(SORT_RECENT)),
+            )
+            .group(groups::LIBRARY)
+            .description("files.setting.sort.help"),
+        )?;
+        for (item, order) in [
+            (SORT, 10),
+            (ROOT, 20),
+            (core_settings::NIGHT_MODE, 30),
+            (core_actions::SETTINGS, 40),
+            (core_actions::HOME, 50),
+        ] {
+            r.add_menu_entry(MenuEntry {
+                menu: MENU,
+                item,
+                order,
+            })?;
+        }
+        r.subscribe(
+            events::BOOK_OPENED,
+            Box::new(|env, params, _| books::record(env, params, true)),
+        )?;
+        r.subscribe(
+            events::PAGE_TURNED,
+            Box::new(|env, params, _| books::record(env, params, false)),
+        )?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/en.ini")))?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/de.ini")))?;
         Ok(())
     }
 }
 
+/// Delay between two books read in the background, so input stays quick.
+const STEP_DELAY_MS: u64 = 20;
+
 #[derive(Debug)]
 struct Browser {
     root: String,
     dir: String,
+    /// Recently read files of this folder: `(name, rank)`.
+    recent: Vec<(String, u32)>,
     /// Number of entries in the folder.
     len: usize,
     /// Index of the first entry of `page`.
     first: usize,
-    /// The entries of the visible page.
-    page: alloc::vec::Vec<Entry>,
+    /// The entries of the visible page, with their cached details.
+    page: Vec<(Entry, Option<Book>)>,
+    /// Just loaded: the first `on_show` need not load again.
+    fresh: bool,
     style: UiStyle,
     header: Rect,
     list: ListView,
@@ -118,10 +175,12 @@ impl Browser {
         let mut browser = Self {
             root,
             dir,
+            recent: Vec::new(),
             len: 0,
             first: 0,
-            page: alloc::vec::Vec::new(),
-            list: ListView::new(area, style.row),
+            page: Vec::new(),
+            fresh: true,
+            list: ListView::new(area, style.noted_row()),
             style,
             header,
         };
@@ -129,22 +188,65 @@ impl Browser {
         browser
     }
 
-    fn listing<'a>(dir: &'a str, env: &'a Env<'_>) -> Listing<'a> {
+    /// The folder's entries, in the chosen order.
+    fn listing<'a>(&'a self, env: &'a Env<'_>, rank: &'a dyn Fn(&str) -> u32) -> Listing<'a> {
+        let by_recent = env.settings.text(SORT.as_str()) != SORT_NAME;
         Listing {
             storage: env.storage,
             formats: env.formats,
-            dir,
+            dir: &self.dir,
             folders_only: false,
+            rank: by_recent.then_some(rank),
         }
+    }
+
+    /// The rank of a recently read file of this folder.
+    fn rank_of(recent: &[(String, u32)], name: &str) -> u32 {
+        recent
+            .iter()
+            .find(|(n, _)| n == name)
+            .map_or(UNRANKED, |(_, rank)| *rank)
     }
 
     /// Shows the first page of the current folder.
     fn load(&mut self, env: &Env<'_>) {
-        let listing = Self::listing(&self.dir, env);
-        self.len = listing.count();
+        let prefix = if self.dir.is_empty() {
+            String::new()
+        } else {
+            format!("{}/", self.dir)
+        };
+        self.recent = books::load_opened(env.storage)
+            .into_iter()
+            .enumerate()
+            .filter_map(|(rank, path)| {
+                let name = path.strip_prefix(&prefix)?;
+                (!name.contains('/')).then(|| (name.to_string(), rank as u32))
+            })
+            .collect();
+        let recent = &self.recent;
+        let rank = |name: &str| Self::rank_of(recent, name);
+        let (len, page) = {
+            let listing = self.listing(env, &rank);
+            (listing.count(), listing.after(None, self.list.rows()))
+        };
+        self.len = len;
         self.list.focus = 0;
         self.first = 0;
-        self.page = listing.after(None, self.list.rows());
+        self.set_page(env, page);
+    }
+
+    /// Takes `entries` as the visible page, with their cached details.
+    fn set_page(&mut self, env: &Env<'_>, entries: Vec<Entry>) {
+        let page = entries
+            .into_iter()
+            .map(|entry| {
+                let book = (!entry.is_dir)
+                    .then(|| books::load(env.storage, &self.path_of(&entry)))
+                    .flatten();
+                (entry, book)
+            })
+            .collect();
+        self.page = page;
     }
 
     /// Loads the page the focus is on, if it is not loaded.
@@ -154,18 +256,25 @@ impl Browser {
         if first == self.first && !self.page.is_empty() {
             return;
         }
-        let listing = Self::listing(&self.dir, env);
-        self.page = if first == self.first + rows {
-            listing.after(self.page.last(), rows)
-        } else if first + rows == self.first {
-            listing.before(self.page.first(), rows)
-        } else {
-            listing.page(self.list.page(), rows, self.len)
+        let recent = &self.recent;
+        let rank = |name: &str| Self::rank_of(recent, name);
+        let page = {
+            let listing = self.listing(env, &rank);
+            let last = self.page.last().map(|(e, _)| e);
+            let head = self.page.first().map(|(e, _)| e);
+            if first == self.first + rows {
+                listing.after(last, rows)
+            } else if first + rows == self.first {
+                listing.before(head, rows)
+            } else {
+                listing.page(self.list.page(), rows, self.len)
+            }
         };
         self.first = first;
+        self.set_page(env, page);
     }
 
-    fn entry(&self, index: usize) -> Option<&Entry> {
+    fn entry(&self, index: usize) -> Option<&(Entry, Option<Book>)> {
         self.page.get(index.checked_sub(self.first)?)
     }
 
@@ -181,6 +290,7 @@ impl Browser {
         if change == ListChange::Page {
             let env = *cx.env();
             self.show_focus(&env);
+            cx.wake_at(env.now);
         }
         if change != ListChange::None {
             cx.request_redraw();
@@ -193,7 +303,7 @@ impl Browser {
     }
 
     fn open(&mut self, index: usize, cx: &mut Cx<'_, '_>) {
-        let Some(entry) = self.entry(index).cloned() else {
+        let Some((entry, _)) = self.entry(index).cloned() else {
             return;
         };
         let path = self.path_of(&entry);
@@ -202,6 +312,7 @@ impl Browser {
             let env = *cx.env();
             self.load(&env);
             cx.request_redraw();
+            cx.wake_at(env.now);
         } else {
             cx.command(Command::OpenSlot(
                 slots::READER,
@@ -215,25 +326,131 @@ impl Browser {
         if self.dir == self.root || self.dir.is_empty() {
             return false;
         }
-        let child = Entry {
-            name: self.dir.rsplit('/').next().unwrap_or_default().to_string(),
-            is_dir: true,
-        };
+        let child = Entry::folder(self.dir.rsplit('/').next().unwrap_or_default());
         self.dir = self
             .dir
             .rsplit_once('/')
             .map_or(String::new(), |(parent, _)| parent.to_string());
         let env = *cx.env();
-        let listing = Self::listing(&self.dir, &env);
-        self.len = listing.count();
-        let (first, page) = listing.page_of(&child, self.list.rows());
+        self.load(&env);
+        let recent = &self.recent;
+        let rank = |name: &str| Self::rank_of(recent, name);
+        let (first, page) = self.listing(&env, &rank).page_of(&child, self.list.rows());
         self.list.focus = (first + page.iter().position(|e| *e == child).unwrap_or(0))
             .min(self.len.saturating_sub(1));
         self.first = first;
-        self.page = page;
+        self.set_page(&env, page);
         cx.request_redraw();
+        cx.wake_at(env.now);
         true
     }
+
+    fn open_menu(cx: &mut Cx<'_, '_>) {
+        cx.command(Command::OpenSlot(
+            slots::MENU,
+            Params::new().with(params::MENU, MENU.as_str()),
+        ));
+    }
+}
+
+/// Draws one row: a cover (or folder) on the left, then title, progress
+/// and a note (author and format).
+fn draw_row(
+    canvas: &mut Canvas<'_>,
+    env: &Env<'_>,
+    style: &UiStyle,
+    rect: Rect,
+    focused: bool,
+    entry: &Entry,
+    book: Option<&Book>,
+) {
+    let fg = if focused { Color::WHITE } else { Color::BLACK };
+    let margin = style.margin as u16;
+    let thumb_h = rect.height.saturating_sub(style.gap as u16 * 2);
+    let thumb = Rect::new(
+        rect.x + margin,
+        rect.y + (rect.height - thumb_h) / 2,
+        thumb_h * 2 / 3,
+        thumb_h,
+    );
+    let text_x = thumb.x + thumb.width;
+    let text = Rect::new(
+        text_x,
+        rect.y,
+        rect.width.saturating_sub(text_x - rect.x),
+        rect.height,
+    );
+    if entry.is_dir {
+        draw_folder(canvas, style, thumb, fg);
+        let note = env.i18n.tr("files.folder");
+        ui::draw_noted_row(canvas, env, style, text, focused, &entry.name, "›", note);
+        return;
+    }
+    let (stem, extension) = entry
+        .name
+        .rsplit_once('.')
+        .unwrap_or((entry.name.as_str(), ""));
+    let format = extension.to_uppercase();
+    match book.and_then(|b| b.cover.as_ref()) {
+        Some(cover) => {
+            let (w, h) = ui::fit_image(cover, thumb.width, thumb.height);
+            let area = Rect::new(
+                thumb.x + (thumb.width - w) / 2,
+                thumb.y + (thumb.height - h) / 2,
+                w,
+                h,
+            );
+            ui::draw_image(canvas, env.storage, cover, area);
+        }
+        None => draw_placeholder(canvas, env, style, thumb, &format, fg),
+    }
+    let title = book.and_then(|b| b.title.as_deref()).unwrap_or(stem);
+    let progress = match book.and_then(|b| b.progress) {
+        Some(100) => env.i18n.tr("files.finished").to_string(),
+        Some(p) if p > 0 => format!("{p} %"),
+        _ => String::new(),
+    };
+    let note = match book.and_then(|b| b.author.as_deref()) {
+        Some(author) => format!("{author} · {format}"),
+        None => format,
+    };
+    ui::draw_noted_row(canvas, env, style, text, focused, title, &progress, &note);
+}
+
+/// A simple folder outline with a tab.
+fn draw_folder(canvas: &mut Canvas<'_>, style: &UiStyle, area: Rect, color: Color) {
+    let line = style.line.max(2);
+    let (x, w) = (i32::from(area.x), u32::from(area.width));
+    let h = w * 3 / 4;
+    let y = i32::from(area.y) + (i32::from(area.height) - h as i32) / 2;
+    let tab = h / 5;
+    canvas.stroke_rect(x, y + tab as i32, w, h - tab, line, color);
+    canvas.fill_rect(x, y, w * 2 / 5, tab + line, color);
+}
+
+/// A book without a cover: an outline with its format.
+fn draw_placeholder(
+    canvas: &mut Canvas<'_>,
+    env: &Env<'_>,
+    style: &UiStyle,
+    area: Rect,
+    format: &str,
+    color: Color,
+) {
+    canvas.stroke_rect(
+        i32::from(area.x),
+        i32::from(area.y),
+        u32::from(area.width),
+        u32::from(area.height),
+        style.line.max(2),
+        color,
+    );
+    let Some(font) = style.font(env) else {
+        return;
+    };
+    let width = font.measure(style.small, format);
+    let x = f32::from(area.x) + (f32::from(area.width) - width) / 2.0;
+    ui::draw_label(canvas, &font, style.small, x, area, format, color);
 }
 
 impl Screen for Browser {
@@ -245,16 +462,21 @@ impl Screen for Browser {
         } else {
             self.dir.rsplit('/').next().unwrap_or_default().to_string()
         };
-        let note = (self.list.pages(len) > 1).then(|| {
+        // The order, which the menu changes (also by tapping the header).
+        let order = env.i18n.tr(env.settings.text(SORT.as_str()));
+        let note = if self.list.pages(len) > 1 {
             env.i18n.format(
-                "files.page",
+                "files.page-order",
                 &[
                     ("page", Arg::Int(self.list.page() as i64 + 1)),
                     ("pages", Arg::Int(self.list.pages(len) as i64)),
+                    ("order", Arg::Str(order)),
                 ],
             )
-        });
-        ui::draw_header(canvas, env, &style, self.header, &title, note.as_deref());
+        } else {
+            format!("{order} ›")
+        };
+        ui::draw_header(canvas, env, &style, self.header, &title, Some(&note));
 
         if self.len == 0 {
             let message = format!(
@@ -266,60 +488,64 @@ impl Screen for Browser {
             ui::draw_message(canvas, env, &style, self.list.area, &message);
             return;
         }
-        let Some(font) = style.font(env) else {
-            return;
-        };
         let (first, page) = (self.first, &self.page);
         self.list
             .draw(canvas, &style, len, |canvas, index, rect, focused| {
-                let Some(entry) = index.checked_sub(first).and_then(|i| page.get(i)) else {
-                    return;
-                };
-                let color = if focused { Color::WHITE } else { Color::BLACK };
-                let name = if entry.is_dir {
-                    format!("{}/", entry.name)
-                } else {
-                    entry
-                        .name
-                        .rsplit_once('.')
-                        .map_or(entry.name.clone(), |(stem, _)| stem.to_string())
-                };
-                let mut width = f32::from(rect.width) - 2.0 * style.margin as f32;
-                // The format, small and right-aligned, tells same-named
-                // books apart (e.g. TXT and EPUB editions).
-                if !entry.is_dir
-                    && let Some((_, extension)) = entry.name.rsplit_once('.')
-                {
-                    let tag = extension.to_uppercase();
-                    let tag_width = font.measure(style.small, &tag);
-                    let x = f32::from(rect.width) - style.margin as f32 - tag_width;
-                    ui::draw_label(canvas, &font, style.small, x, rect, &tag, color);
-                    width -= tag_width + style.margin as f32;
+                if let Some((entry, book)) = index.checked_sub(first).and_then(|i| page.get(i)) {
+                    draw_row(canvas, env, &style, rect, focused, entry, book.as_ref());
                 }
-                let name = ui::fit(&font, style.text, &name, width);
-                ui::draw_label(
-                    canvas,
-                    &font,
-                    style.text,
-                    style.margin as f32,
-                    rect,
-                    &name,
-                    color,
-                );
             });
+    }
+
+    fn on_show(&mut self, cx: &mut Cx<'_, '_>) {
+        let env = *cx.env();
+        if !core::mem::take(&mut self.fresh) {
+            // Back from a book: its progress and place in the order changed.
+            let focus = self.list.focus;
+            self.load(&env);
+            self.list.focus = focus.min(self.len.saturating_sub(1));
+            self.show_focus(&env);
+            cx.request_redraw();
+        }
+        cx.wake_at(env.now);
+    }
+
+    /// Reads the details of one visible book that has none yet.
+    fn on_timer(&mut self, cx: &mut Cx<'_, '_>) {
+        let env = *cx.env();
+        let rows = self.list.rows();
+        let pending = self
+            .page
+            .iter()
+            .position(|(entry, book)| !entry.is_dir && !book.as_ref().is_some_and(|b| b.indexed));
+        let Some(slot) = pending else {
+            return;
+        };
+        let path = self.path_of(&self.page[slot].0);
+        self.page[slot].1 = Some(books::index(&env, &path));
+        let index = self.first + slot;
+        if index / rows == self.list.page() {
+            cx.request_redraw_area(self.list.row_rect(index % rows));
+            cx.request_refresh(RefreshMode::Partial);
+        }
+        cx.wake_at(env.now.add_millis(STEP_DELAY_MS));
     }
 
     fn on_action(&mut self, action: &Id, cx: &mut Cx<'_, '_>) -> Handled {
         let len = self.len;
         let rows = self.list.rows() as isize;
         let a = action;
-        let delta = if *a == actions::UP || *a == actions::LEFT || *a == actions::PREVIOUS {
+        let delta = if *a == core_actions::UP
+            || *a == core_actions::LEFT
+            || *a == core_actions::PREVIOUS
+        {
             Some(-1)
-        } else if *a == actions::DOWN || *a == actions::RIGHT || *a == actions::NEXT {
+        } else if *a == core_actions::DOWN || *a == core_actions::RIGHT || *a == core_actions::NEXT
+        {
             Some(1)
-        } else if *a == actions::NEXT_PAGE {
+        } else if *a == core_actions::NEXT_PAGE {
             Some(rows)
-        } else if *a == actions::PREV_PAGE {
+        } else if *a == core_actions::PREV_PAGE {
             Some(-rows)
         } else {
             None
@@ -327,9 +553,11 @@ impl Screen for Browser {
         if let Some(delta) = delta {
             let change = self.list.move_focus(delta, len);
             self.moved(change, cx);
-        } else if *a == actions::CONFIRM {
+        } else if *a == core_actions::CONFIRM {
             self.open(self.list.focus, cx);
-        } else if *a == actions::BACK {
+        } else if *a == core_actions::MENU {
+            Self::open_menu(cx);
+        } else if *a == core_actions::BACK {
             return if self.up(cx) {
                 Handled::Yes
             } else {
@@ -345,6 +573,10 @@ impl Screen for Browser {
         if gesture.kind != GestureKind::Tap {
             return Handled::No;
         }
+        if self.header.contains(gesture.start) {
+            Self::open_menu(cx);
+            return Handled::Yes;
+        }
         match self.list.hit(gesture.start, self.len) {
             Some(index) => {
                 self.list.focus = index;
@@ -357,8 +589,8 @@ impl Screen for Browser {
 
     fn on_event(&mut self, event: &Id, _: &Params, cx: &mut Cx<'_, '_>) {
         if *event == events::SETTING_CHANGED {
-            // The UI size or the library folder may have changed; a new
-            // library folder is shown from its top.
+            // The UI size, the order or the library folder may have
+            // changed; a new library folder is shown from its top.
             let env = *cx.env();
             let root = env.settings.text(ROOT.as_str()).trim_matches('/');
             let dir = if root == self.root {
@@ -368,9 +600,11 @@ impl Screen for Browser {
             };
             let focus = self.list.focus;
             *self = Self::new(&env, &Params::new().with(params::PATH, dir));
+            self.fresh = false;
             self.list.focus = focus.min(self.len.saturating_sub(1));
             self.show_focus(&env);
             cx.request_redraw();
+            cx.wake_at(env.now);
         }
     }
 }

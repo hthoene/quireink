@@ -5,7 +5,6 @@ use alloc::vec::Vec;
 
 use quireink_sdk::builtin::{actions, events, fonts, params, slots};
 use quireink_sdk::document::{Document, DocumentError, Locator};
-use quireink_sdk::image::GrayFile;
 use quireink_sdk::layout::{Face, Hyphenate, Page, PageImage, Style, Typesetter, layout_page};
 use quireink_sdk::{
     Arg, Canvas, Color, Command, Cx, Env, FontHandle, Handled, Id, Params, Rect, RefreshMode,
@@ -606,47 +605,17 @@ impl Screen for ReaderScreen {
     }
 }
 
-/// Draws an image from its decoded file, scaled to its place on the page:
-/// each screen row reads one source row; columns are averaged when the
-/// image is reduced. Only rows inside the canvas clip are read.
+/// Draws an image at its place on the page.
 fn draw_image(canvas: &mut Canvas<'_>, env: &Env<'_>, t: &Typography, image: &PageImage) {
-    let file = GrayFile {
-        path: image.image.path.clone(),
-        width: image.image.width,
-        height: image.image.height,
-    };
-    let clip = canvas.clip();
     let left = (t.x + image.x + 0.5) as i32;
     let top = (t.y + image.y + 0.5) as i32;
     let (w, h) = ((image.width + 0.5) as i32, (image.height + 0.5) as i32);
-    if w <= 0 || h <= 0 {
-        return;
-    }
-    let first = top.max(i32::from(clip.y));
-    let last = (top + h).min(clip.bottom() as i32);
-    if first >= last {
-        return;
-    }
-    let mut source = alloc::vec![0u8; file.width as usize];
-    let mut row = alloc::vec![0u8; w as usize];
-    let mut loaded = None;
-    for y in first..last {
-        let sy = ((y - top) as u64 * u64::from(file.height) / h as u64) as u32;
-        if loaded != Some(sy) {
-            if !file.read_row(env.storage, sy, &mut source) {
-                return;
-            }
-            loaded = Some(sy);
-            let sw = file.width as usize;
-            for (x, out) in row.iter_mut().enumerate() {
-                let from = x * sw / w as usize;
-                let to = ((x + 1) * sw / w as usize).max(from + 1).min(sw);
-                let sum: u32 = source[from..to].iter().map(|&v| u32::from(v)).sum();
-                *out = (sum / (to - from) as u32) as u8;
-            }
-        }
-        canvas.draw_gray_row(left, y, &row);
-    }
+    quireink_sdk::ui::draw_image(
+        canvas,
+        env.storage,
+        &image.image,
+        Rect::new(left as u16, top as u16, w as u16, h as u16),
+    );
 }
 
 /// The font bound to an optional reading face, for the layout key.

@@ -17,25 +17,38 @@ use quireink_sdk::{Formats, Storage};
 pub(crate) struct Entry {
     pub name: String,
     pub is_dir: bool,
+    /// Place in the sort order before names ([`UNRANKED`] for none).
+    pub rank: u32,
 }
 
-/// Folders first, then names regardless of case, then exact names (so the
-/// order is total).
-fn order(a_dir: bool, a: &str, b_dir: bool, b: &str) -> Ordering {
-    b_dir
-        .cmp(&a_dir)
-        .then_with(|| {
-            a.chars()
-                .flat_map(char::to_lowercase)
-                .cmp(b.chars().flat_map(char::to_lowercase))
-        })
-        .then_with(|| a.cmp(b))
-}
+/// The rank of entries ordered by name only.
+pub(crate) const UNRANKED: u32 = u32::MAX;
 
 impl Entry {
-    fn cmp_to(&self, is_dir: bool, name: &str) -> Ordering {
-        order(self.is_dir, &self.name, is_dir, name)
+    pub fn folder(name: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            is_dir: true,
+            rank: UNRANKED,
+        }
     }
+
+    fn cmp_to(&self, is_dir: bool, rank: u32, name: &str) -> Ordering {
+        order((self.is_dir, self.rank, &self.name), (is_dir, rank, name))
+    }
+}
+
+/// Folders first, then ranked entries by rank, then names regardless of
+/// case, then exact names (so the order is total).
+fn order(a: (bool, u32, &str), b: (bool, u32, &str)) -> Ordering {
+    b.0.cmp(&a.0)
+        .then_with(|| a.1.cmp(&b.1))
+        .then_with(|| {
+            a.2.chars()
+                .flat_map(char::to_lowercase)
+                .cmp(b.2.chars().flat_map(char::to_lowercase))
+        })
+        .then_with(|| a.2.cmp(b.2))
 }
 
 /// Folders other readers keep next to a book, e.g. KOReader's
@@ -52,10 +65,12 @@ pub(crate) struct Listing<'a> {
     pub formats: &'a Formats,
     pub dir: &'a str,
     pub folders_only: bool,
+    /// Ranks files before the name order, e.g. by when they were read.
+    pub rank: Option<&'a dyn Fn(&str) -> u32>,
 }
 
 impl Listing<'_> {
-    fn each(&self, f: &mut dyn FnMut(bool, &str)) {
+    fn each(&self, f: &mut dyn FnMut(bool, u32, &str)) {
         let _ = self.storage.list(self.dir, &mut |entry| {
             let shown = if entry.is_dir {
                 !is_sidecar(entry.name)
@@ -63,7 +78,11 @@ impl Listing<'_> {
                 !self.folders_only && self.formats.supports(entry.name)
             };
             if shown && !entry.name.starts_with('.') {
-                f(entry.is_dir, entry.name);
+                let rank = match self.rank {
+                    Some(rank) if !entry.is_dir => rank(entry.name),
+                    _ => UNRANKED,
+                };
+                f(entry.is_dir, rank, entry.name);
             }
         });
     }
@@ -87,15 +106,15 @@ impl Listing<'_> {
 
     pub fn count(&self) -> usize {
         let mut count = 0;
-        self.each(&mut |_, _| count += 1);
+        self.each(&mut |_, _, _| count += 1);
         count
     }
 
     /// Number of entries sorted before `entry`.
     pub fn rank(&self, entry: &Entry) -> usize {
         let mut rank = 0;
-        self.each(&mut |is_dir, name| {
-            if entry.cmp_to(is_dir, name) == Ordering::Greater {
+        self.each(&mut |is_dir, r, name| {
+            if entry.cmp_to(is_dir, r, name) == Ordering::Greater {
                 rank += 1;
             }
         });
@@ -106,19 +125,20 @@ impl Listing<'_> {
     /// order.
     pub fn after(&self, after: Option<&Entry>, n: usize) -> Vec<Entry> {
         let mut page: Vec<Entry> = Vec::with_capacity(n);
-        self.each(&mut |is_dir, name| {
-            if n == 0 || after.is_some_and(|a| a.cmp_to(is_dir, name) != Ordering::Less) {
+        self.each(&mut |is_dir, rank, name| {
+            if n == 0 || after.is_some_and(|a| a.cmp_to(is_dir, rank, name) != Ordering::Less) {
                 return;
             }
-            if page.len() == n && page[n - 1].cmp_to(is_dir, name) == Ordering::Less {
+            if page.len() == n && page[n - 1].cmp_to(is_dir, rank, name) == Ordering::Less {
                 return;
             }
-            let at = page.partition_point(|e| e.cmp_to(is_dir, name) == Ordering::Less);
+            let at = page.partition_point(|e| e.cmp_to(is_dir, rank, name) == Ordering::Less);
             page.insert(
                 at,
                 Entry {
                     name: name.to_string(),
                     is_dir,
+                    rank,
                 },
             );
             page.truncate(n);
@@ -130,19 +150,20 @@ impl Listing<'_> {
     /// order.
     pub fn before(&self, before: Option<&Entry>, n: usize) -> Vec<Entry> {
         let mut page: Vec<Entry> = Vec::with_capacity(n + 1);
-        self.each(&mut |is_dir, name| {
-            if n == 0 || before.is_some_and(|b| b.cmp_to(is_dir, name) != Ordering::Greater) {
+        self.each(&mut |is_dir, rank, name| {
+            if n == 0 || before.is_some_and(|b| b.cmp_to(is_dir, rank, name) != Ordering::Greater) {
                 return;
             }
-            if page.len() == n && page[0].cmp_to(is_dir, name) == Ordering::Greater {
+            if page.len() == n && page[0].cmp_to(is_dir, rank, name) == Ordering::Greater {
                 return;
             }
-            let at = page.partition_point(|e| e.cmp_to(is_dir, name) == Ordering::Less);
+            let at = page.partition_point(|e| e.cmp_to(is_dir, rank, name) == Ordering::Less);
             page.insert(
                 at,
                 Entry {
                     name: name.to_string(),
                     is_dir,
+                    rank,
                 },
             );
             if page.len() > n {
@@ -231,6 +252,7 @@ mod tests {
             formats: &formats,
             dir: "books",
             folders_only: false,
+            rank: None,
         };
         let len = listing.count();
         assert_eq!(len, expected.len());
@@ -247,6 +269,33 @@ mod tests {
             ..listing
         };
         assert_eq!(names(&folders.after(None, 9)), ["Archiv", "neu"]);
+
+        // Ranked files (e.g. recently read) come first, folders still on top.
+        let recent = |name: &str| match name {
+            "bbook 05.txt" => 0,
+            "Bbook 10.txt" => 1,
+            _ => UNRANKED,
+        };
+        let ranked = Listing {
+            rank: Some(&recent),
+            folders_only: false,
+            ..folders
+        };
+        assert_eq!(
+            names(&ranked.after(None, 5)),
+            [
+                "Archiv",
+                "neu",
+                "bbook 05.txt",
+                "Bbook 10.txt",
+                "Bbook 00.txt"
+            ]
+        );
+        let first = ranked.after(None, 3);
+        assert_eq!(
+            names(&ranked.after(first.last(), 2)),
+            ["Bbook 10.txt", "Bbook 00.txt"]
+        );
 
         let rows = 4;
         let pages = len.div_ceil(rows);
@@ -270,7 +319,8 @@ mod tests {
                         .iter()
                         .map(|n| Entry {
                             name: n.clone(),
-                            is_dir: false
+                            is_dir: false,
+                            rank: UNRANKED,
                         })
                         .collect::<Vec<_>>()
                 )
@@ -281,6 +331,7 @@ mod tests {
         let target = Entry {
             name: expected[13].clone(),
             is_dir: false,
+            rank: UNRANKED,
         };
         let (first, page) = listing.page_of(&target, rows);
         assert_eq!(first, 12);

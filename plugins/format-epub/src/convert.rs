@@ -52,6 +52,8 @@ pub(crate) struct CachePaths {
 /// Images are decoded at most this large (longer side, in pixels); readers
 /// scale them to the page.
 const IMAGE_SIDE: u32 = 1600;
+/// Longest side of a decoded cover: enough for the library and home screen.
+pub(crate) const COVER_SIDE: u32 = 300;
 
 pub(crate) fn encode_kind(kind: BlockKind) -> (u8, u8) {
     match kind {
@@ -603,7 +605,7 @@ pub(crate) fn convert(
     drop(converter);
     for (path, cache) in &images {
         if quireink_sdk::image::GrayFile::open(storage, cache).is_none() {
-            let _ = decode_image(storage, archive, path, cache, &paths.dir);
+            let _ = decode_image(storage, archive, path, cache, &paths.dir, IMAGE_SIDE);
         }
     }
     // Last: its presence marks a complete conversion.
@@ -649,12 +651,13 @@ impl quireink_sdk::image::Source for StorageSource<'_> {
 /// Decodes the image at `path` in the archive into the cache file `cache`.
 /// Stored entries are read in place; compressed ones are inflated to a
 /// temporary file first.
-fn decode_image(
+pub(crate) fn decode_image(
     storage: &dyn Storage,
     archive: &ZipArchive,
     path: &str,
     cache: &str,
     dir: &str,
+    side: u32,
 ) -> Result<(), DocumentError> {
     use quireink_sdk::image::{Format, GrayWriter, decode};
 
@@ -693,7 +696,7 @@ fn decode_image(
                 end,
             };
             let mut writer = GrayWriter::new(storage, cache);
-            decode(format, &mut source, IMAGE_SIDE, &mut writer).and_then(|()| writer.finish())
+            decode(format, &mut source, side, &mut writer).and_then(|()| writer.finish())
         }
         None => Err(quireink_sdk::image::ImageError::Unsupported("image format")),
     };
