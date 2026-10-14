@@ -3,8 +3,9 @@
 **A lean, fast and endlessly customizable e-reader for e-ink devices — from a
 380 KB microcontroller to Linux and Android e-readers, from one codebase.**
 
-> **Status: early development.** The kernel, plugin SDK, text rendering and
-> emulator work; books cannot be opened yet. See the [project plan](docs/PLANNING.md)
+> **Status: early development.** Plain text books can be read in the
+> emulator — with page index, saved reading position and reopening of the
+> last book. EPUB and the full user interface come next. See the [project plan](docs/PLANNING.md)
 > and the [roadmap](docs/PLANNING.md#12-roadmap).
 
 ## Why QuireInk?
@@ -69,6 +70,10 @@ Keys: `PageDown`/`Space` next page, `PageUp` previous page, arrow keys,
 `Enter` confirm, `Esc` back; hold a key for a long press. The mouse acts as
 the touch screen. `F2` shows refreshed regions, `F12` saves a screenshot.
 
+The emulator uses `samples/library` as the device storage; two
+public-domain books are included. Put your own `.txt` files into
+`samples/library/books` or point `--library` at any folder.
+
 The emulator enforces each device's heap budget on the kernel, so memory
 problems show up on the desktop before they show up on hardware. Headless
 runs produce screenshots for tests and bug reports:
@@ -86,11 +91,14 @@ cargo run -p quireink-emulator -- --headless --profile boox-go-7 --set core.lang
 | `crates/quireink-i18n` | Message catalogs, fallback chains and plural rules |
 | `crates/quireink-graphics` | Framebuffers in native pixel formats, clipped canvas |
 | `crates/quireink-text` | Fonts (runtime outlines or bitmap packs), rasterizer, glyph cache, line breaking |
+| `crates/quireink-document` | Format-independent document model: locators, blocks, offset maps |
+| `crates/quireink-layout` | Deterministic page layout usable by any reader plugin |
 | `crates/quireink-sdk` | **The plugin SDK** — the only API plugins use |
 | `crates/quireink-core` | The kernel: plugin host, registries, input routing, refresh policy |
-| `plugins/` | First-party plugins: default fonts, diagnostics screen |
+| `plugins/` | First-party plugins: reader, file browser, TXT format, default fonts, diagnostics |
 | `tools/fontgen` | Converts fonts into bitmap font packs for small devices |
 | `shells/desktop` | Desktop emulator with device profiles |
+| `samples/` | Emulator library with public-domain books |
 | `docs/` | [Plan](docs/PLANNING.md) and [architecture decisions](docs/adr/) |
 
 ## Contributing
