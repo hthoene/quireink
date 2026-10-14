@@ -39,6 +39,7 @@ pub fn install(builder: KernelBuilder, fonts: Fonts) -> KernelBuilder {
         .plugin(quireink_plugin_menu::Menu)
         .plugin(quireink_plugin_menu_editor::MenuEditor)
         .plugin(quireink_plugin_kosync::Kosync)
+        .plugin(quireink_plugin_stats::Stats)
         .plugin(quireink_plugin_keyboard::Keyboard)
         .plugin(quireink_plugin_settings::SettingsPlugin)
         .plugin(quireink_plugin_plugin_manager::PluginManager)

@@ -1,9 +1,10 @@
-//! MD5, for what KOReader's sync protocol asks for: the key derived from a
-//! password and the fingerprint of a book file (not for security).
+//! MD5, for what KOReader asks for: the key derived from a password
+//! (progress sync) and the fingerprint of a book file, by which KOReader
+//! and QuireInk recognise a book on every device (not for security).
 
 use alloc::string::String;
 
-use quireink_sdk::Storage;
+use quireink_platform::Storage;
 
 const SHIFTS: [u32; 64] = [
     7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9,
@@ -23,11 +24,18 @@ const CONSTANTS: [u32; 64] = [
 ];
 
 /// An MD5 digest computed piece by piece.
-pub(crate) struct Md5 {
+#[derive(Debug, Clone)]
+pub struct Md5 {
     state: [u32; 4],
     block: [u8; 64],
     used: usize,
     length: u64,
+}
+
+impl Default for Md5 {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Md5 {
@@ -102,7 +110,7 @@ impl Md5 {
 }
 
 /// The MD5 of `text` as hex (KOReader's password key).
-pub(crate) fn of(text: &str) -> String {
+pub fn of(text: &str) -> String {
     let mut md5 = Md5::new();
     md5.update(text.as_bytes());
     md5.hex()
@@ -111,7 +119,7 @@ pub(crate) fn of(text: &str) -> String {
 /// KOReader's fingerprint of a book file ("partial MD5"): 1 KiB at
 /// offsets 0, 1 KiB, 4 KiB, 16 KiB, … (×4) up to 1 GiB, as far as the file
 /// reaches. The same file gets the same id on every device.
-pub(crate) fn partial(storage: &dyn Storage, path: &str) -> Option<String> {
+pub fn partial(storage: &dyn Storage, path: &str) -> Option<String> {
     let mut md5 = Md5::new();
     let mut buffer = [0u8; 1024];
     for i in -1i32..=10 {
@@ -128,7 +136,7 @@ pub(crate) fn partial(storage: &dyn Storage, path: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use quireink_sdk::MemoryStorage;
+    use crate::MemoryStorage;
 
     #[test]
     fn known_digests() {

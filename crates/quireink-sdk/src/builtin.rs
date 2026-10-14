@@ -108,6 +108,10 @@ pub mod params {
     pub const OFFSET: &str = "offset";
     /// Reading progress in percent, e.g. `12.5`.
     pub const PROGRESS: &str = "progress";
+    /// The page (from 1) and the number of pages, once a reader has
+    /// counted them.
+    pub const PAGE: &str = "page";
+    pub const PAGES: &str = "pages";
     /// A word, e.g. to look up.
     pub const WORD: &str = "word";
     /// A BCP 47 language tag, e.g. of the book a word is from.

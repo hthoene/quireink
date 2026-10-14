@@ -743,14 +743,23 @@ impl Book {
         Ok(book)
     }
 
-    /// Parameters of the standard reading events.
-    fn event_params(&self) -> Params {
-        Params::new()
+    /// Parameters of the standard reading events; the page and the number
+    /// of pages once they are counted.
+    fn event_params(&self, env: &Env<'_>) -> Params {
+        let mut params = Params::new()
             .with(params::PATH, self.path.clone())
             .with(params::TITLE, self.title.clone())
             .with(params::PROGRESS, format!("{:.1}", self.percent()))
             .with(params::SECTION, format!("{}", self.page.start.section))
-            .with(params::OFFSET, format!("{}", self.page.start.offset))
+            .with(params::OFFSET, format!("{}", self.page.start.offset));
+        if let Some(index) = self.index.as_ref().filter(|i| i.is_complete())
+            && let Some((page, true)) = index.locate(env.storage, self.page.start)
+        {
+            params = params
+                .with(params::PAGE, format!("{}", page + 1))
+                .with(params::PAGES, format!("{}", index.pages()));
+        }
+        params
     }
 
     fn open_index(&self, env: &Env<'_>) -> PageIndex {
@@ -870,7 +879,7 @@ impl Book {
         self.page = page;
         self.update_chapter(&env);
         self.save_position(&env);
-        cx.command(Command::Emit(events::PAGE_TURNED, self.event_params()));
+        cx.command(Command::Emit(events::PAGE_TURNED, self.event_params(&env)));
         cx.request_redraw();
         true
     }
@@ -1123,7 +1132,7 @@ impl Book {
     /// What status items get to know about the book.
     fn status_context(&self, env: &Env<'_>) -> Params {
         let mut context = self
-            .event_params()
+            .event_params(env)
             .with(status_context::PAGE, self.position_label(env));
         if let Some((_, _, chapter)) = &self.chapter
             && !chapter.is_empty()
@@ -1257,7 +1266,8 @@ impl Screen for ReaderScreen {
                 "{}/settings.ini",
                 book.dir
             ))));
-            cx.command(Command::Emit(events::BOOK_OPENED, book.event_params()));
+            let params = book.event_params(cx.env());
+            cx.command(Command::Emit(events::BOOK_OPENED, params));
             let now = cx.env().now;
             cx.wake_at(now);
         }

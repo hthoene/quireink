@@ -68,7 +68,8 @@ pub const PROFILES: &[Profile] = &[
         font_packs: true,
         // 100 of 800 rows: 11.7 KiB instead of 94 KiB, eight bands a frame.
         frame_rows: Some(100),
-        settings: &[],
+        // A 4.3" screen: smaller text, so menus and pages hold enough.
+        settings: &[("core.ui-size", "9"), ("reader.font-size", "9")],
         summary: "ESP32-C3, 4.3\" 800x480, buttons only, 192 KiB heap budget",
     },
     Profile {
@@ -102,7 +103,8 @@ pub const PROFILES: &[Profile] = &[
         glyph_cache: 0,
         font_packs: true,
         frame_rows: Some(100),
-        settings: &[],
+        // A 4.3" screen: smaller text, so menus and pages hold enough.
+        settings: &[("core.ui-size", "9"), ("reader.font-size", "9")],
         summary: "ESP32-S3 (unverified), 4.3\" 800x480, touch + buttons, 256 KiB heap budget",
     },
     Profile {

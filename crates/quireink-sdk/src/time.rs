@@ -320,6 +320,26 @@ fn local_millis(env: &Env<'_>, now: Instant) -> Option<i64> {
     Some(utc + offset)
 }
 
+/// Seconds since 1970 (UTC) now, if the device knows the time.
+pub fn unix_seconds(env: &Env<'_>) -> Option<i64> {
+    let clock = env.status.clock?;
+    Some(clock.unix_millis_at(env.now).div_euclid(1000))
+}
+
+/// `unix` seconds since 1970 (UTC) as local seconds since 1970, in the
+/// chosen time zone (or the system's); see [`LocalTime::from_seconds`].
+pub fn local_seconds(env: &Env<'_>, unix: i64) -> i64 {
+    let offset = match chosen_zone(env) {
+        Some(zone) => i64::from(zone.offset_at(unix)),
+        None => env
+            .status
+            .clock
+            .and_then(|c| c.utc_offset_minutes)
+            .map_or(0, |m| i64::from(m) * 60),
+    };
+    unix + offset
+}
+
 /// The local date and time now, if the device knows the time.
 pub fn local_time(env: &Env<'_>) -> Option<LocalTime> {
     local_millis(env, env.now).map(|ms| LocalTime::from_seconds(ms.div_euclid(1000)))

@@ -25,7 +25,8 @@ extern crate alloc;
 mod account;
 mod confirm;
 mod json;
-mod md5;
+
+use quireink_sdk::md5;
 
 use alloc::borrow::Cow;
 use alloc::boxed::Box;

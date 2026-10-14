@@ -39,6 +39,7 @@ mod formats;
 mod gesture;
 mod hyphenation;
 mod id;
+pub mod md5;
 mod memory_storage;
 mod menus;
 mod params;
