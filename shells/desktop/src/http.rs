@@ -8,7 +8,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread;
 use std::time::Duration;
 
-use quireink_core::{HttpCall, HttpResponse, MAX_RESPONSE};
+use quireink_core::{HttpCall, HttpResponse};
 
 /// Requests in flight and their answers.
 #[derive(Debug)]
@@ -56,11 +56,12 @@ fn run(call: HttpCall) -> HttpResponse {
         id: call.id,
         status: 0,
         body: reason.into_bytes(),
+        etag: None,
     };
     let mut command = Command::new("curl");
     command
-        .args(["-sS", "--max-time", "20", "-X", &call.method])
-        .args(["-w", "\n%{http_code}"]);
+        .args(["-sS", "--max-time", "120", "-X", &call.method])
+        .args(["-w", "\n%{http_code}\n%header{etag}"]);
     for (name, value) in &call.headers {
         command.args(["-H", &format!("{name}: {value}")]);
     }
@@ -92,17 +93,21 @@ fn run(call: HttpCall) -> HttpResponse {
     if !output.status.success() {
         return failed(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }
-    // The body, then a line with the status (`-w`).
+    // The body, then a line with the status and one with the ETag (`-w`).
     let mut out = output.stdout;
+    let last = out.iter().rposition(|&b| b == b'\n').unwrap_or(0);
+    let etag = String::from_utf8_lossy(&out[last..]).trim().to_string();
+    out.truncate(last);
     let split = out.iter().rposition(|&b| b == b'\n').unwrap_or(0);
     let status = String::from_utf8_lossy(&out[split..])
         .trim()
         .parse()
         .unwrap_or(0);
-    out.truncate(split.min(MAX_RESPONSE));
+    out.truncate(split.min(call.max_response));
     HttpResponse {
         id: call.id,
         status,
         body: out,
+        etag: (!etag.is_empty()).then_some(etag),
     }
 }

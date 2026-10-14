@@ -155,6 +155,27 @@ impl Storage for DirStorage {
             _ => Ok(()),
         }
     }
+
+    fn rename(&self, from: &str, to: &str) -> Result<(), StorageError> {
+        let (source, target) = (self.resolve(from)?, self.resolve(to)?);
+        // Files kept open must not block the move (Windows).
+        *self.open.borrow_mut() = None;
+        create_parent(&target)?;
+        fs::rename(source, target).map_err(error)
+    }
+
+    fn create_dir(&self, path: &str) -> Result<(), StorageError> {
+        fs::create_dir_all(self.resolve(path)?).map_err(error)
+    }
+
+    fn remove_dir_all(&self, path: &str) -> Result<(), StorageError> {
+        let target = self.resolve(path)?;
+        *self.open.borrow_mut() = None;
+        match fs::remove_dir_all(target) {
+            Err(e) if e.kind() != io::ErrorKind::NotFound => Err(error(e)),
+            _ => Ok(()),
+        }
+    }
 }
 
 #[cfg(test)]

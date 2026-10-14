@@ -40,6 +40,10 @@ mod gesture;
 mod hyphenation;
 mod id;
 pub mod md5;
+/// Reading and writing SQLite database files.
+pub mod sqlite {
+    pub use quireink_sqlite::*;
+}
 mod memory_storage;
 mod menus;
 mod params;

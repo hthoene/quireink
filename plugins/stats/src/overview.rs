@@ -24,6 +24,7 @@ enum Row {
     ThisBook(u16),
     Calendar,
     Books,
+    Sync,
 }
 
 pub(crate) struct Overview {
@@ -51,7 +52,7 @@ impl Overview {
         if let Some(book) = current {
             rows.push(Row::ThisBook(book));
         }
-        rows.extend([Row::Calendar, Row::Books]);
+        rows.extend([Row::Calendar, Row::Books, Row::Sync]);
         let row = style.row as u16;
         let gap = style.gap as u16;
         let list_height = row * rows.len() as u16;
@@ -105,6 +106,7 @@ impl Overview {
             }
             Row::Calendar => Command::OpenScreen(CALENDAR, Params::new()),
             Row::Books => Command::OpenScreen(BOOKS, Params::new()),
+            Row::Sync => Command::OpenScreen(crate::sync::SCREEN, Params::new()),
         });
     }
 
@@ -314,6 +316,7 @@ impl Screen for Overview {
                     Row::ThisBook(_) => "stats.this-book",
                     Row::Calendar => "stats.calendar",
                     Row::Books => "stats.books",
+                    Row::Sync => "stats.sync.title",
                 };
                 ui::draw_value_row(canvas, env, &style, rect, focused, env.i18n.tr(key), "›");
             },

@@ -5,6 +5,7 @@ exclude = ["fuzz"]
 members = [
     "crates/quireink-platform",
     "crates/quireink-config",
+    "crates/quireink-sqlite",
     "crates/quireink-i18n",
     "crates/quireink-graphics",
     "crates/quireink-text",
@@ -52,6 +53,7 @@ authors = ["The QuireInk Authors"]
 [workspace.dependencies]
 quireink-platform = { path = "crates/quireink-platform", version = "0.1.0" }
 quireink-config = { path = "crates/quireink-config", version = "0.1.0" }
+quireink-sqlite = { path = "crates/quireink-sqlite", version = "0.1.0" }
 quireink-i18n = { path = "crates/quireink-i18n", version = "0.1.0" }
 quireink-graphics = { path = "crates/quireink-graphics", version = "0.1.0" }
 quireink-text = { path = "crates/quireink-text", version = "0.1.0" }

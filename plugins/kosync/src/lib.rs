@@ -308,12 +308,10 @@ pub(crate) fn server_request(
         headers.push(("x-auth-key".to_string(), key.to_string()));
     }
     HttpRequest {
-        method: method.to_string(),
-        url: format!("{}{path}", server(env)),
         headers,
         body,
-        reply,
         params,
+        ..HttpRequest::new(method, &format!("{}{path}", server(env)), reply)
     }
 }
 

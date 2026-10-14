@@ -127,6 +127,46 @@ impl Storage for MemoryStorage {
         self.files.borrow_mut().remove(path);
         Ok(())
     }
+
+    fn rename(&self, from: &str, to: &str) -> Result<(), StorageError> {
+        Self::check(from)?;
+        Self::check(to)?;
+        let mut files = self.files.borrow_mut();
+        if let Some(data) = files.remove(from) {
+            files.insert(String::from(to), data);
+            return Ok(());
+        }
+        // A directory: everything below it.
+        let prefix = alloc::format!("{from}/");
+        let moved: Vec<String> = files
+            .keys()
+            .filter(|k| k.starts_with(&prefix))
+            .cloned()
+            .collect();
+        if moved.is_empty() {
+            return Err(StorageError::NotFound);
+        }
+        for key in moved {
+            if let Some(data) = files.remove(&key) {
+                files.insert(alloc::format!("{to}/{}", &key[prefix.len()..]), data);
+            }
+        }
+        Ok(())
+    }
+
+    fn create_dir(&self, path: &str) -> Result<(), StorageError> {
+        // Directories exist through their files here.
+        Self::check(path)
+    }
+
+    fn remove_dir_all(&self, path: &str) -> Result<(), StorageError> {
+        Self::check(path)?;
+        let prefix = alloc::format!("{path}/");
+        self.files
+            .borrow_mut()
+            .retain(|k, _| !k.starts_with(&prefix));
+        Ok(())
+    }
 }
 
 /// Reads a whole (small) file, refusing files larger than `limit` bytes.

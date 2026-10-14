@@ -22,7 +22,7 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use quireink_sdk::{Env, Storage};
+use quireink_sdk::{Env, Storage, StorageError};
 
 /// A stay on a page (KOReader: a row of `page_stat_data`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -199,6 +199,47 @@ pub(crate) fn save_books(storage: &dyn Storage, books: &[Book]) {
 /// Records a stay on a page.
 pub(crate) fn append(storage: &dyn Storage, stat: PageStat) {
     let _ = storage.append(&path("pages.bin"), &stat.encode());
+}
+
+/// Replaces the log with the stays in `file` (records of book, page,
+/// start, duration and pages as big-endian u32, in time order), e.g.
+/// after merging with another device's; the day totals are summed anew.
+pub(crate) fn replace_log(storage: &dyn Storage, file: &str) -> Result<(), StorageError> {
+    let new = path("pages.new");
+    storage.write(&new, &[])?;
+    let mut chunk = [0u8; 20 * 64];
+    let mut at = 0u64;
+    loop {
+        let n = storage.read_at(file, at, &mut chunk)?;
+        let whole = n - n % 20;
+        let mut out = Vec::with_capacity(whole / 20 * RECORD);
+        for r in chunk[..whole].chunks_exact(20) {
+            let v = |i: usize| u32::from_be_bytes([r[i], r[i + 1], r[i + 2], r[i + 3]]);
+            let stat = PageStat {
+                book: v(0).min(u32::from(u16::MAX)) as u16,
+                page: v(4),
+                start: v(8),
+                duration: v(12).min(u32::from(u16::MAX)) as u16,
+                pages: v(16),
+            };
+            out.extend_from_slice(&stat.encode());
+        }
+        storage.append(&new, &out)?;
+        if whole == 0 || n < chunk.len() {
+            break;
+        }
+        at += whole as u64;
+    }
+    // Swapped in at once (by a rename where the storage can), then the
+    // day totals go.
+    if storage.rename(&new, &path("pages.bin")).is_err() {
+        let data =
+            quireink_sdk::read_file(storage, &new, 256 << 20).map_err(|_| StorageError::Io)?;
+        storage.write(&path("pages.bin"), &data)?;
+        let _ = storage.remove(&new);
+    }
+    let _ = storage.remove(&path("days.bin"));
+    Ok(())
 }
 
 /// Every day with reading, in order, local days as `day_of` makes them

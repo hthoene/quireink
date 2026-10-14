@@ -14,6 +14,8 @@ pub struct HttpCall {
     pub url: String,
     pub headers: Vec<(String, String)>,
     pub body: Option<Vec<u8>>,
+    /// The longest response body wanted; shells cut longer ones.
+    pub max_response: usize,
 }
 
 /// What came back. `status` 0 means the request failed (no network, no
@@ -23,7 +25,11 @@ pub struct HttpResponse {
     pub id: u32,
     pub status: u16,
     pub body: Vec<u8>,
+    /// The `ETag` header, if any.
+    pub etag: Option<String>,
 }
 
-/// Longest response body passed on; shells cut longer ones.
+/// Longest response body passed on to plugins.
 pub const MAX_RESPONSE: usize = 1 << 20;
+/// Longest response body saved to a file, and longest file sent.
+pub const MAX_FILE: usize = 64 << 20;

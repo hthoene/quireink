@@ -847,12 +847,9 @@ ui-size = 12
 #[test]
 fn http_requests_go_to_the_shell_and_answers_come_back() {
     let request = |id: &str| quireink_sdk::HttpRequest {
-        method: String::from("GET"),
-        url: String::from("https://example.org/x"),
         headers: alloc::vec![(String::from("accept"), String::from("text/plain"))],
-        body: None,
-        reply: Id::new_static("ov.reply"),
         params: quireink_sdk::Params::new().with("id", String::from(id)),
+        ..quireink_sdk::HttpRequest::new("GET", "https://example.org/x", Id::new_static("ov.reply"))
     };
     // With network: the shell gets it and answers.
     let log = log();
@@ -876,6 +873,7 @@ fn http_requests_go_to_the_shell_and_answers_come_back() {
             id: calls[0].id,
             status: 200,
             body: b"ok".to_vec(),
+            etag: None,
         },
     );
     assert!(log.borrow().contains(&String::from("event ov.reply a")));
@@ -890,6 +888,46 @@ fn http_requests_go_to_the_shell_and_answers_come_back() {
     kernel.run_commands();
     assert!(kernel.take_requests().is_empty());
     assert!(log.borrow().contains(&String::from("event ov.reply b")));
+}
+
+#[test]
+fn files_go_up_and_come_down() {
+    let storage = quireink_sdk::MemoryStorage::new().with("up.bin", b" data".to_vec());
+    let mut kernel = Kernel::builder(DEVICE)
+        .storage(storage)
+        .network(true)
+        .build()
+        .unwrap();
+    kernel.start(Instant(0));
+    let reply = Id::new_static("core.test-reply");
+    kernel.request(quireink_sdk::HttpRequest {
+        body_from: Some(String::from("up.bin")),
+        save_to: Some(String::from("down.bin")),
+        ..quireink_sdk::HttpRequest::new("PUT", "https://example.org/f", reply.clone())
+    });
+    let calls = kernel.take_requests();
+    assert_eq!(calls[0].body.as_deref(), Some(&b" data"[..]));
+    assert_eq!(calls[0].max_response, crate::MAX_FILE);
+    kernel.http_response(
+        Instant(1),
+        crate::HttpResponse {
+            id: calls[0].id,
+            status: 200,
+            body: b"\xffbinary".to_vec(),
+            etag: Some(String::from("\"abc\"")),
+        },
+    );
+    let storage = kernel.shared.storage.as_ref();
+    assert_eq!(
+        quireink_sdk::read_file(storage, "down.bin", 64).unwrap(),
+        b"\xffbinary"
+    );
+    // A file that is not there fails at once.
+    kernel.request(quireink_sdk::HttpRequest {
+        body_from: Some(String::from("missing.bin")),
+        ..quireink_sdk::HttpRequest::new("PUT", "https://example.org/f", reply)
+    });
+    assert!(kernel.take_requests().is_empty());
 }
 
 #[test]

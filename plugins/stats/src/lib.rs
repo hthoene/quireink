@@ -8,6 +8,11 @@
 //! not count as read. Books are recognised by KOReader's fingerprint of
 //! the file (a partial MD5). Reading pauses while the app is in the
 //! background. See [`store`] for the files.
+//!
+//! The statistics are shared with KOReader's: through the cloud folder
+//! KOReader syncs them to (WebDAV), and by taking over those of KOReader
+//! on the same device (see [`sync`]); its database format is in
+//! [`koreader`], the merge in [`merge`].
 
 #![no_std]
 
@@ -17,9 +22,13 @@ mod book;
 mod books;
 mod calendar;
 mod chart;
+mod extsort;
 mod fmt;
+mod koreader;
+mod merge;
 mod overview;
 mod store;
+mod sync;
 mod totals;
 
 use alloc::borrow::Cow;
@@ -48,7 +57,7 @@ pub const MAX_SECONDS: Id = Id::new_static("stats.max-seconds");
 /// Opens the overview.
 pub const OPEN: Id = Id::new_static("stats.open");
 
-const GROUP: Id = Id::new_static("stats.group");
+pub(crate) const GROUP: Id = Id::new_static("stats.group");
 const OVERVIEW: Id = Id::new_static("stats.overview");
 const CALENDAR: Id = Id::new_static("stats.calendar");
 const BOOKS: Id = Id::new_static("stats.books");
@@ -320,6 +329,9 @@ impl Plugin for Stats {
                 }
             }),
         )?;
+
+        // Sharing with KOReader.
+        sync::register(r, Rc::new(RefCell::new(sync::Sync::default())))?;
 
         // The views.
         r.add_screen(ScreenSpec {

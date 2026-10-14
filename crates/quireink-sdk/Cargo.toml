@@ -16,6 +16,7 @@ quireink-platform.workspace = true
 quireink-graphics.workspace = true
 quireink-i18n.workspace = true
 quireink-config.workspace = true
+quireink-sqlite.workspace = true
 quireink-text.workspace = true
 quireink-document.workspace = true
 quireink-layout.workspace = true

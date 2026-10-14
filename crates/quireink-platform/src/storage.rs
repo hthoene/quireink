@@ -80,6 +80,27 @@ pub trait Storage {
     fn exists(&self, path: &str) -> bool {
         self.size(path).is_ok()
     }
+
+    /// Moves a file or a directory to `to`, replacing a file there and
+    /// creating missing parent directories. Storages that cannot say
+    /// [`StorageError::Unsupported`].
+    fn rename(&self, from: &str, to: &str) -> Result<(), StorageError> {
+        let _ = (from, to);
+        Err(StorageError::Unsupported)
+    }
+
+    /// Creates a directory and its missing parents; an existing one is
+    /// fine.
+    fn create_dir(&self, path: &str) -> Result<(), StorageError> {
+        let _ = path;
+        Err(StorageError::Unsupported)
+    }
+
+    /// Deletes a directory with everything in it; a missing one is fine.
+    fn remove_dir_all(&self, path: &str) -> Result<(), StorageError> {
+        let _ = path;
+        Err(StorageError::Unsupported)
+    }
 }
 
 /// Storage for devices without any: everything is empty and read-only.
@@ -188,6 +209,31 @@ impl<B: Storage, M: Storage> Storage for Mounted<B, M> {
     fn exists(&self, path: &str) -> bool {
         let (storage, path) = self.route(path);
         storage.exists(path)
+    }
+
+    fn rename(&self, from: &str, to: &str) -> Result<(), StorageError> {
+        let (a, from_path) = self.route(from);
+        let (b, to_path) = self.route(to);
+        // Within one storage only; across a mount point it is a copy.
+        if core::ptr::addr_eq(a, b) {
+            a.rename(from_path, to_path)
+        } else {
+            Err(StorageError::Unsupported)
+        }
+    }
+
+    fn create_dir(&self, path: &str) -> Result<(), StorageError> {
+        let (storage, path) = self.route(path);
+        storage.create_dir(path)
+    }
+
+    fn remove_dir_all(&self, path: &str) -> Result<(), StorageError> {
+        if path == self.at {
+            // Never the mount point itself.
+            return Err(StorageError::Unsupported);
+        }
+        let (storage, path) = self.route(path);
+        storage.remove_dir_all(path)
     }
 }
 

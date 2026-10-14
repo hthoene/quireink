@@ -1494,9 +1494,17 @@ dependencies = [
  "quireink-image",
  "quireink-layout",
  "quireink-platform",
+ "quireink-sqlite",
  "quireink-text",
  "quireink-xml",
  "quireink-zip",
+]
+
+[[package]]
+name = "quireink-sqlite"
+version = "0.1.0"
+dependencies = [
+ "quireink-platform",
 ]
 
 [[package]]

@@ -1,0 +1,18 @@
+[package]
+name = "quireink-sqlite"
+description = "Reads and writes SQLite database files page by page, e.g. to exchange KOReader's statistics (no_std)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+categories = ["no-std", "database", "parser-implementations"]
+keywords = ["sqlite", "no-std"]
+
+[dependencies]
+quireink-platform.workspace = true
+
+[lints]
+workspace = true

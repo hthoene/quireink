@@ -9,7 +9,7 @@ use android_activity::{AndroidApp, AndroidAppWaker};
 use jni::JNIEnv;
 use jni::JavaVM;
 use jni::objects::{JObject, JValue};
-use quireink_core::{HttpCall, HttpResponse, MAX_RESPONSE};
+use quireink_core::{HttpCall, HttpResponse};
 
 /// Requests in flight and their answers.
 pub struct Net {
@@ -55,6 +55,7 @@ fn failed(call: &HttpCall, reason: &str) -> HttpResponse {
         id: call.id,
         status: 0,
         body: reason.as_bytes().to_vec(),
+        etag: None,
     }
 }
 
@@ -64,10 +65,11 @@ fn perform(vm: &JavaVM, call: &HttpCall) -> HttpResponse {
     };
     let result = env.with_local_frame(64, |env| request(env, call));
     match result {
-        Ok((status, body)) => HttpResponse {
+        Ok((status, body, etag)) => HttpResponse {
             id: call.id,
             status,
             body,
+            etag,
         },
         Err(e) => {
             // E.g. no network or an unknown host (an IOException).
@@ -80,7 +82,10 @@ fn perform(vm: &JavaVM, call: &HttpCall) -> HttpResponse {
     }
 }
 
-fn request(env: &mut JNIEnv<'_>, call: &HttpCall) -> jni::errors::Result<(u16, Vec<u8>)> {
+fn request(
+    env: &mut JNIEnv<'_>,
+    call: &HttpCall,
+) -> jni::errors::Result<(u16, Vec<u8>, Option<String>)> {
     let url = env.new_string(&call.url)?;
     let url = env.new_object(
         "java/net/URL",
@@ -98,7 +103,7 @@ fn request(env: &mut JNIEnv<'_>, call: &HttpCall) -> jni::errors::Result<(u16, V
         &[JValue::Object(&method)],
     )?;
     env.call_method(&conn, "setConnectTimeout", "(I)V", &[JValue::Int(15_000)])?;
-    env.call_method(&conn, "setReadTimeout", "(I)V", &[JValue::Int(20_000)])?;
+    env.call_method(&conn, "setReadTimeout", "(I)V", &[JValue::Int(60_000)])?;
     for (name, value) in &call.headers {
         let (name, value) = (env.new_string(name)?, env.new_string(value)?);
         env.call_method(
@@ -118,6 +123,22 @@ fn request(env: &mut JNIEnv<'_>, call: &HttpCall) -> jni::errors::Result<(u16, V
         env.call_method(&out, "close", "()V", &[])?;
     }
     let status = env.call_method(&conn, "getResponseCode", "()I", &[])?.i()?;
+    let name = env.new_string("ETag")?;
+    let etag = env
+        .call_method(
+            &conn,
+            "getHeaderField",
+            "(Ljava/lang/String;)Ljava/lang/String;",
+            &[JValue::Object(&name)],
+        )?
+        .l()?;
+    let etag = if etag.is_null() {
+        None
+    } else {
+        Some(String::from(
+            env.get_string(&jni::objects::JString::from(etag))?,
+        ))
+    };
     // Errors come with a body too, e.g. the server's reason.
     let stream = if status >= 400 {
         "getErrorStream"
@@ -134,7 +155,7 @@ fn request(env: &mut JNIEnv<'_>, call: &HttpCall) -> jni::errors::Result<(u16, V
             let n = env
                 .call_method(&stream, "read", "([B)I", &[JValue::Object(&buffer)])?
                 .i()?;
-            if n < 0 || body.len() >= MAX_RESPONSE {
+            if n < 0 || body.len() >= call.max_response {
                 break;
             }
             let mut chunk = vec![0i8; n as usize];
@@ -144,5 +165,5 @@ fn request(env: &mut JNIEnv<'_>, call: &HttpCall) -> jni::errors::Result<(u16, V
         env.call_method(&stream, "close", "()V", &[])?;
     }
     env.call_method(&conn, "disconnect", "()V", &[])?;
-    Ok((status.clamp(0, i32::from(u16::MAX)) as u16, body))
+    Ok((status.clamp(0, i32::from(u16::MAX)) as u16, body, etag))
 }

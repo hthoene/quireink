@@ -13,14 +13,38 @@ pub struct HttpRequest {
     pub url: alloc::string::String,
     pub headers: alloc::vec::Vec<(alloc::string::String, alloc::string::String)>,
     pub body: Option<alloc::string::String>,
+    /// A file in storage to send as the body instead, e.g. a database to
+    /// upload.
+    pub body_from: Option<alloc::string::String>,
+    /// A file in storage to write the response's body to (also large
+    /// ones, e.g. a download); the reply then has no `body`.
+    pub save_to: Option<alloc::string::String>,
     pub reply: Id,
     pub params: Params,
+}
+
+impl HttpRequest {
+    /// A request without headers or body.
+    pub fn new(method: &str, url: &str, reply: Id) -> Self {
+        Self {
+            method: alloc::string::String::from(method),
+            url: alloc::string::String::from(url),
+            headers: alloc::vec::Vec::new(),
+            body: None,
+            body_from: None,
+            save_to: None,
+            reply,
+            params: Params::new(),
+        }
+    }
 }
 
 /// Parameters of an HTTP reply event (see [`HttpRequest`]).
 pub mod http_params {
     pub const STATUS: &str = "status";
     pub const BODY: &str = "body";
+    /// The response's `ETag` header, if it had one.
+    pub const ETAG: &str = "etag";
 }
 
 /// A request from a plugin to the kernel.

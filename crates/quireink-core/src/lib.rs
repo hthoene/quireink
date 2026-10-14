@@ -74,7 +74,7 @@ use quireink_sdk::{
 use crate::core_plugin::{CORE, CorePlugin};
 use crate::input::{Recognized, Recognizer, Thresholds};
 use crate::keymap::{InputKey, Keymap, Origin, Zone};
-pub use crate::net::{HttpCall, HttpResponse, MAX_RESPONSE};
+pub use crate::net::{HttpCall, HttpResponse, MAX_FILE, MAX_RESPONSE};
 use crate::refresh::RefreshPolicy;
 use crate::registry::{PluginRegistrar, Registry, Staging};
 
@@ -509,8 +509,9 @@ pub struct Kernel {
     /// The shell reads the system's clipboard (see
     /// [`KernelBuilder::system_clipboard`]).
     reads_clipboard: bool,
-    /// Requests made and not answered yet: id, reply event, parameters.
-    awaiting: Vec<(u32, Id, Params)>,
+    /// Requests made and not answered yet: id, reply event, parameters
+    /// and where to save the body.
+    awaiting: Vec<(u32, Id, Params, Option<String>)>,
     next_request: u32,
     /// Setting defaults from plugins, applied once all are registered:
     /// `(plugin, setting, value)`.
@@ -752,19 +753,27 @@ impl Kernel {
     /// Delivers the answer to a request from [`Kernel::take_requests`].
     pub fn http_response(&mut self, now: Instant, response: HttpResponse) -> Effects {
         self.now = now;
-        if let Some(at) = self
-            .awaiting
-            .iter()
-            .position(|(id, _, _)| *id == response.id)
-        {
-            let (_, reply, params) = self.awaiting.remove(at);
-            let body = String::from_utf8_lossy(&response.body).into_owned();
-            let params = params
-                .with(
-                    quireink_sdk::http_params::STATUS,
-                    format!("{}", response.status),
-                )
-                .with(quireink_sdk::http_params::BODY, body);
+        if let Some(at) = self.awaiting.iter().position(|(id, ..)| *id == response.id) {
+            let (_, reply, params, save_to) = self.awaiting.remove(at);
+            let mut status = format!("{}", response.status);
+            let mut params = match save_to {
+                // Answers that are files: written where asked (a failure
+                // has its reason as the body).
+                Some(path) if response.status != 0 => {
+                    if self.shared.storage.write(&path, &response.body).is_err() {
+                        status = String::from("0");
+                    }
+                    params
+                }
+                _ => {
+                    let body = String::from_utf8_lossy(&response.body).into_owned();
+                    params.with(quireink_sdk::http_params::BODY, body)
+                }
+            };
+            params = params.with(quireink_sdk::http_params::STATUS, status);
+            if let Some(etag) = response.etag {
+                params = params.with(quireink_sdk::http_params::ETAG, etag);
+            }
             self.output.commands.push(Command::Emit(reply, params));
         }
         self.finish()
@@ -1578,16 +1587,41 @@ impl Kernel {
                 .push(Command::Emit(request.reply, params));
             return;
         }
+        let body = match &request.body_from {
+            Some(path) => {
+                match quireink_sdk::read_file(self.shared.storage.as_ref(), path, MAX_FILE) {
+                    Ok(data) => Some(data),
+                    Err(e) => {
+                        let params = request
+                            .params
+                            .with(quireink_sdk::http_params::STATUS, "0")
+                            .with(quireink_sdk::http_params::BODY, format!("{e}"));
+                        self.output
+                            .commands
+                            .push(Command::Emit(request.reply, params));
+                        return;
+                    }
+                }
+            }
+            None => request.body.map(String::into_bytes),
+        };
         self.next_request = self.next_request.wrapping_add(1);
         let id = self.next_request;
+        let max_response = if request.save_to.is_some() {
+            MAX_FILE
+        } else {
+            MAX_RESPONSE
+        };
         self.requests.push(HttpCall {
             id,
             method: request.method,
             url: request.url,
             headers: request.headers,
-            body: request.body.map(String::into_bytes),
+            body,
+            max_response,
         });
-        self.awaiting.push((id, request.reply, request.params));
+        self.awaiting
+            .push((id, request.reply, request.params, request.save_to));
     }
 
     /// Activates the scope stored at `path` for the top screen, or ends
