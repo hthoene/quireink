@@ -286,27 +286,47 @@ so mapping works the same on every device and is fully user-configurable.
 Budget for the ESP32-C3 (≈ 380 KB SRAM total; Wi-Fi alone needs a large share
 while active):
 
-| Item | Budget (target) | Technique |
-|------|-----------------|-----------|
-| Framebuffer | ≤ 48 KB | 800×480 at 1 bpp; grayscale via band rendering / multi-pass **[VERIFY controller]** |
-| Glyph cache | 16–32 KB | LRU of pre-rendered bitmap glyphs, fonts stored in flash/SD |
-| Layout working set | ≤ 32 KB | Lay out one page at a time from a locator |
-| ZIP inflate | ~ 32 KB window + state | Streamed, one entry at a time |
-| XML parsing | few KB | Zero-copy tokenizer, no DOM |
+| Item | Measured (X4 profile) | Technique |
+|------|-----------------------|-----------|
+| Framebuffer | 11.7 KiB | Bands of 100 rows; the panel controller keeps the frame (ADR 0012) |
+| Glyph cache | 0 | Bitmap font packs read in place from flash |
+| Kernel, registries, settings, key maps | ≈ 9 KiB | Sorted-vector maps (`VecMap`), capacity released after registration |
+| Translations | ≈ 4 KiB | Catalogs index into built-in text; inactive languages unloaded |
+| Open book (EPUB) | ≈ 1 KiB + 12 B per chapter | Package cached on storage; ZIP index of 8 B per entry |
+| Folder listing | one page | Keyset pagination over the directory, never the whole folder |
+| Table of contents | one page | Read entry by entry from the cache |
+| ZIP inflate (while converting) | 10.5 KiB + ≤ 32 KiB | Decoder state + window no larger than the entry |
+| XML tokenizer | ≤ 4 KiB | Text emitted early, overlong markup skipped |
 | Wi-Fi + TLS | on demand only | Freed when sync is done |
+
+Totals (X4 profile, heap budget 192 KiB): home screen 28 KiB, reading TXT
+or EPUB 31 KiB, peak 83 KiB while converting an EPUB chapter for the first
+time (was 132 / 155 / over budget before the optimizations of 2026-10-14).
 
 Rules:
 
-- **Streaming everywhere** — never load a whole file or chapter into RAM.
-- **Precompute, then cache** — a background pass paginates chapters and stores
-  page-break locators on storage (`.quireink/cache/…`). Page turn = read one
-  locator + lay out one page.
-- **No hidden allocation in hot paths**; fixed-capacity collections
-  (`heapless`) where sizes are known.
-- The emulator enforces the same heap cap (see §9.2).
-- Only translation catalogs of the active language chain are kept in RAM
-  (M0 still loads all; measured: ≈14 KiB kernel overhead besides the 94 KiB
-  framebuffer in the X4 profile).
+- **Streaming everywhere** — never load a whole file, chapter, folder or
+  table of contents into RAM; memory must not grow with the size of books
+  or libraries.
+- **Precompute, then cache** — conversions and indexes go to storage
+  (`.quireink/plugins/<id>/…`). Page turn = read one locator + lay out one
+  page.
+- **Draw only in `draw`** — screens may be drawn in bands, several times
+  per frame.
+- **No hidden allocation in hot paths**; big buffers are allocated
+  fallibly, so running out of memory is an error message, not a crash.
+- The emulator enforces the same heap cap (see §9.2); `--heap-report`
+  shows where the memory goes.
+
+Still open, to verify on the device (M4):
+
+- **Fragmentation.** The emulator counts bytes, not free blocks. The 32 KiB
+  inflate window needs one contiguous block; if the device allocator
+  fragments over long sessions, reserve a scratch region for large,
+  short-lived buffers.
+- **Stack.** Not measured by the emulator. Inflate state (10.5 KiB) is
+  briefly built on the stack before it moves to the heap.
+- **Real budget.** 192 KiB is a conservative guess for the ESP32-C3 heap.
 
 ---
 
@@ -746,7 +766,7 @@ If the X4 has not arrived by the end of M3, M6 (Boox) is done before M4.
 
 | Risk | Impact | Mitigation |
 |------|--------|-----------|
-| ESP32-C3 RAM too tight (esp. Wi-Fi + TLS + EPUB) | High | Budget allocator from M0; streaming; sync in a separate "mode" that frees reader memory |
+| ESP32-C3 RAM too tight (esp. Wi-Fi + TLS + EPUB) | Medium | Budget allocator from M0; banded rendering, streaming and caching (§5: reading needs 31 of 192 KiB); sync in a separate "mode" that frees reader memory |
 | Display controller / grayscale details of the X4 unknown | Medium | Study CrossPoint; get hardware early |
 | Vendor e-ink quirks per Linux device | Medium | Device DB; learn from KOReader; Kobo first |
 | License contamination | High | Decide license first; `cargo-deny`; copyleft only in separate plugins |
