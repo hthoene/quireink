@@ -156,7 +156,7 @@ fn site_of(backtrace: &Backtrace, depth: usize) -> String {
             .and_then(|l| l.trim().strip_prefix("at "))
             .map(|l| {
                 let file = l.rsplit(['\\', '/']).next().unwrap_or(l);
-                file.rsplitn(2, ':').nth(1).unwrap_or(file).to_string()
+                file.rsplit_once(':').map_or(file, |(f, _)| f).to_string()
             })
             .unwrap_or_default();
         let name = name.rsplit_once("::h").map_or(name, |(n, _)| n);
@@ -194,7 +194,7 @@ pub fn report(depth: usize) {
         group.1 += 1;
     }
     let mut groups: Vec<_> = groups.into_iter().collect();
-    groups.sort_by(|a, b| b.1.0.cmp(&a.1.0));
+    groups.sort_by_key(|(_, (bytes, _))| std::cmp::Reverse(*bytes));
     let total: usize = groups.iter().map(|(_, (bytes, _))| bytes).sum();
     println!("live heap by call site ({:.1} KiB):", total as f64 / 1024.0);
     for (site, (bytes, count)) in groups {
