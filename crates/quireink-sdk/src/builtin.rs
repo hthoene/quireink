@@ -132,7 +132,9 @@ pub mod events {
     /// [`PATH`](super::params::PATH), [`TITLE`](super::params::TITLE),
     /// [`PROGRESS`](super::params::PROGRESS) and the position,
     /// [`SECTION`](super::params::SECTION) and
-    /// [`OFFSET`](super::params::OFFSET).
+    /// [`OFFSET`](super::params::OFFSET). Not for documents in hidden
+    /// folders ([`files::is_hidden`](crate::files::is_hidden)), e.g. web
+    /// pages: they are no books.
     pub const BOOK_OPENED: Id = Id::new_static("core.book-opened");
     /// The reader moved to another page; same parameters as
     /// [`BOOK_OPENED`].

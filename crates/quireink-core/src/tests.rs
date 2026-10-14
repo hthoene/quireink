@@ -874,6 +874,7 @@ fn http_requests_go_to_the_shell_and_answers_come_back() {
             status: 200,
             body: b"ok".to_vec(),
             etag: None,
+            ..Default::default()
         },
     );
     assert!(log.borrow().contains(&String::from("event ov.reply a")));
@@ -1040,6 +1041,8 @@ fn files_go_up_and_come_down() {
             status: 200,
             body: b"\xffbinary".to_vec(),
             etag: Some(String::from("\"abc\"")),
+            content_type: Some(String::from("application/epub+zip")),
+            url: Some(String::from("https://example.org/g")),
         },
     );
     let storage = kernel.shared.storage.as_ref();

@@ -55,9 +55,13 @@ fn failed(call: &HttpCall, reason: &str) -> HttpResponse {
         id: call.id,
         status: 0,
         body: reason.as_bytes().to_vec(),
-        etag: None,
+        ..HttpResponse::default()
     }
 }
+
+/// Redirects followed at most, also from `http` to `https` (which Java
+/// does not follow by itself).
+const MAX_REDIRECTS: u32 = 10;
 
 fn perform(vm: &JavaVM, call: &HttpCall) -> HttpResponse {
     let Ok(mut env) = vm.attach_current_thread() else {
@@ -65,12 +69,7 @@ fn perform(vm: &JavaVM, call: &HttpCall) -> HttpResponse {
     };
     let result = env.with_local_frame(64, |env| request(env, call));
     match result {
-        Ok((status, body, etag)) => HttpResponse {
-            id: call.id,
-            status,
-            body,
-            etag,
-        },
+        Ok(response) => response,
         Err(e) => {
             // E.g. no network or an unknown host (an IOException).
             if env.exception_check().unwrap_or(false) {
@@ -82,18 +81,78 @@ fn perform(vm: &JavaVM, call: &HttpCall) -> HttpResponse {
     }
 }
 
-fn request(
+/// A header of the answer of `conn`, if it has it.
+fn header(
     env: &mut JNIEnv<'_>,
-    call: &HttpCall,
-) -> jni::errors::Result<(u16, Vec<u8>, Option<String>)> {
-    let url = env.new_string(&call.url)?;
-    let url = env.new_object(
+    conn: &JObject<'_>,
+    name: &str,
+) -> jni::errors::Result<Option<String>> {
+    let name = env.new_string(name)?;
+    let value = env
+        .call_method(
+            conn,
+            "getHeaderField",
+            "(Ljava/lang/String;)Ljava/lang/String;",
+            &[JValue::Object(&name)],
+        )?
+        .l()?;
+    if value.is_null() {
+        return Ok(None);
+    }
+    Ok(Some(String::from(
+        env.get_string(&jni::objects::JString::from(value))?,
+    )))
+}
+
+fn request(env: &mut JNIEnv<'_>, call: &HttpCall) -> jni::errors::Result<HttpResponse> {
+    let address = env.new_string(&call.url)?;
+    let mut url = env.new_object(
         "java/net/URL",
         "(Ljava/lang/String;)V",
-        &[JValue::Object(&url)],
+        &[JValue::Object(&address)],
     )?;
+    let mut redirects = 0;
+    loop {
+        let conn = connect(env, &url, call)?;
+        let status = env.call_method(&conn, "getResponseCode", "()I", &[])?.i()?;
+        let location = header(env, &conn, "Location")?;
+        if matches!(status, 301 | 302 | 303 | 307 | 308)
+            && redirects < MAX_REDIRECTS
+            && call.body.is_none()
+            && let Some(location) = location
+        {
+            // Relative to the address it came from.
+            let location = env.new_string(&location)?;
+            url = env.new_object(
+                "java/net/URL",
+                "(Ljava/net/URL;Ljava/lang/String;)V",
+                &[JValue::Object(&url), JValue::Object(&location)],
+            )?;
+            env.call_method(&conn, "disconnect", "()V", &[])?;
+            redirects += 1;
+            continue;
+        }
+        let mut response = answer(env, &conn, call, status)?;
+        if redirects > 0 {
+            let text = env
+                .call_method(&url, "toString", "()Ljava/lang/String;", &[])?
+                .l()?;
+            response.url = Some(String::from(
+                env.get_string(&jni::objects::JString::from(text))?,
+            ));
+        }
+        return Ok(response);
+    }
+}
+
+/// Opens `url` and sends the request.
+fn connect<'a>(
+    env: &mut JNIEnv<'a>,
+    url: &JObject<'_>,
+    call: &HttpCall,
+) -> jni::errors::Result<JObject<'a>> {
     let conn = env
-        .call_method(&url, "openConnection", "()Ljava/net/URLConnection;", &[])?
+        .call_method(url, "openConnection", "()Ljava/net/URLConnection;", &[])?
         .l()?;
     let method = env.new_string(&call.method)?;
     env.call_method(
@@ -122,23 +181,18 @@ fn request(
         env.call_method(&out, "write", "([B)V", &[JValue::Object(&bytes)])?;
         env.call_method(&out, "close", "()V", &[])?;
     }
-    let status = env.call_method(&conn, "getResponseCode", "()I", &[])?.i()?;
-    let name = env.new_string("ETag")?;
-    let etag = env
-        .call_method(
-            &conn,
-            "getHeaderField",
-            "(Ljava/lang/String;)Ljava/lang/String;",
-            &[JValue::Object(&name)],
-        )?
-        .l()?;
-    let etag = if etag.is_null() {
-        None
-    } else {
-        Some(String::from(
-            env.get_string(&jni::objects::JString::from(etag))?,
-        ))
-    };
+    Ok(conn)
+}
+
+/// Reads the answer of `conn`.
+fn answer(
+    env: &mut JNIEnv<'_>,
+    conn: &JObject<'_>,
+    call: &HttpCall,
+    status: i32,
+) -> jni::errors::Result<HttpResponse> {
+    let etag = header(env, conn, "ETag")?;
+    let content_type = header(env, conn, "Content-Type")?;
     // Errors come with a body too, e.g. the server's reason.
     let stream = if status >= 400 {
         "getErrorStream"
@@ -146,7 +200,7 @@ fn request(
         "getInputStream"
     };
     let stream = env
-        .call_method(&conn, stream, "()Ljava/io/InputStream;", &[])?
+        .call_method(conn, stream, "()Ljava/io/InputStream;", &[])?
         .l()?;
     let mut body = Vec::new();
     if !stream.is_null() {
@@ -164,6 +218,13 @@ fn request(
         }
         env.call_method(&stream, "close", "()V", &[])?;
     }
-    env.call_method(&conn, "disconnect", "()V", &[])?;
-    Ok((status.clamp(0, i32::from(u16::MAX)) as u16, body, etag))
+    env.call_method(conn, "disconnect", "()V", &[])?;
+    Ok(HttpResponse {
+        id: call.id,
+        status: status.clamp(0, i32::from(u16::MAX)) as u16,
+        body,
+        etag,
+        content_type,
+        url: None,
+    })
 }

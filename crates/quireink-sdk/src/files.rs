@@ -36,6 +36,13 @@ pub fn name(path: &str) -> &str {
     path.rsplit_once('/').map_or(path, |(_, name)| name)
 }
 
+/// Whether a part of `path` starts with `.`: QuireInk's own data, or
+/// documents a plugin keeps for itself (e.g. web pages a browser shows),
+/// which are no books.
+pub fn is_hidden(path: &str) -> bool {
+    path.split('/').any(|part| part.starts_with('.'))
+}
+
 /// A folder's entries: folders first, then by name (case ignored);
 /// names starting with `.` only with `hidden`.
 pub fn list(storage: &dyn Storage, dir: &str, hidden: bool) -> Result<Vec<Entry>, StorageError> {

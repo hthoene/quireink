@@ -93,6 +93,11 @@ pub mod http_params {
     pub const BODY: &str = "body";
     /// The response's `ETag` header, if it had one.
     pub const ETAG: &str = "etag";
+    /// The response's `Content-Type` header, if it had one, e.g.
+    /// `text/html; charset=utf-8`.
+    pub const CONTENT_TYPE: &str = "content-type";
+    /// Where the answer came from, if redirected elsewhere.
+    pub const URL: &str = "url";
 }
 
 /// A request from a plugin to the kernel.

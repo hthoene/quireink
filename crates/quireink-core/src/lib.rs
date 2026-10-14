@@ -1055,6 +1055,12 @@ impl Kernel {
             if let Some(etag) = response.etag {
                 params = params.with(quireink_sdk::http_params::ETAG, etag);
             }
+            if let Some(content_type) = response.content_type {
+                params = params.with(quireink_sdk::http_params::CONTENT_TYPE, content_type);
+            }
+            if let Some(url) = response.url {
+                params = params.with(quireink_sdk::http_params::URL, url);
+            }
             self.output.commands.push(Command::Emit(reply, params));
         }
         self.finish()

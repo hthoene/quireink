@@ -20,13 +20,17 @@ pub struct HttpCall {
 
 /// What came back. `status` 0 means the request failed (no network, no
 /// such host, timeout); `body` then holds a short reason.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct HttpResponse {
     pub id: u32,
     pub status: u16,
     pub body: Vec<u8>,
     /// The `ETag` header, if any.
     pub etag: Option<String>,
+    /// The `Content-Type` header, if any.
+    pub content_type: Option<String>,
+    /// Where the answer came from after redirects, if elsewhere.
+    pub url: Option<String>,
 }
 
 /// What a shell does for plugins' servers (see `Kernel::take_server_calls`).

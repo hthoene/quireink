@@ -773,8 +773,10 @@ impl Book {
         book.index = Some(book.open_index(env));
         book.update_chapter(env);
         book.update_links(env);
-        let state = format!("[reader]\nlast = \"{}\"\n", escape(&book.path));
-        let _ = env.storage.write(&state_path(), state.as_bytes());
+        if !book.web() {
+            let state = format!("[reader]\nlast = \"{}\"\n", escape(&book.path));
+            let _ = env.storage.write(&state_path(), state.as_bytes());
+        }
         Ok(book)
     }
 
@@ -916,7 +918,9 @@ impl Book {
         self.update_chapter(&env);
         self.update_links(&env);
         self.save_position(&env);
-        cx.command(Command::Emit(events::PAGE_TURNED, self.event_params(&env)));
+        if !self.web() {
+            cx.command(Command::Emit(events::PAGE_TURNED, self.event_params(&env)));
+        }
         cx.request_redraw();
         true
     }
@@ -1072,6 +1076,13 @@ impl Book {
             }
         }
         words
+    }
+
+    /// Whether this is no book but a document a plugin keeps for itself,
+    /// e.g. a web page: it is not reported as read (see
+    /// [`events::BOOK_OPENED`]) nor opened again at start-up.
+    fn web(&self) -> bool {
+        quireink_sdk::files::is_hidden(&self.path)
     }
 
     /// Reads the links of the page.
@@ -1405,8 +1416,10 @@ impl Screen for ReaderScreen {
                 "{}/settings.ini",
                 book.dir
             ))));
-            let params = book.event_params(cx.env());
-            cx.command(Command::Emit(events::BOOK_OPENED, params));
+            if !book.web() {
+                let params = book.event_params(cx.env());
+                cx.command(Command::Emit(events::BOOK_OPENED, params));
+            }
             let now = cx.env().now;
             cx.wake_at(now);
         }

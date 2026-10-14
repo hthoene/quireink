@@ -56,12 +56,16 @@ fn run(call: HttpCall) -> HttpResponse {
         id: call.id,
         status: 0,
         body: reason.into_bytes(),
-        etag: None,
+        ..HttpResponse::default()
     };
     let mut command = Command::new("curl");
     command
-        .args(["-sS", "--max-time", "120", "-X", &call.method])
-        .args(["-w", "\n%{http_code}\n%header{etag}"]);
+        .args(["-sS", "-L", "--max-redirs", "10", "--max-time", "120"])
+        .args(["-X", &call.method])
+        .args([
+            "-w",
+            "\n%{http_code}\n%header{etag}\n%{content_type}\n%{url_effective}",
+        ]);
     for (name, value) in &call.headers {
         command.args(["-H", &format!("{name}: {value}")]);
     }
@@ -93,21 +97,26 @@ fn run(call: HttpCall) -> HttpResponse {
     if !output.status.success() {
         return failed(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }
-    // The body, then a line with the status and one with the ETag (`-w`).
+    // The body, then lines with the status, the ETag, the content type
+    // and the final address (`-w`), read from the end.
     let mut out = output.stdout;
-    let last = out.iter().rposition(|&b| b == b'\n').unwrap_or(0);
-    let etag = String::from_utf8_lossy(&out[last..]).trim().to_string();
-    out.truncate(last);
-    let split = out.iter().rposition(|&b| b == b'\n').unwrap_or(0);
-    let status = String::from_utf8_lossy(&out[split..])
-        .trim()
-        .parse()
-        .unwrap_or(0);
-    out.truncate(split.min(call.max_response));
+    let mut line = || {
+        let at = out.iter().rposition(|&b| b == b'\n').unwrap_or(0);
+        let text = String::from_utf8_lossy(&out[at..]).trim().to_string();
+        out.truncate(at);
+        (!text.is_empty()).then_some(text)
+    };
+    let url = line().filter(|url| *url != call.url);
+    let content_type = line();
+    let etag = line();
+    let status = line().and_then(|s| s.parse().ok()).unwrap_or(0);
+    out.truncate(call.max_response);
     HttpResponse {
         id: call.id,
         status,
         body: out,
-        etag: (!etag.is_empty()).then_some(etag),
+        etag,
+        content_type,
+        url,
     }
 }
