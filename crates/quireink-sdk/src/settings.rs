@@ -101,6 +101,8 @@ pub struct SettingSpec {
     pub editor: Option<Id>,
     /// May differ per scope, e.g. per book (see [`Settings::scope`]).
     pub scoped: bool,
+    /// How much one step changes a number (e.g. 10 for percentages).
+    pub step: i64,
 }
 
 impl SettingSpec {
@@ -123,7 +125,14 @@ impl SettingSpec {
             unit: None,
             editor: None,
             scoped: false,
+            step: 1,
         }
+    }
+
+    /// How much one step (a `+` or `−`) changes a number.
+    pub fn step(mut self, step: i64) -> Self {
+        self.step = step.max(1);
+        self
     }
 
     /// May be set per scope, e.g. for one book only.

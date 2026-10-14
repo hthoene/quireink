@@ -14,7 +14,9 @@ use quireink_sdk::{
 use crate::annotations::{self, Annotation, Kind, Mark};
 use crate::index::PageIndex;
 use crate::selection::{self, Item, Mode, Selection};
-use crate::settings::{FONT_SIZE, HYPHENATE, INDENT, JUSTIFY, LINE_SPACING, MARGIN};
+use crate::settings::{
+    FONT_SIZE, FONT_WEIGHT, HYPHENATE, INDENT, JUSTIFY, LINE_SPACING, MARGIN, WORD_SPACING,
+};
 use crate::status;
 use crate::{PLUGIN, state_path};
 use quireink_sdk::status::context as status_context;
@@ -97,6 +99,8 @@ impl Embedded {
 struct Faces<'a> {
     /// Regular, bold, italic and bold italic.
     fonts: [FontHandle<'a>; 4],
+    weight: u8,
+    word_spacing: f32,
     /// The book's own fonts.
     embedded: Option<&'a Embedded>,
     size: f32,
@@ -124,6 +128,8 @@ impl<'a> Faces<'a> {
         let bold_italic = face(&fonts::READING_BOLD_ITALIC).unwrap_or(bold);
         Some(Self {
             fonts: [regular, bold, italic, bold_italic],
+            weight: t.weight,
+            word_spacing: t.word_spacing,
             embedded,
             size: t.size,
             ascent: t.ascent,
@@ -152,8 +158,30 @@ impl<'a> Faces<'a> {
     }
 }
 
+impl Faces<'_> {
+    /// A space between words in `face`.
+    fn space(&self, face: Face) -> f32 {
+        self.font(face).advance(self.size(face), ' ') * self.word_spacing
+    }
+
+    /// Draws `text` in `face`, as heavy as the font weight setting asks.
+    fn draw(&self, canvas: &mut Canvas<'_>, face: Face, x: f32, baseline: i32, text: &str) -> f32 {
+        let size = self.size(face);
+        // About a pixel per step at 48 px; at least one.
+        let extra = match self.weight {
+            0 => 0,
+            w => (f32::from(w) * size / 48.0 + 0.5).max(1.0) as u16,
+        };
+        self.font(face)
+            .draw_bolder(canvas, size, x, baseline, text, Color::BLACK, extra)
+    }
+}
+
 impl Typesetter for Faces<'_> {
     fn advance(&self, face: Face, c: char) -> f32 {
+        if c == ' ' {
+            return self.space(face);
+        }
         self.font(face).advance(self.size(face), c)
     }
 
@@ -172,6 +200,10 @@ impl Typesetter for Faces<'_> {
 #[derive(Debug, Clone)]
 struct Typography {
     size: f32,
+    /// Font weight steps (0: as the font is).
+    weight: u8,
+    /// Spaces relative to the font's.
+    word_spacing: f32,
     /// Body text lines: baseline from the top of a line, line height.
     ascent: f32,
     line_height: f32,
@@ -196,6 +228,8 @@ impl Typography {
         let settings = env.settings;
         let m = env.metrics;
         let size = m.pt(settings.int(FONT_SIZE.as_str()) as f32);
+        let weight = settings.int(FONT_WEIGHT.as_str()).clamp(0, 4) as u8;
+        let word_spacing = settings.int(WORD_SPACING.as_str()).clamp(50, 200) as f32 / 100.0;
         let metrics = font.line_metrics(size);
         let natural = metrics.ascent + metrics.descent;
         let line_height = (size * settings.int(LINE_SPACING.as_str()) as f32 / 100.0).max(natural);
@@ -225,7 +259,7 @@ impl Typography {
         let key = format!(
             "{:016x}",
             fnv(&format!(
-                "{}|{}|{}|{}|{size}|{line_height}|{}|{}|{justify}|{width}x{height}|{}|{}|{}",
+                "{}|{}|{}|{}|{size}|{line_height}|{}|{}|{justify}|{width}x{height}|{}|{}|{}|{word_spacing}",
                 font.id(),
                 face_id(env, &fonts::READING_BOLD),
                 face_id(env, &fonts::READING_ITALIC),
@@ -239,6 +273,8 @@ impl Typography {
         );
         Self {
             size,
+            weight,
+            word_spacing,
             ascent,
             line_height,
             style,
@@ -909,19 +945,13 @@ impl Book {
             }
             let mut x = t.x + line.x;
             for run in &line.runs {
-                let font = faces.font(run.face);
-                let size = faces.size(run.face);
                 let text = &line.text[run.start..run.end];
-                if line.word_spacing == 0.0 {
-                    x += font.draw(canvas, size, x, baseline, text, Color::BLACK);
-                    continue;
-                }
-                let space = font.advance(size, ' ');
+                let space = faces.space(run.face) + line.word_spacing;
                 for (i, word) in text.split(' ').enumerate() {
                     if i > 0 {
-                        x += space + line.word_spacing;
+                        x += space;
                     }
-                    x += font.draw(canvas, size, x, baseline, word, Color::BLACK);
+                    x += faces.draw(canvas, run.face, x, baseline, word);
                 }
             }
         }
@@ -946,7 +976,7 @@ impl Book {
                 let size = faces.size(run.face);
                 let (ascent, height) = faces.line(run.face);
                 let top = t.y + line.baseline - ascent;
-                let space = font.advance(size, ' ') + line.word_spacing;
+                let space = faces.space(run.face) + line.word_spacing;
                 for (i, part) in line.text[run.start..run.end].split(' ').enumerate() {
                     if i > 0 {
                         x += space;

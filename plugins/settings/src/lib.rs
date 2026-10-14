@@ -398,7 +398,7 @@ impl GroupPage {
         let value = match (&spec.kind, current) {
             (SettingKind::Bool, Some(SettingValue::Bool(v))) => SettingValue::Bool(!v),
             (SettingKind::Int { min, max }, Some(SettingValue::Int(v))) => {
-                SettingValue::Int((v + step).clamp(*min, *max))
+                SettingValue::Int((v + step * spec.step).clamp(*min, *max))
             }
             _ => return,
         };

@@ -438,8 +438,24 @@ impl<'a> FontHandle<'a> {
         text: &str,
         color: Color,
     ) -> f32 {
+        self.draw_bolder(canvas, size, x, baseline, text, color, 0)
+    }
+
+    /// Like [`FontHandle::draw`], with glyphs widened by `extra` pixels
+    /// (e.g. a reader's font weight setting).
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_bolder(
+        &self,
+        canvas: &mut Canvas<'_>,
+        size: f32,
+        x: f32,
+        baseline: i32,
+        text: &str,
+        color: Color,
+        extra: u16,
+    ) -> f32 {
         let mut cache = self.cache.borrow_mut();
-        quireink_text::draw_text(
+        quireink_text::draw_text_bolder(
             canvas,
             &mut cache,
             self.index,
@@ -449,6 +465,7 @@ impl<'a> FontHandle<'a> {
             baseline,
             text,
             color,
+            extra,
         )
     }
 }

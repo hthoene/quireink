@@ -860,7 +860,7 @@ pub fn next_value(env: &Env<'_>, spec: &SettingSpec, step: i64) -> Option<Settin
     Some(match (&spec.kind, current) {
         (SettingKind::Bool, SettingValue::Bool(v)) => SettingValue::Bool(!v),
         (SettingKind::Int { min, max }, SettingValue::Int(v)) => {
-            SettingValue::Int((v + step).clamp(*min, *max))
+            SettingValue::Int((v + step * spec.step).clamp(*min, *max))
         }
         (SettingKind::Choice(options), SettingValue::Text(v)) => {
             let options: Vec<&str> = options.iter().map(|o| o.as_ref()).collect();

@@ -79,6 +79,10 @@ pub mod settings {
 
     /// Font size in points.
     pub const FONT_SIZE: Id = Id::new_static("reader.font-size");
+    /// Darker text: glyphs widened by up to this many steps.
+    pub const FONT_WEIGHT: Id = Id::new_static("reader.font-weight");
+    /// Space between words in percent of the font's.
+    pub const WORD_SPACING: Id = Id::new_static("reader.word-spacing");
     /// Distance between baselines in percent of the font size.
     pub const LINE_SPACING: Id = Id::new_static("reader.line-spacing");
     /// Page margins in millimetres.
@@ -241,7 +245,23 @@ impl Plugin for Reader {
                 (100, 250, 135),
                 "core.unit.percent",
             )
+            .step(5)
             .description("reader.setting.line-spacing.help"),
+            int(
+                settings::FONT_WEIGHT,
+                "reader.setting.font-weight",
+                (0, 4, 0),
+                "reader.unit.weight",
+            )
+            .description("reader.setting.font-weight.help"),
+            int(
+                settings::WORD_SPACING,
+                "reader.setting.word-spacing",
+                (50, 200, 100),
+                "core.unit.percent",
+            )
+            .step(10)
+            .description("reader.setting.word-spacing.help"),
             int(
                 settings::MARGIN,
                 "reader.setting.margin",
@@ -346,7 +366,9 @@ impl Plugin for Reader {
             (LAYOUT_MENU, core_settings::SCOPE_ONLY, 1),
             (LAYOUT_MENU, core_settings::READING_FONT, 5),
             (LAYOUT_MENU, settings::FONT_SIZE, 10),
+            (LAYOUT_MENU, settings::FONT_WEIGHT, 15),
             (LAYOUT_MENU, settings::LINE_SPACING, 20),
+            (LAYOUT_MENU, settings::WORD_SPACING, 25),
             (LAYOUT_MENU, settings::MARGIN, 30),
             (LAYOUT_MENU, settings::JUSTIFY, 40),
             (LAYOUT_MENU, settings::HYPHENATE, 50),

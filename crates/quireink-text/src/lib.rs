@@ -58,19 +58,49 @@ pub fn draw_text(
     text: &str,
     color: Color,
 ) -> f32 {
+    draw_text_bolder(
+        canvas, cache, font_index, font, size, x, baseline, text, color, 0,
+    )
+}
+
+/// Like [`draw_text`], with every glyph widened by `extra` pixels to the
+/// right: darker, bolder text with any font, also bitmap packs. Advances
+/// stay as they are.
+#[allow(clippy::too_many_arguments)]
+pub fn draw_text_bolder(
+    canvas: &mut Canvas<'_>,
+    cache: &mut GlyphCache,
+    font_index: u16,
+    font: &Font,
+    size: f32,
+    x: f32,
+    baseline: i32,
+    text: &str,
+    color: Color,
+    extra: u16,
+) -> f32 {
     let mut pen = x;
     for ch in text.chars() {
         let glyph = cache.glyph(font_index, font, ch, size);
         if !glyph.is_empty() {
             let gx = raster::floor(pen + 0.5) + i32::from(glyph.left);
             let gy = baseline + i32::from(glyph.top);
+            let width = u32::from(glyph.width);
             canvas.draw_mask(
                 gx,
                 gy,
-                u32::from(glyph.width),
+                width + u32::from(extra),
                 u32::from(glyph.height),
                 color,
-                |px, py| glyph.coverage(px as u16, py as u16),
+                |px, py| {
+                    // The strongest coverage of the pixels up to `extra`
+                    // to the left.
+                    (0..=u32::from(extra))
+                        .filter(|k| *k <= px && px - k < width)
+                        .map(|k| glyph.coverage((px - k) as u16, py as u16))
+                        .max()
+                        .unwrap_or(0)
+                },
             );
         }
         pen += glyph.advance;
