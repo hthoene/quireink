@@ -28,7 +28,8 @@ OPTIONS:
     --profile <id>        Device to emulate (default: xteink-x4)
     --list-profiles       List available device profiles
     --config <file>       User configuration file (quireink.ini)
-    --set <key>=<value>   Override a setting, e.g. --set core.language=de
+    --set <key>=<value>   Override configuration, e.g. --set core.language=de
+                          or --set slots.core.home=core.placeholder
     --headless            Run without a window
     --script <steps>      Input steps, e.g. \"page-forward,long:confirm,tap:100:200\"
     --screenshot <file>   Save a PNG of the panel after the script (headless)
@@ -117,8 +118,8 @@ fn user_config(options: &Options) -> Result<Option<String>, String> {
     };
     for (key, value) in &options.sets {
         let (section, name) = key
-            .rsplit_once('.')
-            .ok_or_else(|| format!("--set expects <plugin>.<setting>=<value>, got `{key}`"))?;
+            .split_once('.')
+            .ok_or_else(|| format!("--set expects <section>.<key>=<value>, got `{key}`"))?;
         config.push_str(&format!("\n[{section}]\n{name} = {value}\n"));
     }
     Ok(Some(config))

@@ -35,6 +35,13 @@ pub fn run_script(device: &mut Device, script: &str) -> Result<(), String> {
 
 fn run_step(device: &mut Device, step: &str) -> Result<(), String> {
     let parts: Vec<&str> = step.split(':').collect();
+    let touch_step = matches!(parts.first(), Some(&("tap" | "long-tap" | "swipe")));
+    if touch_step && !device.profile.device.input.touch {
+        return Err(format!(
+            "`{}` has no touch screen",
+            device.profile.device.id
+        ));
+    }
     let number = |s: &str| {
         s.parse::<i32>()
             .map_err(|_| format!("`{s}` is not a number"))
