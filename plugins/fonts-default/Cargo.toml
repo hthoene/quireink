@@ -1,0 +1,33 @@
+[package]
+name = "quireink-plugin-fonts-default"
+description = "QuireInk default fonts: Literata for reading, Atkinson Hyperlegible Next for the UI"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+# The code is Apache-2.0; the bundled fonts are under the SIL Open Font
+# License 1.1 (see fonts/*-OFL.txt).
+license = "Apache-2.0 AND OFL-1.1"
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+categories = ["no-std"]
+include = ["src", "fonts", "build.rs", "README.md"]
+
+[features]
+default = ["outline"]
+# Ship the scalable fonts. Without it, bitmap font packs are generated at
+# build time (for devices like the ESP32-C3); sizes can be chosen with the
+# QUIREINK_FONT_SIZES environment variable, e.g. "20,24,28,32".
+outline = ["quireink-sdk/outline"]
+
+[dependencies]
+quireink-sdk.workspace = true
+
+[build-dependencies]
+quireink-text = { workspace = true, features = ["outline"] }
+
+[dev-dependencies]
+quireink-i18n.workspace = true
+
+[lints]
+workspace = true

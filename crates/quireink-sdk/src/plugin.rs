@@ -2,6 +2,7 @@ use alloc::borrow::Cow;
 use core::fmt;
 
 use crate::action::ActionSpec;
+use crate::fonts::FontSpec;
 use crate::id::Id;
 use crate::screen::ScreenSpec;
 use crate::settings::SettingSpec;
@@ -81,6 +82,14 @@ pub trait Registrar {
     /// tap.center = core.menu
     /// ```
     fn add_keymap(&mut self, source: Cow<'static, str>) -> Result<(), RegisterError>;
+
+    /// Adds a font. Bitmap packs work everywhere; scalable fonts need the
+    /// `outline` feature.
+    fn add_font(&mut self, font: FontSpec) -> Result<(), RegisterError>;
+
+    /// Proposes a font for a role such as
+    /// [`builtin::fonts::UI`](crate::builtin::fonts::UI).
+    fn bind_font(&mut self, role: Id, font: Id, priority: Priority) -> Result<(), RegisterError>;
 
     /// Adds a translation catalog (see `quireink-i18n`).
     fn add_translations(&mut self, source: Cow<'static, str>) -> Result<(), RegisterError>;

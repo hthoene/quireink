@@ -13,8 +13,8 @@
 //! - **Plugins** ([`Plugin`]): a [`Manifest`] plus a `register` function that
 //!   adds contributions through a [`Registrar`].
 //! - **Contributions**: actions ([`ActionSpec`]), screens ([`ScreenSpec`]),
-//!   slots ([`SlotSpec`]), settings ([`SettingSpec`]), key maps and
-//!   translations (data in the QuireInk config format).
+//!   slots ([`SlotSpec`]), settings ([`SettingSpec`]), fonts ([`FontSpec`]),
+//!   key maps and translations (data in the QuireInk config format).
 //! - **Slots**: named UI roles such as [`builtin::slots::HOME`]. Any plugin
 //!   may bind a screen to any slot; the user's configuration has the final
 //!   word.
@@ -31,6 +31,7 @@ mod action;
 pub mod builtin;
 mod command;
 mod env;
+mod fonts;
 mod gesture;
 mod id;
 mod plugin;
@@ -41,6 +42,7 @@ mod version;
 pub use action::{ActionHandler, ActionSpec};
 pub use command::Command;
 pub use env::{Env, Metrics};
+pub use fonts::{FontHandle, FontSpec, Fonts};
 pub use gesture::{Direction, Gesture, GestureKind};
 pub use id::{Id, InvalidId};
 pub use plugin::{Manifest, Plugin, Priority, RegisterError, Registrar, SlotSpec};
@@ -54,3 +56,4 @@ pub use quireink_platform::{
     Color, DeviceInfo, DisplayInfo, InputCaps, Instant, PixelFormat, Point, PointerEvent,
     PointerPhase, PointerTool, Rect, RefreshMode,
 };
+pub use quireink_text::{Font, FontError, LineMetrics};

@@ -51,8 +51,8 @@ use quireink_platform::{
 };
 use quireink_sdk::builtin::{GLOBAL_KEYMAP_LAYER, settings as core_settings, slots};
 use quireink_sdk::{
-    Command, Cx, Env, GestureKind, Handled, Id, Manifest, Metrics, Output, Plugin, RegisterError,
-    SDK_VERSION, Screen, Settings,
+    Command, Cx, Env, Fonts, GestureKind, Handled, Id, Manifest, Metrics, Output, Plugin,
+    RegisterError, SDK_VERSION, Screen, Settings,
 };
 
 use crate::core_plugin::{CORE, CorePlugin};
@@ -65,6 +65,8 @@ pub use quireink_sdk as sdk;
 
 /// Commands may trigger further commands; this bounds runaway loops.
 const MAX_COMMAND_ROUNDS: usize = 16;
+/// Default memory for glyphs rasterized at runtime.
+const DEFAULT_GLYPH_CACHE: usize = 32 * 1024;
 
 /// Something the shell has to do after an event.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -162,6 +164,7 @@ pub struct KernelBuilder {
     plugins: Vec<Box<dyn Plugin>>,
     device_keymap: Option<Cow<'static, str>>,
     user_config: Option<String>,
+    glyph_cache: usize,
 }
 
 impl fmt::Debug for KernelBuilder {
@@ -193,6 +196,13 @@ impl KernelBuilder {
         self
     }
 
+    /// Memory for glyphs rasterized at runtime (default 32 KiB). Bitmap font
+    /// packs do not use it.
+    pub fn glyph_cache(mut self, bytes: usize) -> Self {
+        self.glyph_cache = bytes;
+        self
+    }
+
     pub fn build(self) -> Result<Kernel, KernelError> {
         let display = self.device.display;
         let framebuffer = Framebuffer::new(display.width, display.height, display.format)
@@ -204,6 +214,7 @@ impl KernelBuilder {
             keymap: Keymap::default(),
             settings: Settings::new(),
             translator: Translator::new(),
+            fonts: Fonts::new(self.glyph_cache),
             recognizer: Recognizer::default(),
             captured: Vec::new(),
             stack: Vec::new(),
@@ -267,6 +278,7 @@ pub struct Kernel {
     keymap: Keymap,
     settings: Settings,
     translator: Translator,
+    fonts: Fonts,
     recognizer: Recognizer,
     /// Pointer ids captured by the active screen.
     captured: Vec<u8>,
@@ -298,6 +310,7 @@ impl Kernel {
             plugins: Vec::new(),
             device_keymap: None,
             user_config: None,
+            glyph_cache: DEFAULT_GLYPH_CACHE,
         }
     }
 
@@ -348,6 +361,10 @@ impl Kernel {
 
     pub fn translator(&self) -> &Translator {
         &self.translator
+    }
+
+    pub fn fonts(&self) -> &Fonts {
+        &self.fonts
     }
 
     /// Manifests of all successfully registered plugins, `core` first.
@@ -415,6 +432,15 @@ impl Kernel {
                 });
             }
         }
+        if let Some(font) = staging
+            .fonts
+            .iter()
+            .find(|f| self.fonts.contains(f.id.as_str()))
+        {
+            return Err(RegisterError::Duplicate {
+                id: font.id.clone(),
+            });
+        }
         staging.merge_into(&mut self.registry)?;
         for setting in staging.settings.drain(..) {
             // Cannot fail: checked above.
@@ -426,6 +452,13 @@ impl Kernel {
         }
         for catalog in staging.catalogs.drain(..) {
             self.translator.add(catalog);
+        }
+        for font in staging.fonts.drain(..) {
+            // Cannot fail: checked above.
+            let _ = self.fonts.add(font);
+        }
+        for (role, font, priority) in staging.font_roles.drain(..) {
+            self.fonts.propose(role, font, priority);
         }
         Ok(())
     }
@@ -448,6 +481,21 @@ impl Kernel {
             match entry.section {
                 "plugins" => {}
                 section if section.starts_with("keymap.") => {}
+                "fonts" => match (Id::parse(entry.key), Id::parse(&value)) {
+                    (Ok(role), Ok(font)) if self.fonts.contains(font.as_str()) => {
+                        self.fonts.bind_user(role, font);
+                    }
+                    (Ok(_), Ok(font)) => self.warn(
+                        WarningSource::UserConfig,
+                        line,
+                        format!("unknown font `{font}`"),
+                    ),
+                    _ => self.warn(
+                        WarningSource::UserConfig,
+                        line,
+                        "invalid font binding".into(),
+                    ),
+                },
                 "slots" => match (Id::parse(entry.key), Id::parse(&value)) {
                     (Ok(slot), Ok(screen)) => self.registry.bind_user(slot, screen),
                     _ => self.warn(
@@ -592,13 +640,13 @@ impl Kernel {
         match self.registry.actions.get(&action) {
             Some(spec) => {
                 if let Some(handler) = &spec.handler {
-                    let env = Env {
-                        device: &self.device,
-                        now: self.now,
-                        metrics: Metrics::new(self.device.display.dpi),
-                        settings: &self.settings,
-                        i18n: &self.translator,
-                    };
+                    let env = env(
+                        &self.device,
+                        self.now,
+                        &self.settings,
+                        &self.translator,
+                        &self.fonts,
+                    );
                     handler(&env, &mut self.output.commands);
                 }
             }
@@ -615,13 +663,13 @@ impl Kernel {
         let Some(top) = self.stack.last_mut() else {
             return Handled::No;
         };
-        let env = Env {
-            device: &self.device,
-            now: self.now,
-            metrics: Metrics::new(self.device.display.dpi),
-            settings: &self.settings,
-            i18n: &self.translator,
-        };
+        let env = env(
+            &self.device,
+            self.now,
+            &self.settings,
+            &self.translator,
+            &self.fonts,
+        );
         let mut cx = Cx::new(&env, self.framebuffer.canvas(), &mut self.output);
         f(top.screen.as_mut(), &mut cx)
     }
@@ -720,13 +768,13 @@ impl Kernel {
                 format!("unknown screen `{id}`"),
             );
         };
-        let env = Env {
-            device: &self.device,
-            now: self.now,
-            metrics: Metrics::new(self.device.display.dpi),
-            settings: &self.settings,
-            i18n: &self.translator,
-        };
+        let env = env(
+            &self.device,
+            self.now,
+            &self.settings,
+            &self.translator,
+            &self.fonts,
+        );
         let screen = (spec.factory)(&env);
         self.stack.push(ActiveScreen { id, slot, screen });
         self.screen_changed();
@@ -754,13 +802,13 @@ impl Kernel {
         let Some(top) = self.stack.last_mut() else {
             return;
         };
-        let env = Env {
-            device: &self.device,
-            now: self.now,
-            metrics: Metrics::new(self.device.display.dpi),
-            settings: &self.settings,
-            i18n: &self.translator,
-        };
+        let env = env(
+            &self.device,
+            self.now,
+            &self.settings,
+            &self.translator,
+            &self.fonts,
+        );
         let mut canvas = self.framebuffer.canvas();
         canvas.clear(Color::WHITE);
         top.screen.draw(&mut canvas, &env);
@@ -782,4 +830,22 @@ fn disabled_plugins(source: &str) -> Vec<String> {
         .filter(|entry| entry.section == "plugins" && entry.value.as_bool() == Some(false))
         .map(|entry| String::from(entry.key))
         .collect()
+}
+
+/// The read-only environment handed to plugins.
+fn env<'a>(
+    device: &'a DeviceInfo,
+    now: Instant,
+    settings: &'a Settings,
+    translator: &'a Translator,
+    fonts: &'a Fonts,
+) -> Env<'a> {
+    Env {
+        device,
+        now,
+        metrics: Metrics::new(device.display.dpi),
+        settings,
+        i18n: translator,
+        fonts,
+    }
 }

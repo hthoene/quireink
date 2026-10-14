@@ -25,6 +25,8 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets
       - run: cargo test --workspace
+      # Builds without runtime font rendering use bitmap font packs.
+      - run: cargo test -p quireink-text -p quireink-plugin-fonts-default --no-default-features
 
   embedded:
     name: no_std targets
@@ -42,6 +44,7 @@ jobs:
         run: >
           cargo build --release --target ${{ matrix.target }}
           -p quireink-core -p quireink-plugin-diagnostics
+          -p quireink-plugin-fonts-default --no-default-features
 
   architecture:
     name: Architecture rules
@@ -73,10 +76,13 @@ jobs:
       - name: Headless smoke test on every profile
         shell: bash
         run: |
-          for profile in $(cargo run -q -p quireink-emulator -- --list-profiles | cut -d' ' -f1); do
-            cargo run -q -p quireink-emulator -- --headless --profile "$profile" \
-              --script "page-forward,wait:600" --screenshot "out/$profile.png"
+          emu="cargo run -q -p quireink-emulator --"
+          for profile in $($emu --list-profiles | cut -d' ' -f1); do
+            $emu --headless --profile "$profile" --script "wait:600" --screenshot "out/$profile.png"
           done
+          $emu --headless --profile xteink-x4 --script "page-forward,right,confirm,long:confirm"
+          $emu --headless --profile kobo-clara-bw --set core.language=de \
+            --script "tap:900:700,swipe:900:700:100:700,long-tap:500:700"
       - uses: actions/upload-artifact@v4
         if: matrix.os == 'ubuntu-latest'
         with:

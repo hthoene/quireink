@@ -54,5 +54,15 @@ pub mod settings {
     pub const LONG_PRESS_MS: Id = Id::new_static("core.long-press-ms");
 }
 
+/// Font roles.
+pub mod fonts {
+    use crate::Id;
+
+    /// Menus, labels and other user interface text.
+    pub const UI: Id = Id::new_static("core.font-ui");
+    /// Book text.
+    pub const READING: Id = Id::new_static("core.font-reading");
+}
+
 /// The name of the key map layer that applies everywhere.
 pub const GLOBAL_KEYMAP_LAYER: &str = "global";

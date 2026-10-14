@@ -3,3 +3,11 @@ Copyright 2026 The QuireInk Authors
 
 This product is licensed under the Apache License, Version 2.0.
 See the LICENSE file for details.
+
+Bundled fonts (plugins/fonts-default/fonts) are licensed under the SIL Open
+Font License, Version 1.1:
+
+- Literata, Copyright 2017 The Literata Project Authors
+  (https://github.com/googlefonts/literata)
+- Atkinson Hyperlegible Next, Copyright 2020-2024 The Atkinson Hyperlegible
+  Next Project Authors (https://github.com/googlefonts/atkinson-hyperlegible-next)

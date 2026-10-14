@@ -1,0 +1,17 @@
+[package]
+name = "quireink-fontgen"
+description = "Converts OpenType/TrueType fonts into QuireInk bitmap font packs (.qifp)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+quireink-text = { workspace = true, features = ["outline"] }
+
+[lints]
+workspace = true

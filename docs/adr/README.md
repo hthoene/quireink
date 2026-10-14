@@ -13,6 +13,7 @@ superseded by a new record that links back.
 | [0005](0005-raw-input-and-layered-keymaps.md) | Raw input and layered key maps in the kernel | Accepted |
 | [0006](0006-one-text-config-format.md) | One human-editable text format for configuration and data | Accepted |
 | [0007](0007-content-based-locators.md) | Content-based reading positions | Accepted |
+| [0008](0008-fonts-outlines-and-bitmap-packs.md) | Fonts: runtime outlines and bitmap packs | Accepted |
 
 ## Template
 

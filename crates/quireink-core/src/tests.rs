@@ -381,3 +381,77 @@ fn reports_unknown_references_in_config() {
     kernel.start(Instant(0));
     assert_eq!(kernel.active_screen(), Some(&screens::PLACEHOLDER));
 }
+
+/// A plugin contributing two tiny bitmap fonts.
+struct FontPlugin;
+
+impl Plugin for FontPlugin {
+    fn manifest(&self) -> Manifest {
+        Manifest {
+            id: Id::new_static("fonts"),
+            name: Cow::Borrowed("Fonts"),
+            version: Version::new(1, 0, 0),
+            sdk: SDK_VERSION,
+        }
+    }
+
+    fn register(&self, r: &mut dyn Registrar) -> Result<(), RegisterError> {
+        for name in ["fonts.serif", "fonts.sans"] {
+            let mut pack = quireink_text::PackBuilder::new();
+            let metrics = quireink_text::LineMetrics {
+                ascent: 8.0,
+                descent: 2.0,
+                line_height: 12.0,
+            };
+            pack.add_strike(
+                10.0,
+                metrics,
+                alloc::vec![('a', quireink_text::Glyph::empty(5.0))],
+            );
+            let font = quireink_sdk::Font::from_data(pack.build(), &[]).unwrap();
+            r.add_font(quireink_sdk::FontSpec {
+                id: Id::parse(name).unwrap(),
+                font,
+            })?;
+        }
+        r.bind_font(
+            quireink_sdk::builtin::fonts::UI,
+            Id::new_static("fonts.sans"),
+            Priority::DEFAULT,
+        )?;
+        Ok(())
+    }
+}
+
+#[test]
+fn font_roles_follow_proposals_and_user_config() {
+    let kernel = Kernel::builder(DEVICE).plugin(FontPlugin).build().unwrap();
+    let fonts = kernel.fonts();
+    assert_eq!(
+        fonts.role("core.font-ui").unwrap().id().as_str(),
+        "fonts.sans"
+    );
+    // No proposal for reading: the first registered font is used.
+    assert_eq!(
+        fonts.role("core.font-reading").unwrap().id().as_str(),
+        "fonts.serif"
+    );
+
+    let mut kernel = Kernel::builder(DEVICE)
+        .plugin(FontPlugin)
+        .user_config(
+            "[fonts]
+core.font-ui = fonts.serif
+core.font-reading = nope.font
+",
+        )
+        .build()
+        .unwrap();
+    assert_eq!(
+        kernel.fonts().role("core.font-ui").unwrap().id().as_str(),
+        "fonts.serif"
+    );
+    let warnings = kernel.take_warnings();
+    assert_eq!(warnings.len(), 1);
+    assert!(warnings[0].message.contains("unknown font `nope.font`"));
+}

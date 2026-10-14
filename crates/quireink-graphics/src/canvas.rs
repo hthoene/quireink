@@ -66,6 +66,32 @@ impl<'a> Canvas<'a> {
         self.fill_rect(point.x, point.y, 1, 1, color);
     }
 
+    /// Blends `color` over a `width`×`height` area at `(x, y)` using
+    /// `coverage(dx, dy)` (0 = transparent, 255 = opaque) — used for
+    /// anti-aliased glyphs and icons.
+    pub fn draw_mask(
+        &mut self,
+        x: i32,
+        y: i32,
+        width: u32,
+        height: u32,
+        color: Color,
+        coverage: impl Fn(u32, u32) -> u8,
+    ) {
+        let Some(rect) = self.clip_signed(x, y, width, height) else {
+            return;
+        };
+        for py in rect.y..rect.bottom() as u16 {
+            for px in rect.x..rect.right() as u16 {
+                let alpha = coverage((i32::from(px) - x) as u32, (i32::from(py) - y) as u32);
+                if alpha > 0 {
+                    self.framebuffer.blend_pixel(px, py, color, alpha);
+                }
+            }
+        }
+        self.framebuffer.mark_dirty(rect);
+    }
+
     fn clip_signed(&self, x: i32, y: i32, width: u32, height: u32) -> Option<Rect> {
         let clip = self.clip;
         let left = (x as i64).max(clip.x as i64);

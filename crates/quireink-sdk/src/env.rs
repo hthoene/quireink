@@ -1,6 +1,7 @@
 use quireink_i18n::Translator;
 use quireink_platform::{DeviceInfo, Instant};
 
+use crate::fonts::Fonts;
 use crate::settings::Settings;
 
 /// Read-only view of the environment a plugin runs in.
@@ -12,6 +13,7 @@ pub struct Env<'a> {
     pub metrics: Metrics,
     pub settings: &'a Settings,
     pub i18n: &'a Translator,
+    pub fonts: &'a Fonts,
 }
 
 /// Converts physical lengths to pixels for the current screen, so layouts
@@ -29,6 +31,11 @@ impl Metrics {
     /// Pixels for `mm` millimetres (rounded, at least 1 for non-zero input).
     pub const fn mm(&self, mm: u32) -> u32 {
         self.tenth_mm(mm * 10)
+    }
+
+    /// Pixels for a font size in typographic points (1/72 inch).
+    pub fn pt(&self, points: f32) -> f32 {
+        points * f32::from(self.dpi) / 72.0
     }
 
     /// Pixels for `tenths` tenths of a millimetre.

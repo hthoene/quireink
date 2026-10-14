@@ -7,7 +7,7 @@ use alloc::vec::Vec;
 
 use quireink_i18n::Catalog;
 use quireink_sdk::{
-    ActionSpec, Id, Priority, RegisterError, Registrar, ScreenSpec, SettingSpec, SlotSpec,
+    ActionSpec, FontSpec, Id, Priority, RegisterError, Registrar, ScreenSpec, SettingSpec, SlotSpec,
 };
 
 /// A candidate screen for a slot, proposed by a plugin.
@@ -67,6 +67,8 @@ pub(crate) struct Staging {
     pub(crate) settings: Vec<SettingSpec>,
     pub(crate) keymaps: Vec<Cow<'static, str>>,
     pub(crate) catalogs: Vec<Catalog>,
+    pub(crate) fonts: Vec<FontSpec>,
+    pub(crate) font_roles: Vec<(Id, Id, Priority)>,
 }
 
 impl Staging {
@@ -178,6 +180,18 @@ impl Registrar for PluginRegistrar<'_> {
         self.check_namespace(&setting.id)?;
         Self::check_unique(self.staging.settings.iter().map(|s| &s.id), &setting.id)?;
         self.staging.settings.push(setting);
+        Ok(())
+    }
+
+    fn add_font(&mut self, font: FontSpec) -> Result<(), RegisterError> {
+        self.check_namespace(&font.id)?;
+        Self::check_unique(self.staging.fonts.iter().map(|f| &f.id), &font.id)?;
+        self.staging.fonts.push(font);
+        Ok(())
+    }
+
+    fn bind_font(&mut self, role: Id, font: Id, priority: Priority) -> Result<(), RegisterError> {
+        self.staging.font_roles.push((role, font, priority));
         Ok(())
     }
 

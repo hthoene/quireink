@@ -15,6 +15,12 @@ keywords = ["e-reader", "plugin", "sdk"]
 quireink-platform.workspace = true
 quireink-graphics.workspace = true
 quireink-i18n.workspace = true
+quireink-text.workspace = true
+
+[features]
+default = []
+# Scalable OpenType/TrueType fonts (see quireink-text).
+outline = ["quireink-text/outline"]
 
 [lints]
 workspace = true

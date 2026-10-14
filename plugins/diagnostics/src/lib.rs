@@ -18,9 +18,9 @@ extern crate alloc;
 use alloc::borrow::Cow;
 use alloc::boxed::Box;
 
-use quireink_sdk::builtin::{actions, slots};
+use quireink_sdk::builtin::{actions, fonts, slots};
 use quireink_sdk::{
-    ActionSpec, Canvas, Color, Cx, Env, Gesture, GestureKind, Handled, Id, Manifest, Metrics,
+    ActionSpec, Arg, Canvas, Color, Cx, Env, Gesture, GestureKind, Handled, Id, Manifest, Metrics,
     Plugin, Priority, Rect, RefreshMode, RegisterError, Registrar, SDK_VERSION, Screen, ScreenSpec,
     SettingKind, SettingSpec, SettingValue, Version,
 };
@@ -79,6 +79,8 @@ struct Layout {
     header: Rect,
     ramp: Rect,
     boxes: [Rect; 4],
+    /// Page counter text above the progress bar.
+    label: Rect,
     progress: Rect,
 }
 
@@ -98,9 +100,12 @@ impl Layout {
         let progress_h = px(6);
         let progress_y = (frame.y + frame.height).saturating_sub(gap + progress_h);
         let progress = Rect::new(content_x, progress_y, content_w, progress_h);
+        let label_h = px(7);
+        let label_y = progress_y.saturating_sub(label_h);
+        let label = Rect::new(content_x, label_y, content_w, label_h);
 
         let grid_y = ramp.y + ramp.height + gap;
-        let grid_h = progress_y.saturating_sub(grid_y + gap);
+        let grid_h = label_y.saturating_sub(grid_y + gap / 2);
         let box_w = content_w.saturating_sub(gap) / 2;
         let box_h = grid_h.saturating_sub(gap) / 2;
         let cell = |col: u16, row: u16| {
@@ -116,6 +121,7 @@ impl Layout {
             header,
             ramp,
             boxes: [cell(0, 0), cell(1, 0), cell(0, 1), cell(1, 1)],
+            label,
             progress,
         }
     }
@@ -173,6 +179,57 @@ impl DiagnosticsScreen {
             self.metrics.tenth_mm(3)
         };
         canvas.stroke_rect(x, y, w, h, border, Color::BLACK);
+    }
+
+    /// Black bar with the translated title.
+    fn draw_header(&self, canvas: &mut Canvas<'_>, env: &Env<'_>) {
+        let r = self.layout.header;
+        let (x, y, w, h) = (
+            i32::from(r.x),
+            i32::from(r.y),
+            u32::from(r.width),
+            u32::from(r.height),
+        );
+        canvas.fill_rect(x, y, w, h, Color::BLACK);
+        let title = env.i18n.tr("diagnostics.title");
+        let padding = self.metrics.mm(2) as f32;
+        draw_label(
+            &mut canvas.clipped(r),
+            env,
+            r,
+            padding,
+            title,
+            Color::WHITE,
+            false,
+        );
+    }
+
+    /// "Page x of y", centred above the progress bar.
+    fn draw_page_label(&self, canvas: &mut Canvas<'_>, env: &Env<'_>, pages: u32) {
+        let r = self.layout.label;
+        canvas.fill_rect(
+            i32::from(r.x),
+            i32::from(r.y),
+            u32::from(r.width),
+            u32::from(r.height),
+            Color::WHITE,
+        );
+        let text = env.i18n.format(
+            "diagnostics.page",
+            &[
+                ("page", Arg::Int(i64::from(self.page) + 1)),
+                ("pages", Arg::Int(i64::from(pages))),
+            ],
+        );
+        draw_label(
+            &mut canvas.clipped(r),
+            env,
+            r,
+            0.0,
+            &text,
+            Color::BLACK,
+            true,
+        );
     }
 
     fn draw_progress(&self, canvas: &mut Canvas<'_>, pages: u32) {
@@ -243,9 +300,7 @@ impl Screen for DiagnosticsScreen {
         let (x, y, w, h) = rect(l.frame);
         canvas.stroke_rect(x, y, w, h, self.metrics.tenth_mm(5), Color::BLACK);
 
-        // Header bar; will carry the title once text rendering exists.
-        let (x, y, w, h) = rect(l.header);
-        canvas.fill_rect(x, y, w, h, Color::BLACK);
+        self.draw_header(canvas, env);
 
         // One stripe per gray level the panel can show (at most 16).
         let levels = env
@@ -286,6 +341,7 @@ impl Screen for DiagnosticsScreen {
         for index in 0..4 {
             self.draw_box(canvas, index);
         }
+        self.draw_page_label(canvas, env, Self::pages(env));
         self.draw_progress(canvas, Self::pages(env));
     }
 
@@ -299,6 +355,8 @@ impl Screen for DiagnosticsScreen {
             };
             if page != self.page {
                 self.page = page;
+                let env = *cx.env();
+                self.draw_page_label(cx.canvas(), &env, pages);
                 self.draw_progress(cx.canvas(), pages);
                 cx.request_refresh(RefreshMode::Partial);
             }
@@ -341,6 +399,32 @@ impl Screen for DiagnosticsScreen {
         self.toggle(index, cx);
         Handled::Yes
     }
+}
+
+/// Draws one line of UI text vertically centred in `area`, either left
+/// aligned (with `padding`) or centred.
+fn draw_label(
+    canvas: &mut Canvas<'_>,
+    env: &Env<'_>,
+    area: Rect,
+    padding: f32,
+    text: &str,
+    color: Color,
+    centered: bool,
+) {
+    let Some(font) = env.fonts.role(fonts::UI.as_str()) else {
+        return;
+    };
+    let size = f32::from(area.height) * 0.5;
+    let metrics = font.line_metrics(size);
+    let baseline = i32::from(area.y)
+        + ((f32::from(area.height) + metrics.ascent - metrics.descent) / 2.0) as i32;
+    let x = if centered {
+        f32::from(area.x) + (f32::from(area.width) - font.measure(size, text)) / 2.0
+    } else {
+        f32::from(area.x) + padding
+    };
+    font.draw(canvas, size, x, baseline, text, color);
 }
 
 #[cfg(test)]

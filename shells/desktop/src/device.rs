@@ -36,8 +36,9 @@ impl Device {
     ) -> Result<Self, KernelError> {
         budget::set_limit(profile.heap_budget);
         let kernel = budget::track(|| {
-            let mut builder =
-                Kernel::builder(profile.device).plugin(quireink_plugin_diagnostics::Diagnostics);
+            let mut builder = Kernel::builder(profile.device)
+                .plugin(quireink_plugin_fonts_default::DefaultFonts)
+                .plugin(quireink_plugin_diagnostics::Diagnostics);
             // Copy the configuration inside the tracked scope so that its
             // allocation and release are both accounted for.
             if let Some(config) = user_config.as_deref() {

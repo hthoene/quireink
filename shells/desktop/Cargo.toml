@@ -15,9 +15,10 @@ name = "quireink-emu"
 path = "src/main.rs"
 
 [dependencies]
-quireink-core = { workspace = true, features = ["color"] }
+quireink-core = { workspace = true, features = ["color", "outline"] }
 quireink-platform.workspace = true
 quireink-plugin-diagnostics.workspace = true
+quireink-plugin-fonts-default = { workspace = true, features = ["outline"] }
 png = "0.17"
 softbuffer = "0.4"
 # Without client-side decorations on Wayland: they pull in the unmaintained

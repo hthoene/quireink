@@ -15,6 +15,8 @@ keywords = ["e-reader", "e-ink", "epaper"]
 default = []
 # Colour framebuffers for colour e-ink panels.
 color = ["quireink-graphics/color"]
+# Scalable OpenType/TrueType fonts; not available on the ESP32-C3.
+outline = ["quireink-sdk/outline"]
 
 [dependencies]
 quireink-platform.workspace = true
@@ -22,6 +24,9 @@ quireink-config.workspace = true
 quireink-graphics.workspace = true
 quireink-i18n.workspace = true
 quireink-sdk.workspace = true
+
+[dev-dependencies]
+quireink-text.workspace = true
 
 [lints]
 workspace = true

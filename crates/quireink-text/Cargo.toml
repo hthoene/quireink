@@ -1,0 +1,28 @@
+[package]
+name = "quireink-text"
+description = "Font loading, glyph rasterization, caching and line breaking for QuireInk (no_std)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+categories = ["no-std", "text-processing", "rendering"]
+keywords = ["font", "text", "rasterizer", "no-std"]
+
+[dependencies]
+quireink-graphics.workspace = true
+quireink-platform.workspace = true
+skrifa = { version = "0.48", default-features = false, features = ["libm"], optional = true }
+
+[features]
+default = []
+# Render OpenType/TrueType fonts at runtime. Not available on targets
+# without atomic compare-and-swap (ESP32-C3); those use pre-rendered bitmap
+# font packs generated with `quireink-fontgen`.
+outline = ["dep:skrifa"]
+
+[lints]
+workspace = true
+

@@ -3,8 +3,8 @@
 **A lean, fast and endlessly customizable e-reader for e-ink devices — from a
 380 KB microcontroller to Linux and Android e-readers, from one codebase.**
 
-> **Status: early development.** The kernel, plugin SDK and emulator work;
-> there is no book rendering yet. See the [project plan](docs/PLANNING.md)
+> **Status: early development.** The kernel, plugin SDK, text rendering and
+> emulator work; books cannot be opened yet. See the [project plan](docs/PLANNING.md)
 > and the [roadmap](docs/PLANNING.md#12-roadmap).
 
 ## Why QuireInk?
@@ -85,9 +85,11 @@ cargo run -p quireink-emulator -- --headless --profile boox-go-7 --set core.lang
 | `crates/quireink-config` | The human-editable config format used for settings, key maps and translations |
 | `crates/quireink-i18n` | Message catalogs, fallback chains and plural rules |
 | `crates/quireink-graphics` | Framebuffers in native pixel formats, clipped canvas |
+| `crates/quireink-text` | Fonts (runtime outlines or bitmap packs), rasterizer, glyph cache, line breaking |
 | `crates/quireink-sdk` | **The plugin SDK** — the only API plugins use |
 | `crates/quireink-core` | The kernel: plugin host, registries, input routing, refresh policy |
-| `plugins/` | First-party plugins |
+| `plugins/` | First-party plugins: default fonts, diagnostics screen |
+| `tools/fontgen` | Converts fonts into bitmap font packs for small devices |
 | `shells/desktop` | Desktop emulator with device profiles |
 | `docs/` | [Plan](docs/PLANNING.md) and [architecture decisions](docs/adr/) |
 
@@ -99,3 +101,6 @@ testing on real hardware. Please read [CONTRIBUTING.md](CONTRIBUTING.md).
 ## License
 
 QuireInk is licensed under the [Apache License, Version 2.0](LICENSE).
+The bundled fonts — [Literata](https://github.com/googlefonts/literata) and
+[Atkinson Hyperlegible Next](https://github.com/googlefonts/atkinson-hyperlegible-next) —
+are licensed under the [SIL Open Font License 1.1](plugins/fonts-default/fonts/).

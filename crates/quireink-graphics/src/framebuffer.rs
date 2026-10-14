@@ -107,37 +107,68 @@ impl Framebuffer {
             return;
         }
         let value = self.encode(color);
-        let bpp = self.format.bits_per_pixel() as usize;
-        for y in rect.y as usize..rect.bottom() as usize {
-            let row = y * self.stride;
-            match bpp {
-                1 | 2 | 4 => {
-                    for x in rect.x as usize..rect.right() as usize {
-                        let bit = x * bpp;
-                        let shift = 8 - bpp - bit % 8;
-                        let mask = (((1u16 << bpp) - 1) as u8) << shift;
-                        let byte = &mut self.data[row + bit / 8];
-                        *byte = (*byte & !mask) | (((value as u8) << shift) & mask);
-                    }
-                }
-                8 => {
-                    self.data[row + rect.x as usize..row + rect.right() as usize].fill(value as u8)
-                }
-                16 => {
-                    let bytes = (value as u16).to_le_bytes();
-                    for x in rect.x as usize..rect.right() as usize {
-                        self.data[row + x * 2..row + x * 2 + 2].copy_from_slice(&bytes);
-                    }
-                }
-                _ => {
-                    let bytes = [(value >> 16) as u8, (value >> 8) as u8, value as u8];
-                    for x in rect.x as usize..rect.right() as usize {
-                        self.data[row + x * 3..row + x * 3 + 3].copy_from_slice(&bytes);
-                    }
-                }
+        for y in rect.y..rect.bottom() as u16 {
+            if self.format == PixelFormat::Gray8 {
+                let row = usize::from(y) * self.stride;
+                self.data[row + usize::from(rect.x)..row + rect.right() as usize].fill(value as u8);
+                continue;
+            }
+            for x in rect.x..rect.right() as u16 {
+                self.store(x, y, value);
             }
         }
         self.mark_dirty(rect);
+    }
+
+    /// Blends `color` with coverage `alpha` (0–255) over the pixel at
+    /// `(x, y)`, which must lie inside the framebuffer. Does not mark the
+    /// pixel dirty; callers mark whole areas.
+    pub(crate) fn blend_pixel(&mut self, x: u16, y: u16, color: Color, alpha: u8) {
+        let value = if alpha == 255 {
+            color
+        } else {
+            let stored = self.view().pixel(x, y);
+            let below = if self.inverted {
+                stored.inverted()
+            } else {
+                stored
+            };
+            let mix = |under: u8, over: u8| {
+                let (a, u, o) = (u32::from(alpha), u32::from(under), u32::from(over));
+                ((o * a + u * (255 - a) + 127) / 255) as u8
+            };
+            Color::rgb(
+                mix(below.r, color.r),
+                mix(below.g, color.g),
+                mix(below.b, color.b),
+            )
+        };
+        let encoded = self.encode(value);
+        self.store(x, y, encoded);
+    }
+
+    /// Writes an encoded pixel value.
+    fn store(&mut self, x: u16, y: u16, value: u32) {
+        let row = usize::from(y) * self.stride;
+        let x = usize::from(x);
+        match self.format.bits_per_pixel() as usize {
+            bpp @ (1 | 2 | 4) => {
+                let bit = x * bpp;
+                let shift = 8 - bpp - bit % 8;
+                let mask = (((1u16 << bpp) - 1) as u8) << shift;
+                let byte = &mut self.data[row + bit / 8];
+                *byte = (*byte & !mask) | (((value as u8) << shift) & mask);
+            }
+            8 => self.data[row + x] = value as u8,
+            16 => {
+                let bytes = (value as u16).to_le_bytes();
+                self.data[row + x * 2..row + x * 2 + 2].copy_from_slice(&bytes);
+            }
+            _ => {
+                let bytes = [(value >> 16) as u8, (value >> 8) as u8, value as u8];
+                self.data[row + x * 3..row + x * 3 + 3].copy_from_slice(&bytes);
+            }
+        }
     }
 
     /// Converts a colour to the stored pixel value (nearest level).
@@ -213,6 +244,17 @@ mod tests {
         fb.fill_clipped(Rect::new(1, 0, 1, 1), Color::gray(180));
         assert_eq!(fb.view().pixel(0, 0), Color::gray(85));
         assert_eq!(fb.view().pixel(1, 0), Color::gray(170));
+    }
+
+    #[test]
+    fn blends_over_existing_pixels() {
+        let mut fb = Framebuffer::new(2, 1, PixelFormat::Gray8).unwrap();
+        fb.blend_pixel(0, 0, Color::BLACK, 128);
+        assert_eq!(fb.view().pixel(0, 0), Color::gray(127));
+        fb.set_inverted(true);
+        fb.fill_clipped(Rect::new(1, 0, 1, 1), Color::WHITE);
+        fb.blend_pixel(1, 0, Color::BLACK, 255);
+        assert_eq!(fb.view().pixel(1, 0), Color::WHITE);
     }
 
     #[test]

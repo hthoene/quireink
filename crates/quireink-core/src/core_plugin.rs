@@ -6,7 +6,7 @@ use alloc::borrow::Cow;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
-use quireink_sdk::builtin::{actions, screens, settings, slots};
+use quireink_sdk::builtin::{actions, fonts, screens, settings, slots};
 use quireink_sdk::{
     ActionHandler, ActionSpec, Canvas, Color, Command, Cx, Env, Handled, Id, Manifest, Plugin,
     Priority, RegisterError, Registrar, SDK_VERSION, Screen, ScreenSpec, SettingKind, SettingSpec,
@@ -147,22 +147,14 @@ impl Screen for PlaceholderScreen {
             line,
             Color::BLACK,
         );
-        // A cross marks the empty slot until text rendering exists.
-        let bar = env.metrics.mm(2);
-        canvas.fill_rect(
-            margin as i32,
-            (h / 2 - bar / 2) as i32,
-            inner_w,
-            bar,
-            Color::gray(128),
-        );
-        canvas.fill_rect(
-            (w / 2 - bar / 2) as i32,
-            margin as i32,
-            bar,
-            inner_h,
-            Color::gray(128),
-        );
+        if let Some(font) = env.fonts.role(fonts::UI.as_str()) {
+            let size = env.metrics.pt(14.0);
+            let text = env.i18n.tr("core.screen.placeholder");
+            let width = font.measure(size, text);
+            let x = (w as f32 - width) / 2.0;
+            let baseline = (h / 2) as i32 + (size / 3.0) as i32;
+            font.draw(canvas, size, x, baseline, text, Color::BLACK);
+        }
     }
 
     fn on_action(&mut self, _: &Id, _: &mut Cx<'_, '_>) -> Handled {
