@@ -23,6 +23,13 @@ page.
   about 10 KiB. Its window is a power of two that holds the whole entry,
   and at most 32 KiB. Small entries such as package documents therefore
   need only a few KiB.
+- **The package is read once.** On first open, the spine (archive record
+  and size per chapter), the table of contents and the metadata are
+  written to the cache (`spine.bin`, `toc.dat`/`toc.idx`, `package.ini`).
+  In memory an open book needs 8 bytes per archive entry (the ZIP index
+  keeps name hashes, not names) and 12 bytes per chapter. The table of
+  contents is read entry by entry (`Document::toc_len`, `toc_entry`,
+  `toc_target`); anchors are resolved only when an entry is chosen.
 - **Chapters are converted once, on first use.** The XHTML is tokenized
   while it is inflated and written to the plugin's cache
   (`.quireink/plugins/format-epub/<hash>/`):

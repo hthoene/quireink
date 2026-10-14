@@ -223,10 +223,26 @@ pub trait Document {
     /// block yields the same block.
     fn block_at(&self, storage: &dyn Storage, at: Locator) -> Result<Option<Block>, DocumentError>;
 
-    /// The table of contents; empty if the format or file has none.
-    fn toc(&self, storage: &dyn Storage) -> Vec<TocEntry> {
+    /// Number of table of contents entries; 0 if the format or file has
+    /// none. Tables of contents can be long, so they are read entry by
+    /// entry instead of all at once.
+    fn toc_len(&self, storage: &dyn Storage) -> u32 {
         let _ = storage;
-        Vec::new()
+        0
+    }
+
+    /// Table of contents entry `index`, in reading order. Its locator may
+    /// point at the start of the entry's section when the exact position
+    /// is costly to find (e.g. needs converting a chapter); use
+    /// [`Document::toc_target`] before jumping there.
+    fn toc_entry(&self, storage: &dyn Storage, index: u32) -> Option<TocEntry> {
+        let _ = (storage, index);
+        None
+    }
+
+    /// The exact position of table of contents entry `index`.
+    fn toc_target(&self, storage: &dyn Storage, index: u32) -> Option<Locator> {
+        self.toc_entry(storage, index).map(|entry| entry.at)
     }
 
     /// Reading progress of `at` from 0.0 to 1.0.

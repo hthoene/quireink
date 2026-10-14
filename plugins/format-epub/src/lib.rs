@@ -154,7 +154,7 @@ mod tests {
         let ch2 = String::from("<html><body><p>Zweites.</p></body></html>");
         let storage = epub(ch2);
         let doc = EpubDocument::open(&storage, "books/test.epub").unwrap();
-        let metadata = doc.metadata();
+        let metadata = &doc.metadata().clone();
         assert_eq!(metadata.title.as_deref(), Some("Die Verwandlung"));
         assert_eq!(metadata.authors, ["Franz Kafka"]);
         assert_eq!(metadata.language.as_deref(), Some("de"));
@@ -176,17 +176,34 @@ mod tests {
         assert_eq!(ch1[0].0, BlockKind::Heading(1));
         assert_eq!(blocks(&storage, &doc, 1)[0].1, "Zweites.");
 
-        let toc = doc.toc(&storage);
-        let titles: Vec<(&str, u8)> = toc.iter().map(|e| (e.title.as_str(), e.level)).collect();
+        assert_toc(&storage, &doc);
+
+        // A second open reads the package from the cache.
+        let doc = EpubDocument::open(&storage, "books/test.epub").unwrap();
+        assert_eq!(doc.metadata(), metadata);
+        assert_toc(&storage, &doc);
+    }
+
+    fn assert_toc(storage: &MemoryStorage, doc: &EpubDocument) {
+        let titles: Vec<(String, u8)> = (0..doc.toc_len(storage))
+            .map(|i| doc.toc_entry(storage, i).unwrap())
+            .map(|e| (e.title, e.level))
+            .collect();
         assert_eq!(
             titles,
-            [("Erstes Kapitel", 0), ("Später", 1), ("Zweites Kapitel", 0)]
+            [
+                (String::from("Erstes Kapitel"), 0),
+                (String::from("Später"), 1),
+                (String::from("Zweites Kapitel"), 0)
+            ]
         );
-        assert_eq!(toc[2].at, Locator::new(1, 0));
+        assert_eq!(doc.toc_target(storage, 2), Some(Locator::new(1, 0)));
         // The anchor points at the block with id="later".
-        let later = doc.block_at(&storage, toc[1].at).unwrap().unwrap();
-        assert_eq!(later.text, "Später.");
-        assert!(doc.progress(toc[2].at) > 0.5);
+        let later = doc.toc_target(storage, 1).unwrap();
+        assert_eq!(later.section, 0);
+        let block = doc.block_at(storage, later).unwrap().unwrap();
+        assert_eq!(block.text, "Später.");
+        assert!(doc.progress(Locator::new(1, 0)) > 0.5);
     }
 
     #[test]

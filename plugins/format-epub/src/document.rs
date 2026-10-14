@@ -1,7 +1,6 @@
-use alloc::borrow::Cow;
 use alloc::string::String;
 use alloc::vec::Vec;
-use core::cell::RefCell;
+use core::cell::Cell;
 
 use quireink_sdk::document::{
     Block, Document, DocumentError, Locator, Metadata, OffsetMap, TocEntry,
@@ -11,31 +10,39 @@ use quireink_sdk::{Env, Storage, StorageError};
 
 use crate::PLUGIN;
 use crate::convert::{self, CachePaths, HEADER};
-use crate::package::{self, RawToc};
+use crate::package::{self, Chapter};
 
-/// Bump when the conversion changes, so caches are rebuilt.
-const CACHE_VERSION: u32 = 2;
+/// Marks a chapter whose converted length is not known yet.
+const UNKNOWN: u32 = u32::MAX;
 
-/// An open EPUB. Chapters are converted on first use and read from the
-/// cache afterwards.
+/// An open EPUB. The package is read once into the cache; chapters are
+/// converted on first use and read from the cache afterwards. In memory:
+/// 8 bytes per archive entry and 12 per chapter.
 #[derive(Debug)]
 pub struct EpubDocument {
     archive: ZipArchive,
-    /// Archive paths of the spine documents.
-    spine: Vec<String>,
-    /// Uncompressed sizes of the spine documents, for progress estimates.
-    sizes: Vec<u32>,
-    metadata: Metadata,
-    toc: Vec<RawToc>,
-    cache: String,
+    /// The spine: archive record and uncompressed size per chapter.
+    spine: Vec<Chapter>,
     /// Length of each converted chapter's text, once known.
-    lengths: RefCell<Vec<Option<u32>>>,
+    lengths: Vec<Cell<u32>>,
+    metadata: Metadata,
+    toc_len: u32,
+    cache: String,
 }
 
 fn fnv(text: &str) -> u64 {
     text.bytes().fold(0xcbf2_9ce4_8422_2325, |hash, b| {
         (hash ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
     })
+}
+
+fn paths(cache: &str, section: u32) -> CachePaths {
+    CachePaths {
+        text: alloc::format!("{cache}/{section}.txt"),
+        index: alloc::format!("{cache}/{section}.idx"),
+        anchors: alloc::format!("{cache}/{section}.anc"),
+        end: alloc::format!("{cache}/{section}.end"),
+    }
 }
 
 fn u32_at(storage: &dyn Storage, path: &str, offset: u64) -> Result<u32, StorageError> {
@@ -49,51 +56,38 @@ fn u32_at(storage: &dyn Storage, path: &str, offset: u64) -> Result<u32, Storage
 impl EpubDocument {
     pub fn open(storage: &dyn Storage, path: &str) -> Result<Self, DocumentError> {
         let archive = ZipArchive::open(storage, path).map_err(package::error)?;
-        let package = package::read(storage, &archive)?;
-        let sizes = package
-            .spine
-            .iter()
-            .map(|p| archive.entry(p).map_or(0, |e| e.size))
-            .collect();
+        let cache = alloc::format!("{}/{:016x}", Env::plugin_dir(PLUGIN.as_str()), fnv(path));
+        let size = storage.size(path)?;
+        let package = match package::load(storage, &cache, size) {
+            Some(package) => package,
+            None => {
+                // Another book, file version or cache format: start over.
+                package::invalidate(storage, &cache, |section| paths(&cache, section).end);
+                package::build(storage, &archive, &cache, size)?
+            }
+        };
         let mut metadata = package.metadata;
         if metadata.title.is_none() {
             let name = path.rsplit('/').next().unwrap_or(path);
             metadata.title = Some(String::from(name.rsplit_once('.').map_or(name, |(s, _)| s)));
         }
-        let cache = alloc::format!("{}/{:016x}", Env::plugin_dir(PLUGIN.as_str()), fnv(path));
-        let document = EpubDocument {
-            lengths: RefCell::new(alloc::vec![None; package.spine.len()]),
+        Ok(EpubDocument {
+            lengths: package.spine.iter().map(|_| Cell::new(UNKNOWN)).collect(),
             spine: package.spine,
-            sizes,
             metadata,
-            toc: package.toc,
+            toc_len: package.toc_len,
             archive,
             cache,
-        };
-        document.validate_cache(storage, storage.size(path)?);
-        Ok(document)
-    }
-
-    /// Drops cached chapters made from another file or converter version.
-    fn validate_cache(&self, storage: &dyn Storage, size: u64) {
-        let meta = alloc::format!("{}/meta.ini", self.cache);
-        let expected = alloc::format!("[cache]\nversion = {CACHE_VERSION}\nsize = {size}\n");
-        let current = quireink_sdk::read_file(storage, &meta, 1024).unwrap_or_default();
-        if current != expected.as_bytes() {
-            for section in 0..self.spine.len() {
-                let _ = storage.remove(&self.paths(section as u32).end);
-            }
-            let _ = storage.write(&meta, expected.as_bytes());
-        }
+        })
     }
 
     fn paths(&self, section: u32) -> CachePaths {
-        CachePaths {
-            text: alloc::format!("{}/{section}.txt", self.cache),
-            index: alloc::format!("{}/{section}.idx", self.cache),
-            anchors: alloc::format!("{}/{section}.anc", self.cache),
-            end: alloc::format!("{}/{section}.end", self.cache),
-        }
+        paths(&self.cache, section)
+    }
+
+    fn length(&self, section: u32) -> Option<u32> {
+        let length = self.lengths.get(section as usize)?.get();
+        (length != UNKNOWN).then_some(length)
     }
 
     /// Converts a chapter if needed; returns its paths, text length and
@@ -107,15 +101,15 @@ impl EpubDocument {
         let length = match u32_at(storage, &paths.end, 0) {
             Ok(length) => length,
             Err(_) => {
-                let name = &self.spine[section as usize];
-                let entry = self.archive.entry(name).ok_or_else(|| {
-                    DocumentError::Malformed(Cow::Owned(alloc::format!("missing {name}")))
-                })?;
-                convert::convert(storage, &self.archive, entry, &paths)?
+                let entry = self
+                    .archive
+                    .entry_by_record(storage, self.spine[section as usize].record)
+                    .map_err(package::error)?;
+                convert::convert(storage, &self.archive, &entry, &paths)?
             }
         };
-        if let Some(slot) = self.lengths.borrow_mut().get_mut(section as usize) {
-            *slot = Some(length);
+        if let Some(slot) = self.lengths.get(section as usize) {
+            slot.set(length);
         }
         let blocks = (storage.size(&paths.index)? / 4) as u32;
         Ok((paths, length, blocks))
@@ -205,29 +199,25 @@ impl Document for EpubDocument {
     }
 
     fn section_len(&self, section: u32) -> u32 {
-        self.lengths
-            .borrow()
-            .get(section as usize)
-            .copied()
-            .flatten()
-            .unwrap_or_else(|| self.sizes.get(section as usize).copied().unwrap_or(0))
+        self.length(section)
+            .unwrap_or_else(|| self.spine.get(section as usize).map_or(0, |c| c.size))
     }
 
     /// Estimated from the chapters' sizes in the archive, so it needs no
     /// conversion of unread chapters.
     fn progress(&self, at: Locator) -> f32 {
-        let total: u64 = self.sizes.iter().map(|&s| u64::from(s)).sum();
+        let total: u64 = self.spine.iter().map(|c| u64::from(c.size)).sum();
         if total == 0 {
             return 0.0;
         }
-        let section = (at.section as usize).min(self.sizes.len());
-        let before: u64 = self.sizes[..section].iter().map(|&s| u64::from(s)).sum();
-        let within = match (
-            self.sizes.get(section),
-            self.lengths.borrow().get(section).copied().flatten(),
-        ) {
-            (Some(&size), Some(length)) if length > 0 => {
-                u64::from(size) * u64::from(at.offset.min(length)) / u64::from(length)
+        let section = (at.section as usize).min(self.spine.len());
+        let before: u64 = self.spine[..section]
+            .iter()
+            .map(|c| u64::from(c.size))
+            .sum();
+        let within = match (self.spine.get(section), self.length(section as u32)) {
+            (Some(chapter), Some(length)) if length > 0 => {
+                u64::from(chapter.size) * u64::from(at.offset.min(length)) / u64::from(length)
             }
             _ => 0,
         };
@@ -257,22 +247,28 @@ impl Document for EpubDocument {
             .map(Some)
     }
 
-    fn toc(&self, storage: &dyn Storage) -> Vec<TocEntry> {
-        self.toc
-            .iter()
-            .filter_map(|entry| {
-                let section = self.spine.iter().position(|p| *p == entry.file)? as u32;
-                let offset = entry
-                    .fragment
-                    .as_deref()
-                    .and_then(|id| self.anchor(storage, section, id))
-                    .unwrap_or(0);
-                Some(TocEntry {
-                    title: entry.title.clone(),
-                    level: entry.level,
-                    at: Locator::new(section, offset),
-                })
-            })
-            .collect()
+    fn toc_len(&self, _: &dyn Storage) -> u32 {
+        self.toc_len
+    }
+
+    /// Points at the start of the entry's chapter; finding an anchor needs
+    /// the chapter converted, which [`Document::toc_target`] does.
+    fn toc_entry(&self, storage: &dyn Storage, index: u32) -> Option<TocEntry> {
+        let entry = package::toc_entry(storage, &self.cache, index)?;
+        Some(TocEntry {
+            title: entry.title,
+            level: entry.level,
+            at: Locator::new(entry.section, 0),
+        })
+    }
+
+    fn toc_target(&self, storage: &dyn Storage, index: u32) -> Option<Locator> {
+        let entry = package::toc_entry(storage, &self.cache, index)?;
+        let offset = entry
+            .fragment
+            .as_deref()
+            .and_then(|id| self.anchor(storage, entry.section, id))
+            .unwrap_or(0);
+        Some(Locator::new(entry.section, offset))
     }
 }

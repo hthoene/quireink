@@ -1,8 +1,9 @@
 //! A streaming ZIP reader.
 //!
-//! Only the central directory is kept in memory (names, sizes, offsets);
-//! entries are read straight from storage and inflated chunk by chunk, so a
-//! large EPUB never has to fit into RAM. Supports the "stored" and
+//! Only an index of the central directory is kept in memory — 8 bytes per
+//! entry (name hash and directory offset); details are read from storage
+//! on lookup. Entries are inflated chunk by chunk, so a large EPUB never has
+//! to fit into RAM. Supports the "stored" and
 //! "deflate" methods, which cover EPUB and most other ZIP-based formats.
 
 #![no_std]
@@ -78,14 +79,35 @@ pub struct Entry {
     pub size: u32,
     /// Offset of the local file header.
     header_offset: u32,
+    /// Offset of the central directory record.
+    record: u32,
+}
+
+impl Entry {
+    /// Identifies the entry within its archive; see
+    /// [`ZipArchive::entry_by_record`].
+    pub fn record(&self) -> u32 {
+        self.record
+    }
 }
 
 /// An open ZIP archive.
 #[derive(Debug, Clone)]
 pub struct ZipArchive {
     path: String,
-    entries: Vec<Entry>,
+    /// `(name hash, offset of the central directory record)`, sorted.
+    index: Vec<(u32, u32)>,
 }
+
+/// FNV-1a, to find entries without keeping their names in memory.
+fn hash(name: &[u8]) -> u32 {
+    name.iter().fold(0x811c_9dc5, |hash, &b| {
+        (hash ^ u32::from(b)).wrapping_mul(0x0100_0193)
+    })
+}
+
+/// Size of a central directory record without name, extra and comment.
+const RECORD: usize = 46;
 
 fn u16_at(b: &[u8], at: usize) -> Option<u16> {
     Some(u16::from_le_bytes(b.get(at..at + 2)?.try_into().ok()?))
@@ -172,55 +194,88 @@ impl ZipArchive {
             return Err(ZipError::Invalid("central directory out of range"));
         }
 
-        let mut entries = Vec::with_capacity(usize::from(count));
+        let mut index = Vec::new();
+        index
+            .try_reserve_exact(usize::from(count))
+            .map_err(|_| ZipError::OutOfMemory)?;
         let mut at = u64::from(cd_offset);
+        let bad = ZipError::Invalid("bad central directory entry");
         for _ in 0..count {
-            let bad = ZipError::Invalid("bad central directory entry");
-            if at + 46 > cd_end {
+            if at + RECORD as u64 > cd_end || at > u64::from(u32::MAX) {
                 return Err(bad);
             }
-            let head = read_exact(storage, path, at, 46)?;
+            let head = read_exact(storage, path, at, RECORD)?;
+            let field = |offset| u16_at(&head, offset).map(u64::from).ok_or(bad.clone());
             if u32_at(&head, 0) != Some(0x0201_4b50) {
                 return Err(bad);
             }
-            let flags = u16_at(&head, 8).ok_or(bad.clone())?;
-            let method = match u16_at(&head, 10).ok_or(bad.clone())? {
-                0 => Method::Stored,
-                8 => Method::Deflate,
-                _ => return Err(ZipError::Unsupported("compression method")),
-            };
-            let compressed_size = u32_at(&head, 20).ok_or(bad.clone())?;
-            let size = u32_at(&head, 24).ok_or(bad.clone())?;
-            let name_len = usize::from(u16_at(&head, 28).ok_or(bad.clone())?);
-            let extra_len = u64::from(u16_at(&head, 30).ok_or(bad.clone())?);
-            let comment_len = u64::from(u16_at(&head, 32).ok_or(bad.clone())?);
-            let header_offset = u32_at(&head, 42).ok_or(bad)?;
-            if flags & 1 != 0 {
-                return Err(ZipError::Unsupported("encrypted entries"));
-            }
-            let name = read_exact(storage, path, at + 46, name_len)?;
-            entries.push(Entry {
-                name: String::from_utf8_lossy(&name).into_owned(),
-                method,
-                compressed_size,
-                size,
-                header_offset,
-            });
-            at += 46 + name_len as u64 + extra_len + comment_len;
+            let name_len = field(28)?;
+            let name = read_exact(storage, path, at + RECORD as u64, name_len as usize)?;
+            index.push((hash(&name), at as u32));
+            at += RECORD as u64 + name_len + field(30)? + field(32)?;
         }
+        index.sort_unstable();
         Ok(ZipArchive {
             path: String::from(path),
-            entries,
+            index,
         })
     }
 
-    pub fn entries(&self) -> &[Entry] {
-        &self.entries
+    /// Number of entries.
+    pub fn len(&self) -> usize {
+        self.index.len()
     }
 
-    /// The entry named `name` (exact, case-sensitive path inside the archive).
-    pub fn entry(&self, name: &str) -> Option<&Entry> {
-        self.entries.iter().find(|e| e.name == name)
+    pub fn is_empty(&self) -> bool {
+        self.index.is_empty()
+    }
+
+    /// The entry named `name` (exact, case-sensitive path inside the
+    /// archive), read from the central directory.
+    pub fn entry(&self, storage: &dyn Storage, name: &str) -> Result<Option<Entry>, ZipError> {
+        let wanted = hash(name.as_bytes());
+        let first = self.index.partition_point(|&(h, _)| h < wanted);
+        for &(h, offset) in &self.index[first..] {
+            if h != wanted {
+                break;
+            }
+            let entry = self.entry_by_record(storage, offset)?;
+            if entry.name == name {
+                return Ok(Some(entry));
+            }
+        }
+        Ok(None)
+    }
+
+    /// The entry whose [`Entry::record`] is `offset` — a compact way to
+    /// remember entries without their names.
+    pub fn entry_by_record(&self, storage: &dyn Storage, offset: u32) -> Result<Entry, ZipError> {
+        let bad = ZipError::Invalid("bad central directory entry");
+        let head = read_exact(storage, &self.path, u64::from(offset), RECORD)?;
+        let flags = u16_at(&head, 8).ok_or(bad.clone())?;
+        let method = match u16_at(&head, 10).ok_or(bad.clone())? {
+            0 => Method::Stored,
+            8 => Method::Deflate,
+            _ => return Err(ZipError::Unsupported("compression method")),
+        };
+        if flags & 1 != 0 {
+            return Err(ZipError::Unsupported("encrypted entries"));
+        }
+        let name_len = usize::from(u16_at(&head, 28).ok_or(bad.clone())?);
+        let name = read_exact(
+            storage,
+            &self.path,
+            u64::from(offset) + RECORD as u64,
+            name_len,
+        )?;
+        Ok(Entry {
+            name: String::from_utf8_lossy(&name).into_owned(),
+            method,
+            compressed_size: u32_at(&head, 20).ok_or(bad.clone())?,
+            size: u32_at(&head, 24).ok_or(bad.clone())?,
+            header_offset: u32_at(&head, 42).ok_or(bad)?,
+            record: offset,
+        })
     }
 
     /// Offset of an entry's data, after its local header.
@@ -468,14 +523,16 @@ mod tests {
             .build();
         let storage = OneFile(zip);
         let archive = ZipArchive::open(&storage, "x.zip").unwrap();
-        assert_eq!(archive.entries().len(), 2);
+        assert_eq!(archive.len(), 2);
+        assert_eq!(archive.entry(&storage, "missing").unwrap(), None);
 
-        let mimetype = archive.entry("mimetype").unwrap();
+        let mimetype = archive.entry(&storage, "mimetype").unwrap().unwrap();
         assert_eq!(
-            archive.read(&storage, mimetype, 100).unwrap(),
+            archive.read(&storage, &mimetype, 100).unwrap(),
             b"application/epub+zip"
         );
-        let entry = archive.entry("OEBPS/big.txt").unwrap();
+        let entry = archive.entry(&storage, "OEBPS/big.txt").unwrap().unwrap();
+        let entry = &entry;
         assert_eq!(entry.method, Method::Deflate);
         assert!(entry.compressed_size < entry.size);
         let data = archive.read(&storage, entry, 1 << 20).unwrap();
