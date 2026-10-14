@@ -1116,8 +1116,11 @@ impl Book {
         let label = env.i18n.tr("reader.link-back");
         let pad = style.gap as f32;
         let width = font.measure(style.small, label) + 2.0 * pad;
-        let height = font.line_metrics(style.small).line_height + pad;
-        let y = ((self.typography.y - height) / 2.0).max(2.0);
+        // Within the top margin where it is wide enough, so it covers no
+        // text.
+        let line = font.line_metrics(style.small).line_height;
+        let height = (line + pad).min(self.typography.y - 4.0).max(line);
+        let y = ((self.typography.y - height) / 2.0).max(0.0);
         Some(Rect::new(
             self.typography.x as u16,
             y as u16,

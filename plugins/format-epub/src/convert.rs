@@ -23,6 +23,9 @@
 //! All files are appended in small pieces while converting, and positions
 //! in a chapter are offsets into `<n>.txt`, so neither converting nor
 //! reading ever holds more than a block in memory.
+//!
+//! HTML files (e.g. web pages) are converted the same way, read as
+//! browsers do (see [`Source::Html`]).
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -52,6 +55,25 @@ const FLUSH: usize = 1024;
 const FLUSH_SMALL: usize = 256;
 
 const FLAG_CONTINUES: u8 = 1;
+
+/// Where a chapter's markup comes from.
+pub(crate) enum Source<'a> {
+    /// A chapter of an EPUB.
+    Zip {
+        archive: &'a ZipArchive,
+        entry: &'a Entry,
+    },
+    /// An HTML file in storage. `<script>` and `<style>` hold raw text,
+    /// elements may be left open, and only the reading matter is shown:
+    /// the `focus` element (`main` or `article`) if the page has one, and
+    /// never navigation, forms and the like. Links are made absolute with
+    /// `base` (the page's address), else left relative to the file.
+    Html {
+        path: &'a str,
+        focus: Option<&'a str>,
+        base: Option<&'a str>,
+    },
+}
 
 /// Paths of a chapter's cache files.
 #[derive(Debug, Clone)]
@@ -129,6 +151,8 @@ struct Frame {
     index: u32,
     /// A link (`<a href>`): where it starts, and where it goes.
     link: Option<(u32, String)>,
+    /// The reading matter of an HTML page: its content is shown.
+    focus: bool,
     /// How many children of each name it has had so far.
     children: Vec<(String, u32)>,
 }
@@ -180,6 +204,14 @@ fn styled(style: TextStyle, props: &Props) -> TextStyle {
     }
 }
 
+/// How an HTML page is read.
+struct Html {
+    /// The element holding the reading matter.
+    focus: Option<String>,
+    /// The page's address, for absolute links.
+    base: Option<String>,
+}
+
 struct Converter<'a> {
     storage: &'a dyn Storage,
     paths: &'a CachePaths,
@@ -192,6 +224,9 @@ struct Converter<'a> {
     links: String,
     /// The chapter's archive path, for links within it.
     chapter: String,
+    /// Reading HTML: the page's address, if known (else `None` for
+    /// EPUB chapters and HTML without one).
+    html: Option<Html>,
     /// Pending `<n>.pos` lines.
     positions: String,
     /// The element path of the block being collected.
@@ -332,6 +367,13 @@ impl Converter<'_> {
         if href.is_empty() || quireink_sdk::document::is_external(&href) {
             return (!href.is_empty()).then_some(href);
         }
+        if let Some(html) = &self.html {
+            return Some(match (href.strip_prefix('#'), &html.base) {
+                (Some(_), _) => href,
+                (None, Some(base)) => crate::html::join_url(base, &href),
+                (None, None) => crate::package::resolve(&self.base, &href).0,
+            });
+        }
         let (path, fragment) = if let Some(fragment) = href.strip_prefix('#') {
             (self.chapter.clone(), Some(String::from(fragment)))
         } else {
@@ -352,7 +394,26 @@ impl Converter<'_> {
             Props::default()
         };
         let hides = matches!(tag.as_str(), "head" | "script" | "style" | "title" | "svg")
-            || props.hidden == Some(true);
+            || props.hidden == Some(true)
+            || self
+                .html
+                .as_ref()
+                .is_some_and(|html| furniture(&tag, &attrs, html.focus.is_some()));
+        // HTML leaves paragraphs and list items open: the next one ends
+        // them.
+        if self.html.is_some() {
+            let open = self.stack.last().map(|f| f.tag.as_str());
+            let closes = match tag.as_str() {
+                "li" => matches!(open, Some("li" | "p")),
+                "dt" | "dd" => matches!(open, Some("dt" | "dd" | "p")),
+                "td" | "th" => matches!(open, Some("td" | "th")),
+                "tr" => matches!(open, Some("tr" | "td" | "th")),
+                tag => is_block(tag) && open == Some("p"),
+            };
+            if closes && let Some(open) = open.map(String::from) {
+                self.end(&open);
+            }
+        }
         // Block elements end the block before them (before their anchor is
         // placed, so it points at the new block), in the old style.
         if !hides
@@ -405,9 +466,19 @@ impl Converter<'_> {
             }
             _ => None,
         };
+        let focus = self
+            .html
+            .as_ref()
+            .and_then(|html| html.focus.as_deref())
+            .is_some_and(|focus| focus == tag && !self.stack.iter().any(|f| f.focus));
+        if focus {
+            // The reading matter begins: shown, unless hidden otherwise.
+            self.hidden = self.hidden.saturating_sub(1);
+        }
         self.stack.push(Frame {
             index,
             link,
+            focus,
             children: Vec::new(),
             tag: tag.clone(),
             style: styled(style, &props),
@@ -421,7 +492,7 @@ impl Converter<'_> {
             self.hidden += 1;
         }
         // Images, also inside <svg> (a common way to show covers).
-        if matches!(tag.as_str(), "img" | "image") && self.only_svg_hides() {
+        if matches!(tag.as_str(), "img" | "image") && self.html.is_none() && self.only_svg_hides() {
             let href = attrs
                 .iter()
                 .find(|(name, _)| matches!(local_name(name), "src" | "href"))
@@ -483,6 +554,9 @@ impl Converter<'_> {
         for frame in self.stack.drain(open..) {
             if frame.hides {
                 self.hidden = self.hidden.saturating_sub(1);
+            }
+            if frame.focus {
+                self.hidden += 1;
             }
             if let Some((start, href)) = frame.link
                 && here > start
@@ -688,6 +762,102 @@ impl Converter<'_> {
     }
 }
 
+/// Elements without content or end tag in HTML.
+fn is_void(tag: &str) -> bool {
+    matches!(
+        tag.to_ascii_lowercase().as_str(),
+        "area"
+            | "base"
+            | "br"
+            | "col"
+            | "embed"
+            | "hr"
+            | "img"
+            | "input"
+            | "link"
+            | "meta"
+            | "source"
+            | "track"
+            | "wbr"
+    )
+}
+
+/// Words in class names and ids of page furniture (`site-nav`,
+/// `vector-dropdown`, `mw-editsection`, …).
+const FURNITURE: [&str; 24] = [
+    "nav",
+    "navbar",
+    "navigation",
+    "navbox",
+    "menu",
+    "dropdown",
+    "sidebar",
+    "banner",
+    "cookie",
+    "cookies",
+    "share",
+    "sharing",
+    "social",
+    "related",
+    "comments",
+    "advert",
+    "ads",
+    "promo",
+    "popup",
+    "modal",
+    "noprint",
+    "breadcrumb",
+    "breadcrumbs",
+    "editsection",
+];
+
+/// Parts of a web page that are not reading matter: navigation, forms,
+/// menus and the like, by element, ARIA role or class name. Headers and
+/// footers belong to the reading matter when it is marked (an article's
+/// title), else they are the site's.
+fn furniture(tag: &str, attrs: &quireink_sdk::xml::Attrs<'_>, focus: bool) -> bool {
+    let role = attrs.get("role");
+    if matches!(
+        role.as_deref(),
+        Some("navigation" | "search" | "banner" | "contentinfo" | "complementary" | "menu")
+    ) || attrs.get("aria-hidden").as_deref() == Some("true")
+    {
+        return true;
+    }
+    // A class or id naming furniture starts or ends with its word
+    // (`nav-links`, `site-nav`); words in between describe a state
+    // (`main-menu-pinned-disabled` on `<body>`).
+    let furniture_word = |word: &str| FURNITURE.contains(&word.to_ascii_lowercase().as_str());
+    let named = |name: &str| {
+        attrs.get(name).is_some_and(|value| {
+            value.split_whitespace().any(|token| {
+                let mut words = token.split(['-', '_']).filter(|w| !w.is_empty());
+                let first = words.next();
+                let last = words.next_back();
+                first.is_some_and(furniture_word) || last.is_some_and(furniture_word)
+            })
+        })
+    };
+    let frame = matches!(tag, "html" | "body" | "main" | "article");
+    if !frame && (named("class") || named("id")) {
+        return true;
+    }
+    matches!(
+        tag,
+        "nav"
+            | "aside"
+            | "form"
+            | "noscript"
+            | "iframe"
+            | "button"
+            | "select"
+            | "textarea"
+            | "template"
+            | "dialog"
+            | "menu"
+    ) || (!focus && matches!(tag, "header" | "footer"))
+}
+
 fn is_block(tag: &str) -> bool {
     matches!(
         tag,
@@ -731,13 +901,23 @@ fn heading_level(tag: &str) -> Option<u8> {
 /// Converts a chapter; returns the length of its text file.
 pub(crate) fn convert(
     storage: &dyn Storage,
-    archive: &ZipArchive,
-    entry: &Entry,
+    source: &Source<'_>,
     paths: &CachePaths,
     rules: Rules,
     styles: bool,
 ) -> Result<u32, DocumentError> {
-    let base = String::from(entry.name.rfind('/').map_or("", |i| &entry.name[..=i]));
+    let name = match source {
+        Source::Zip { entry, .. } => entry.name.as_str(),
+        Source::Html { path, .. } => path,
+    };
+    let base = String::from(name.rfind('/').map_or("", |i| &name[..=i]));
+    let html = match source {
+        Source::Zip { .. } => None,
+        Source::Html { focus, base, .. } => Some(Html {
+            focus: focus.map(String::from),
+            base: base.map(String::from),
+        }),
+    };
     let _ = storage.remove(&paths.end);
     for path in [
         &paths.text,
@@ -756,7 +936,7 @@ pub(crate) fn convert(
         index: Vec::with_capacity(FLUSH_SMALL + 4),
         anchors: String::new(),
         links: String::new(),
-        chapter: entry.name.clone(),
+        chapter: String::from(name),
         positions: String::new(),
         block_path: String::new(),
         // Blocks are split before they outgrow this, so it never grows.
@@ -775,13 +955,18 @@ pub(crate) fn convert(
         images: Vec::new(),
         kind: BlockKind::Paragraph,
         continues: false,
-        hidden: 0,
+        // A page with reading matter shows nothing outside it.
+        hidden: u32::from(html.as_ref().is_some_and(|h| h.focus.is_some())),
+        html,
         pre: 0,
         space: false,
         space_style: TextStyle::REGULAR,
         failed: None,
     };
-    let mut tokenizer = Tokenizer::new();
+    let mut tokenizer = match source {
+        Source::Zip { .. } => Tokenizer::new(),
+        Source::Html { .. } => Tokenizer::html(),
+    };
     let mut handle = |token: Token<'_>| match token {
         Token::Start {
             name,
@@ -789,7 +974,8 @@ pub(crate) fn convert(
             self_closing,
         } => {
             converter.start(name, attrs, self_closing);
-            if self_closing {
+            // Empty elements, also as HTML writes them (`<br>`).
+            if self_closing || is_void(local_name(name)) {
                 converter.end(name);
             }
         }
@@ -797,12 +983,26 @@ pub(crate) fn convert(
         Token::Text(text) => converter.characters(&text),
         Token::CData(text) => converter.characters(text),
     };
-    archive
-        .stream(storage, entry, &mut |chunk| {
-            tokenizer.feed(chunk, &mut handle);
-            true
-        })
-        .map_err(error)?;
+    match source {
+        Source::Zip { archive, entry } => archive
+            .stream(storage, entry, &mut |chunk| {
+                tokenizer.feed(chunk, &mut handle);
+                true
+            })
+            .map_err(error)?,
+        Source::Html { path, .. } => {
+            let mut chunk = [0u8; 1024];
+            let mut at = 0u64;
+            loop {
+                let n = storage.read_at(path, at, &mut chunk)?;
+                if n == 0 {
+                    break;
+                }
+                tokenizer.feed(&chunk[..n], &mut handle);
+                at += n as u64;
+            }
+        }
+    }
     tokenizer.finish(&mut handle);
     converter.flush();
     converter.write_out();
@@ -818,9 +1018,11 @@ pub(crate) fn convert(
     let images = core::mem::take(&mut converter.images);
     let length = converter.length;
     drop(converter);
-    for (path, cache) in &images {
-        if quireink_sdk::image::GrayFile::open(storage, cache).is_none() {
-            let _ = decode_image(storage, archive, path, cache, &paths.dir, IMAGE_SIDE);
+    if let Source::Zip { archive, .. } = source {
+        for (path, cache) in &images {
+            if quireink_sdk::image::GrayFile::open(storage, cache).is_none() {
+                let _ = decode_image(storage, archive, path, cache, &paths.dir, IMAGE_SIDE);
+            }
         }
     }
     // Last: its presence marks a complete conversion.
@@ -922,4 +1124,46 @@ pub(crate) fn decode_image(
         let _ = storage.remove(cache);
     }
     result.map_err(|e| DocumentError::Malformed(alloc::borrow::Cow::Owned(alloc::format!("{e}"))))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use quireink_sdk::xml::{Token, Tokenizer};
+
+    fn is_furniture(tag: &str) -> bool {
+        let mut found = None;
+        Tokenizer::parse(tag.as_bytes(), &mut |token| {
+            if let Token::Start { name, attrs, .. } = token {
+                found = Some(furniture(name, &attrs, true));
+            }
+        });
+        found.unwrap()
+    }
+
+    #[test]
+    fn page_furniture_is_recognized() {
+        for tag in [
+            "<nav>",
+            "<div role=\"navigation\">",
+            "<div class=\"vector-dropdown mw-portlet\">",
+            "<span class=\"mw-editsection\">",
+            "<div id=\"site_sidebar\">",
+            "<p aria-hidden=\"true\">",
+            "<div class=\"NoPrint\">",
+        ] {
+            assert!(is_furniture(tag), "{tag}");
+        }
+        for tag in [
+            "<p>",
+            "<header>",
+            "<div class=\"unavailable canvas\">",
+            "<div class=\"article-header\">",
+            "<div id=\"mw-content-text\">",
+            "<div class=\"vector-feature-main-menu-pinned-disabled\">",
+            "<body class=\"menu-open\">",
+        ] {
+            assert!(!is_furniture(tag), "{tag}");
+        }
+    }
 }

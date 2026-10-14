@@ -4,15 +4,15 @@ use alloc::vec::Vec;
 use core::cell::Cell;
 
 use quireink_sdk::document::{
-    Align, Block, BlockKind, Document, DocumentError, EmbeddedFont, ImageRef, Link, Locator,
-    Metadata, OffsetMap, Run, TextStyle, TocEntry,
+    Block, Document, DocumentError, EmbeddedFont, ImageRef, Link, Locator, Metadata, TocEntry,
 };
 use quireink_sdk::image::GrayFile;
 use quireink_sdk::zip::ZipArchive;
-use quireink_sdk::{Env, Storage, StorageError};
+use quireink_sdk::{Env, Storage};
 
 use crate::PLUGIN;
-use crate::convert::{self, CachePaths, HEADER, INDEX};
+use crate::cached;
+use crate::convert::{self, CachePaths, INDEX};
 use crate::obfuscation;
 use crate::package::{self, Chapter};
 
@@ -94,14 +94,6 @@ fn parse_xpointer(xpointer: &str) -> Option<(u32, String)> {
 /// Where chapters converted without the book's styles are kept.
 fn plain_cache(cache: &str) -> String {
     alloc::format!("{cache}/plain")
-}
-
-fn u32_at(storage: &dyn Storage, path: &str, offset: u64) -> Result<u32, StorageError> {
-    let mut buf = [0u8; 4];
-    if storage.read_at(path, offset, &mut buf)? != 4 {
-        return Err(StorageError::Io);
-    }
-    Ok(u32::from_le_bytes(buf))
 }
 
 impl EpubDocument {
@@ -187,7 +179,7 @@ impl EpubDocument {
         section: u32,
     ) -> Result<(CachePaths, u32, u32), DocumentError> {
         let paths = self.paths(section);
-        let length = match u32_at(storage, &paths.end, 0) {
+        let length = match cached::u32_at(storage, &paths.end, 0) {
             Ok(length) => length,
             Err(_) => {
                 let entry = self
@@ -199,7 +191,11 @@ impl EpubDocument {
                 } else {
                     Default::default()
                 };
-                convert::convert(storage, &self.archive, &entry, &paths, rules, self.styles)?
+                let source = convert::Source::Zip {
+                    archive: &self.archive,
+                    entry: &entry,
+                };
+                convert::convert(storage, &source, &paths, rules, self.styles)?
             }
         };
         if let Some(slot) = self.lengths.get(section as usize) {
@@ -209,152 +205,10 @@ impl EpubDocument {
         Ok((paths, length, blocks))
     }
 
-    /// Reads block `i` of a chapter.
-    fn read_block(
-        &self,
-        storage: &dyn Storage,
-        paths: &CachePaths,
-        length: u32,
-        blocks: u32,
-        i: u32,
-    ) -> Result<Block, DocumentError> {
-        let mut entry = [0u8; INDEX as usize];
-        storage.read_at(&paths.index, u64::from(i * INDEX), &mut entry)?;
-        let start = u32::from_le_bytes([entry[0], entry[1], entry[2], entry[3]]);
-        let end = if i + 1 < blocks {
-            u32_at(storage, &paths.index, u64::from((i + 1) * INDEX))?
-        } else {
-            length
-        };
-        let mut header = [0u8; HEADER as usize];
-        let at = start.checked_sub(HEADER).ok_or(DocumentError::Malformed(
-            alloc::borrow::Cow::Borrowed("cache index"),
-        ))?;
-        storage.read_at(&paths.text, u64::from(at), &mut header)?;
-        let len = usize::from(u16::from_le_bytes([header[4], header[5]]));
-        let run_count = usize::from(u16::from_le_bytes([header[6], header[7]]));
-        let mut text = alloc::vec![0u8; len];
-        let mut filled = 0;
-        while filled < len {
-            let n = storage.read_at(
-                &paths.text,
-                u64::from(start) + filled as u64,
-                &mut text[filled..],
-            )?;
-            if n == 0 {
-                break;
-            }
-            filled += n;
-        }
-        text.truncate(filled);
-        let mut runs = Vec::new();
-        if run_count > 0 {
-            let mut data = alloc::vec![0u8; run_count * convert::RUN];
-            let read = storage.read_at(&paths.text, u64::from(start) + len as u64, &mut data)?;
-            runs = data[..read]
-                .chunks_exact(convert::RUN)
-                .map(|r| Run {
-                    start: u32::from(u16::from_le_bytes([r[0], r[1]])),
-                    end: u32::from(u16::from_le_bytes([r[2], r[3]])),
-                    style: TextStyle::from_bits(r[4]),
-                })
-                .collect();
-        }
-        let mut kind = convert::decode_kind(header[0], header[1]);
-        let mut text = String::from_utf8_lossy(&text).into_owned();
-        let mut image = None;
-        if kind == BlockKind::Image {
-            // `cache path<TAB>alternative text`
-            let (path, alt) = text.split_once('\t').unwrap_or((&text, ""));
-            image = GrayFile::open(storage, path).map(|file| ImageRef {
-                path: file.path,
-                width: file.width,
-                height: file.height,
-            });
-            let alt = String::from(alt);
-            if image.is_none() {
-                // Not decodable: its alternative text instead.
-                kind = BlockKind::Paragraph;
-            }
-            text = alt;
-        }
-        Ok(Block {
-            kind,
-            continues: convert::continues(header[2]),
-            start,
-            end,
-            text,
-            map: OffsetMap::IDENTITY,
-            runs,
-            align: Align::from_bits(header[3]),
-            indent: Some(i16::from_le_bytes([entry[4], entry[5]]))
-                .filter(|&i| i != convert::NO_INDENT),
-            space: Some(u16::from_le_bytes([entry[6], entry[7]]))
-                .filter(|&s| s != convert::NO_SPACE),
-            size: Some(u16::from_le_bytes([entry[8], entry[9]])).filter(|&s| s != 0),
-            image,
-        })
-    }
-
-    /// Calls `visit` with each line of a cache file until it returns
-    /// `false`, reading in small pieces.
-    fn lines(storage: &dyn Storage, path: &str, mut visit: impl FnMut(&str) -> bool) {
-        let mut chunk = [0u8; 256];
-        let mut line: Vec<u8> = Vec::new();
-        let mut offset = 0u64;
-        loop {
-            let Ok(n) = storage.read_at(path, offset, &mut chunk) else {
-                return;
-            };
-            offset += n as u64;
-            for &byte in &chunk[..n] {
-                if byte != b'\n' {
-                    // Longer lines are cut; nothing sensible is that long.
-                    if line.len() < 2048 {
-                        line.push(byte);
-                    }
-                    continue;
-                }
-                if !visit(core::str::from_utf8(&line).unwrap_or_default()) {
-                    return;
-                }
-                line.clear();
-            }
-            if n == 0 {
-                return;
-            }
-        }
-    }
-
-    /// The offset of anchor `id` in a chapter, scanning the anchor file
-    /// line by line.
+    /// The offset of anchor `id` in a chapter.
     fn anchor(&self, storage: &dyn Storage, section: u32, id: &str) -> Option<u32> {
         let (paths, ..) = self.chapter(storage, section).ok()?;
-        let mut chunk = [0u8; 256];
-        let mut line: Vec<u8> = Vec::new();
-        let mut offset = 0u64;
-        loop {
-            let n = storage.read_at(&paths.anchors, offset, &mut chunk).ok()?;
-            offset += n as u64;
-            for &byte in &chunk[..n] {
-                if byte != b'\n' {
-                    // Longer lines cannot match a sensible id.
-                    if line.len() < 512 {
-                        line.push(byte);
-                    }
-                    continue;
-                }
-                if let Some(tab) = line.iter().position(|&b| b == b'\t')
-                    && &line[..tab] == id.as_bytes()
-                {
-                    return core::str::from_utf8(&line[tab + 1..]).ok()?.parse().ok();
-                }
-                line.clear();
-            }
-            if n == 0 {
-                return None;
-            }
-        }
+        cached::anchor(storage, &paths, id)
     }
 }
 
@@ -500,51 +354,14 @@ impl Document for EpubDocument {
             return Ok(None);
         }
         let (paths, length, blocks) = self.chapter(storage, at.section)?;
-        if blocks == 0 || at.offset >= length {
-            return Ok(None);
-        }
-        // The last block whose text starts at or before the offset.
-        let (mut low, mut high) = (0u32, blocks);
-        while low < high {
-            let mid = low + (high - low) / 2;
-            if u32_at(storage, &paths.index, u64::from(mid * INDEX))? <= at.offset {
-                low = mid + 1;
-            } else {
-                high = mid;
-            }
-        }
-        let i = low.saturating_sub(1);
-        self.read_block(storage, &paths, length, blocks, i)
-            .map(Some)
+        cached::block_at(storage, &paths, length, blocks, at.offset)
     }
 
     fn links(&self, storage: &dyn Storage, section: u32, from: u32, to: u32) -> Vec<Link> {
-        let mut links = Vec::new();
-        let Ok((paths, ..)) = self.chapter(storage, section) else {
-            return links;
-        };
-        Self::lines(storage, &paths.links, |line| {
-            let mut parts = line.splitn(3, '\t');
-            let (Some(start), Some(end), Some(href)) = (parts.next(), parts.next(), parts.next())
-            else {
-                return true;
-            };
-            let (Ok(start), Ok(end)) = (start.parse::<u32>(), end.parse::<u32>()) else {
-                return true;
-            };
-            if start >= to {
-                return false;
-            }
-            if end > from {
-                links.push(Link {
-                    start,
-                    end,
-                    href: String::from(href),
-                });
-            }
-            true
-        });
-        links
+        match self.chapter(storage, section) {
+            Ok((paths, ..)) => cached::links(storage, &paths, from, to),
+            Err(_) => Vec::new(),
+        }
     }
 
     fn link_target(&self, storage: &dyn Storage, href: &str) -> Option<Locator> {

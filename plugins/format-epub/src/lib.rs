@@ -9,16 +9,21 @@
 //!   books of any size work on small devices.
 //!
 //! Supported markup: paragraphs, headings, lists, block quotes, line
-//! breaks, preformatted text and anchors. Styles (CSS, bold, italic) and
-//! images are not rendered yet.
+//! breaks, preformatted text, anchors and links, styles and images.
+//!
+//! HTML files (`.html`, `.htm`, `.xhtml`) — e.g. saved web pages — open
+//! the same way, showing only a page's reading matter (see
+//! [`HtmlDocument`]).
 
 #![no_std]
 
 extern crate alloc;
 
+mod cached;
 mod convert;
 mod css;
 mod document;
+mod html;
 mod obfuscation;
 mod package;
 
@@ -32,9 +37,12 @@ use quireink_sdk::{
 };
 
 pub use document::EpubDocument;
+pub use html::HtmlDocument;
 
 pub const PLUGIN: Id = Id::new_static("format-epub");
 pub const FORMAT: Id = Id::new_static("format-epub.epub");
+/// HTML files, e.g. web pages.
+pub const HTML: Id = Id::new_static("format-epub.html");
 
 /// The EPUB format plugin.
 #[derive(Debug, Default)]
@@ -46,7 +54,8 @@ impl Plugin for EpubFormat {
             id: PLUGIN,
             name: Cow::Borrowed("EPUB"),
             description: Cow::Borrowed(
-                "Opens EPUB books with their styles, table of contents and images.",
+                "Opens EPUB books with their styles, table of contents and images, and web pages \
+                 (HTML).",
             ),
             version: Version::new(0, 1, 0),
             sdk: SDK_VERSION,
@@ -60,6 +69,19 @@ impl Plugin for EpubFormat {
             extensions: vec![Cow::Borrowed("epub")],
             open: Box::new(|storage, path, options| {
                 EpubDocument::open_with(storage, path, options.publisher_styles)
+                    .map(|d| Box::new(d) as Box<dyn Document>)
+            }),
+        })?;
+        r.add_format(FormatSpec {
+            id: HTML,
+            title: Cow::Borrowed("format-epub.html"),
+            extensions: vec![
+                Cow::Borrowed("html"),
+                Cow::Borrowed("htm"),
+                Cow::Borrowed("xhtml"),
+            ],
+            open: Box::new(|storage, path, options| {
+                HtmlDocument::open(storage, path, options.publisher_styles)
                     .map(|d| Box::new(d) as Box<dyn Document>)
             }),
         })?;

@@ -8,6 +8,10 @@
 //!
 //! There is no DOM and no namespace processing; names keep their prefix
 //! (see [`local_name`]).
+//!
+//! For HTML ([`Tokenizer::html`]), the content of `<script>` and `<style>`
+//! is text up to the matching end tag, as browsers read it: `a < b` in a
+//! script starts no tag.
 
 #![no_std]
 
@@ -116,17 +120,32 @@ pub fn local_name(name: &str) -> &str {
     name.rsplit(':').next().unwrap_or(name)
 }
 
+/// Elements whose content HTML reads as text up to their end tag.
+const RAW_TEXT: [&str; 2] = ["script", "style"];
+
 /// Incremental tokenizer; see the crate documentation.
 #[derive(Debug, Default)]
 pub struct Tokenizer {
     pending: Vec<u8>,
     /// Skipping overlong markup up to its closing `>`.
     skipping: bool,
+    /// HTML: `<script>` and `<style>` hold raw text.
+    html: bool,
+    /// Inside such an element: its name.
+    raw: Option<&'static str>,
 }
 
 impl Tokenizer {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// A tokenizer for HTML (see the crate documentation).
+    pub fn html() -> Self {
+        Self {
+            html: true,
+            ..Self::default()
+        }
     }
 
     /// Tokenizes a complete document.
@@ -151,7 +170,7 @@ impl Tokenizer {
                 }
             }
             self.pending.extend_from_slice(piece);
-            let consumed = process(&self.pending, false, emit);
+            let consumed = process(&self.pending, false, self.html, &mut self.raw, emit);
             self.pending.drain(..consumed);
             // What is left is unfinished markup; text is emitted early.
             if self.pending.len() > MAX_MARKUP {
@@ -163,14 +182,23 @@ impl Tokenizer {
 
     /// Emits what is left at the end of the input.
     pub fn finish(&mut self, emit: &mut dyn FnMut(Token<'_>)) {
-        process(&self.pending, true, emit);
+        process(&self.pending, true, self.html, &mut self.raw, emit);
         self.pending.clear();
         self.skipping = false;
+        self.raw = None;
     }
 }
 
 fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     haystack.windows(needle.len()).position(|w| w == needle)
+}
+
+/// Where the end tag of raw text element `name` starts, in any case.
+fn find_end_tag(haystack: &[u8], name: &str) -> Option<usize> {
+    let len = name.len() + 2;
+    haystack
+        .windows(len)
+        .position(|w| w.starts_with(b"</") && w[2..].eq_ignore_ascii_case(name.as_bytes()))
 }
 
 /// A cut in `run` that splits neither a UTF-8 sequence nor an entity.
@@ -198,10 +226,37 @@ fn text(bytes: &[u8]) -> Cow<'_, str> {
 }
 
 /// Processes `buf`, returning how many bytes were consumed. Without `last`,
-/// incomplete tokens at the end are left for the next round.
-fn process(buf: &[u8], last: bool, emit: &mut dyn FnMut(Token<'_>)) -> usize {
+/// incomplete tokens at the end are left for the next round. With `html`,
+/// `raw` is the raw text element being read, if any.
+fn process(
+    buf: &[u8],
+    last: bool,
+    html: bool,
+    raw: &mut Option<&'static str>,
+    emit: &mut dyn FnMut(Token<'_>),
+) -> usize {
     let mut pos = 0;
     while pos < buf.len() {
+        if let Some(name) = *raw {
+            let rest = &buf[pos..];
+            let end = match find_end_tag(rest, name) {
+                Some(end) => {
+                    *raw = None;
+                    end
+                }
+                None if last => rest.len(),
+                // Keep what could be the start of the end tag.
+                None => match rest.len().checked_sub(name.len() + 2) {
+                    Some(keep) if keep > 0 => safe_cut(&rest[..keep]),
+                    _ => return pos,
+                },
+            };
+            if end > 0 {
+                emit(Token::Text(text(&rest[..end])));
+            }
+            pos += end;
+            continue;
+        }
         if buf[pos] != b'<' {
             let end = match buf[pos..].iter().position(|&b| b == b'<') {
                 Some(i) => pos + i,
@@ -243,7 +298,13 @@ fn process(buf: &[u8], last: bool, emit: &mut dyn FnMut(Token<'_>)) -> usize {
         } else {
             match tag_end(rest) {
                 Some(end) => {
-                    emit_tag(&rest[1..end], emit);
+                    if let Some(name) = emit_tag(&rest[1..end], emit)
+                        && html
+                    {
+                        *raw = RAW_TEXT
+                            .into_iter()
+                            .find(|raw| local_name(name).eq_ignore_ascii_case(raw));
+                    }
                     Some(end + 1)
                 }
                 None => None,
@@ -276,13 +337,15 @@ fn tag_end(tag: &[u8]) -> Option<usize> {
     None
 }
 
-fn emit_tag(inner: &[u8], emit: &mut dyn FnMut(Token<'_>)) {
+/// Emits a tag; returns the name of an element it opens (not of one that
+/// closes itself).
+fn emit_tag<'a>(inner: &'a [u8], emit: &mut dyn FnMut(Token<'_>)) -> Option<&'a str> {
     let Ok(inner) = core::str::from_utf8(inner) else {
-        return;
+        return None;
     };
     if let Some(name) = inner.strip_prefix('/') {
         emit(Token::End { name: name.trim() });
-        return;
+        return None;
     }
     let (inner, self_closing) = match inner.trim_end().strip_suffix('/') {
         Some(stripped) => (stripped, true),
@@ -293,13 +356,14 @@ fn emit_tag(inner: &[u8], emit: &mut dyn FnMut(Token<'_>)) {
         .unwrap_or(inner.len());
     let name = &inner[..name_end];
     if name.is_empty() {
-        return;
+        return None;
     }
     emit(Token::Start {
         name,
         attrs: Attrs(&inner[name_end..]),
         self_closing,
     });
+    (!self_closing).then_some(name)
 }
 
 #[cfg(test)]
@@ -353,6 +417,48 @@ mod tests {
     const DOC: &str = "<?xml version=\"1.0\"?><!DOCTYPE html><html xmlns=\"x\">\
         <!-- a > comment --><p class=\"a b\" id='x' hidden>Hello &amp; \
         <em>world</em>!<br/></p><![CDATA[1 < 2]]><img alt=\"a > b\" /></html>";
+
+    #[test]
+    fn html_scripts_and_styles_are_text() {
+        let page = "<p>a<script>if (a<b && c>d) { x('</div>'); }</SCRIPT>\
+            <style>p > b { }</style>b</p><script/>c";
+        for chunk in [1, 3, 7, 64, 1000] {
+            let mut out = Vec::new();
+            let mut tokenizer = Tokenizer::html();
+            for piece in page.as_bytes().chunks(chunk) {
+                tokenizer.feed(piece, &mut |t| out.push(describe(t)));
+            }
+            tokenizer.finish(&mut |t| out.push(describe(t)));
+            let mut merged: Vec<String> = Vec::new();
+            for t in out {
+                match (merged.last_mut(), t.starts_with('\'')) {
+                    (Some(last), true) if last.starts_with('\'') => {
+                        last.pop();
+                        last.push_str(&t[1..]);
+                    }
+                    _ => merged.push(t),
+                }
+            }
+            assert_eq!(
+                merged,
+                [
+                    "<p >",
+                    "'a'",
+                    "<script >",
+                    "'if (a<b && c>d) { x('</div>'); }'",
+                    "</SCRIPT>",
+                    "<style >",
+                    "'p > b { }'",
+                    "</style>",
+                    "'b'",
+                    "</p>",
+                    "<script />",
+                    "'c'"
+                ],
+                "chunk {chunk}"
+            );
+        }
+    }
 
     #[test]
     fn tokenizes_regardless_of_chunk_size() {
