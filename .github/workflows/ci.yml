@@ -47,7 +47,7 @@ jobs:
           -p quireink-plugin-format-txt -p quireink-plugin-format-epub -p quireink-plugin-hyphenation
           -p quireink-image -p quireink-sqlite -p quireink-plugin-settings
           -p quireink-plugin-reader -p quireink-plugin-files
-          -p quireink-plugin-menu -p quireink-plugin-menu-editor -p quireink-plugin-kosync -p quireink-plugin-stats -p quireink-plugin-keyboard -p quireink-plugin-home -p quireink-plugin-plugin-manager
+          -p quireink-plugin-menu -p quireink-plugin-menu-editor -p quireink-plugin-kosync -p quireink-plugin-stats -p quireink-plugin-file-manager -p quireink-plugin-keyboard -p quireink-plugin-home -p quireink-plugin-plugin-manager
           -p quireink-stardict -p quireink-plugin-dictionary
           -p quireink-plugin-fonts-default --no-default-features
 

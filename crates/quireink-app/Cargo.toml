@@ -32,6 +32,7 @@ quireink-plugin-menu.workspace = true
 quireink-plugin-menu-editor.workspace = true
 quireink-plugin-kosync.workspace = true
 quireink-plugin-stats.workspace = true
+quireink-plugin-file-manager.workspace = true
 quireink-plugin-plugin-manager.workspace = true
 quireink-plugin-reader.workspace = true
 quireink-plugin-settings.workspace = true

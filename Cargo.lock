@@ -1244,6 +1244,7 @@ dependencies = [
  "quireink-core",
  "quireink-plugin-diagnostics",
  "quireink-plugin-dictionary",
+ "quireink-plugin-file-manager",
  "quireink-plugin-files",
  "quireink-plugin-fonts-default",
  "quireink-plugin-format-epub",
@@ -1365,6 +1366,14 @@ dependencies = [
  "quireink-i18n",
  "quireink-sdk",
  "quireink-stardict",
+]
+
+[[package]]
+name = "quireink-plugin-file-manager"
+version = "0.1.0"
+dependencies = [
+ "quireink-i18n",
+ "quireink-sdk",
 ]
 
 [[package]]

@@ -31,6 +31,7 @@ members = [
     "plugins/menu-editor",
     "plugins/kosync",
     "plugins/stats",
+    "plugins/file-manager",
     "plugins/plugin-manager",
     "plugins/settings",
     "plugins/home",
@@ -74,6 +75,7 @@ quireink-plugin-menu = { path = "plugins/menu", version = "0.1.0" }
 quireink-plugin-menu-editor = { path = "plugins/menu-editor", version = "0.1.0" }
 quireink-plugin-kosync = { path = "plugins/kosync", version = "0.1.0" }
 quireink-plugin-stats = { path = "plugins/stats", version = "0.1.0" }
+quireink-plugin-file-manager = { path = "plugins/file-manager", version = "0.1.0" }
 quireink-plugin-keyboard = { path = "plugins/keyboard", version = "0.1.0" }
 quireink-plugin-plugin-manager = { path = "plugins/plugin-manager", version = "0.1.0" }
 quireink-plugin-hyphenation = { path = "plugins/hyphenation", version = "0.1.0" }
