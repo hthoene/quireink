@@ -65,6 +65,8 @@ struct Entry {
     family: Option<Cow<'static, str>>,
     bold: bool,
     italic: bool,
+    /// 400 regular, 700 bold; picks among faces of the same style.
+    weight: u16,
     /// A font file on the storage, loaded only while its family is chosen.
     file: Option<String>,
 }
@@ -125,6 +127,7 @@ impl Fonts {
             id: spec.id,
             font: Some(spec.font),
             family: spec.family,
+            weight: if spec.bold { 700 } else { 400 },
             bold: spec.bold,
             italic: spec.italic,
             file: None,
@@ -143,6 +146,7 @@ impl Fonts {
             family: Some(Cow::Owned(info.family)),
             bold: info.bold,
             italic: info.italic,
+            weight: info.weight,
             file: Some(path),
         });
         Ok(())
@@ -196,16 +200,43 @@ impl Fonts {
         self.family = family.map(String::from);
     }
 
-    /// Loads the files of the chosen family and frees those of other
-    /// families; returns the files that could not be loaded.
+    /// The entry of `family` best for a regular, bold, italic or bold
+    /// italic face: that style, the weight closest to 400 or 700; among
+    /// equals the first.
+    fn best_face(&self, family: &str, bold: bool, italic: bool, loaded: bool) -> Option<usize> {
+        let target: i32 = if bold { 700 } else { 400 };
+        self.entries
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| {
+                e.family.as_deref() == Some(family)
+                    && e.bold == bold
+                    && e.italic == italic
+                    && (!loaded || e.font.is_some())
+            })
+            .min_by_key(|(_, e)| (i32::from(e.weight) - target).abs())
+            .map(|(index, _)| index)
+    }
+
+    /// Loads the files of the chosen family's faces (one per style) and
+    /// frees all others; returns the files that could not be loaded.
     pub fn load(&mut self, storage: &dyn Storage) -> Vec<String> {
         let mut failed = Vec::new();
         let chosen = self.family.clone();
-        for entry in &mut self.entries {
+        let wanted: Vec<usize> = chosen
+            .as_deref()
+            .map(|family| {
+                [(false, false), (true, false), (false, true), (true, true)]
+                    .iter()
+                    .filter_map(|&(b, i)| self.best_face(family, b, i, false))
+                    .collect()
+            })
+            .unwrap_or_default();
+        for (index, entry) in self.entries.iter_mut().enumerate() {
             let Some(path) = &entry.file else {
                 continue;
             };
-            if entry.family.as_deref() != chosen.as_deref() {
+            if !wanted.contains(&index) {
                 entry.font = None;
                 continue;
             }
@@ -237,12 +268,7 @@ impl Fonts {
             r if r == roles::READING_BOLD_ITALIC.as_str() => (true, true),
             _ => return None,
         };
-        let index = self.entries.iter().position(|e| {
-            e.font.is_some()
-                && e.family.as_deref() == Some(family)
-                && e.bold == bold
-                && e.italic == italic
-        });
+        let index = self.best_face(family, bold, italic, true);
         Some(index.map(|index| self.handle(index)))
     }
 

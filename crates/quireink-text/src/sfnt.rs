@@ -15,6 +15,8 @@ pub struct FontInfo {
     pub family: String,
     pub bold: bool,
     pub italic: bool,
+    /// The weight, 100 (thin) to 900 (black); 400 is regular, 700 bold.
+    pub weight: u16,
 }
 
 /// Reads `buf.len()` bytes at an offset; returns how many were read.
@@ -76,9 +78,10 @@ pub fn read_info(read_at: ReadAt<'_>) -> Option<FontInfo> {
 
     // Style: OS/2 (weight and selection flags), else the head table.
     let (mut bold, mut italic) = (false, false);
+    let mut weight = 400;
     if let Some((offset, len)) = table(b"OS/2").filter(|(_, len)| *len >= 64) {
         let os2 = read(read_at, offset, len.min(96))?;
-        let weight = u16_at(&os2, 4)?;
+        weight = u16_at(&os2, 4)?;
         let selection = u16_at(&os2, 62)?;
         italic = selection & 1 != 0;
         bold = selection & (1 << 5) != 0 || weight >= 600;
@@ -87,16 +90,20 @@ pub fn read_info(read_at: ReadAt<'_>) -> Option<FontInfo> {
         let style = u16_at(&head, 44)?;
         bold = style & 1 != 0;
         italic = style & 2 != 0;
+        weight = if bold { 700 } else { 400 };
     }
     Some(FontInfo {
         family,
         bold,
         italic,
+        weight,
     })
 }
 
-/// The typographic family name (name id 16), else the family name (1);
-/// English names first.
+/// The family name (name id 1), else the typographic family (16); English
+/// names first. Name 1 groups a regular, bold, italic and bold italic face
+/// as systems do: a font's light or display cuts are families of their own
+/// there, while name 16 would put all of them into one.
 fn family_name(table: &[u8]) -> Option<String> {
     let count = usize::from(u16_at(table, 2)?);
     let strings = usize::from(u16_at(table, 4)?);
@@ -131,7 +138,7 @@ fn family_name(table: &[u8]) -> Option<String> {
             _ => continue,
         };
         let english = language == 0x409 || (platform == 1 && language == 0);
-        let rank = u8::from(id == 16) * 2 + u8::from(english);
+        let rank = u8::from(id == 1) * 2 + u8::from(english);
         if !text.trim().is_empty() && best.as_ref().is_none_or(|(r, _)| rank > *r) {
             best = Some((rank, String::from(text.trim())));
         }
@@ -162,7 +169,8 @@ mod tests {
             Some(FontInfo {
                 family: String::from("Literata"),
                 bold: false,
-                italic: false
+                italic: false,
+                weight: 400,
             })
         );
         let italic = info(include_bytes!(
