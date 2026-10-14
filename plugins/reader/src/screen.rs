@@ -7,8 +7,8 @@ use quireink_sdk::builtin::{actions, events, fonts, params, slots};
 use quireink_sdk::document::{Document, DocumentError, Locator};
 use quireink_sdk::layout::{Face, Hyphenate, Page, PageImage, Style, Typesetter, layout_page};
 use quireink_sdk::{
-    Arg, Canvas, Color, Command, Cx, Env, FontHandle, Handled, Id, Params, Rect, RefreshMode,
-    Screen,
+    Arg, Canvas, Color, Command, Cx, Env, FontHandle, Gesture, GestureKind, Handled, Id, Params,
+    Point, Rect, RefreshMode, Screen,
 };
 
 use crate::index::PageIndex;
@@ -188,17 +188,128 @@ struct Book {
     indexing: Option<Locator>,
 }
 
+/// A word on the page, with its box on the screen.
+#[derive(Debug, Clone, PartialEq)]
+struct WordBox {
+    area: Rect,
+    text: String,
+}
+
+impl WordBox {
+    /// The word without surrounding punctuation, as looked up.
+    fn lookup_text(&self) -> &str {
+        self.text.trim_matches(|c: char| !c.is_alphanumeric())
+    }
+}
+
 /// Shows a book page by page.
 pub(crate) struct ReaderScreen {
     book: Result<Book, String>,
+    /// The word chosen with buttons to look up, as an index into the
+    /// page's words.
+    selected: Option<usize>,
 }
 
 impl ReaderScreen {
     pub(crate) fn open(env: &Env<'_>, params: &Params) -> Self {
         Self {
             book: Book::open(env, params),
+            selected: None,
         }
     }
+
+    /// Opens the lookup slot (e.g. the dictionary) for `word`.
+    fn look_up(book: &Book, word: &WordBox, cx: &mut Cx<'_, '_>) {
+        let text = word.lookup_text();
+        if text.is_empty() {
+            return;
+        }
+        cx.command(Command::OpenSlot(
+            slots::LOOKUP,
+            Params::new()
+                .with(params::WORD, text.to_string())
+                .with(params::LANGUAGE, book.language.clone()),
+        ));
+    }
+
+    /// Moves the selection to word `to`, redrawing both highlights.
+    fn select(&mut self, words: &[WordBox], to: Option<usize>, cx: &mut Cx<'_, '_>) {
+        for index in [self.selected, to].into_iter().flatten() {
+            if let Some(word) = words.get(index) {
+                cx.request_redraw_area(highlight(word.area));
+            }
+        }
+        self.selected = to;
+        cx.request_refresh(RefreshMode::Fast);
+    }
+
+    /// Buttons while a word is selected: move, look up, or stop.
+    fn on_selection(&mut self, action: &Id, index: usize, cx: &mut Cx<'_, '_>) -> Handled {
+        let env = *cx.env();
+        let Ok(book) = &self.book else {
+            return Handled::No;
+        };
+        let words = book.words(&env);
+        if words.is_empty() {
+            self.selected = None;
+            return Handled::No;
+        }
+        let last = words.len() - 1;
+        let a = action;
+        let to = if [actions::LEFT, actions::PREVIOUS, actions::PREV_PAGE].contains(a) {
+            index.saturating_sub(1)
+        } else if [actions::RIGHT, actions::NEXT, actions::NEXT_PAGE].contains(a) {
+            (index + 1).min(last)
+        } else if *a == actions::UP {
+            nearest_on_line(&words, index, false)
+        } else if *a == actions::DOWN {
+            nearest_on_line(&words, index, true)
+        } else if *a == actions::CONFIRM {
+            if let Some(word) = words.get(index) {
+                Self::look_up(book, word, cx);
+            }
+            return Handled::Yes;
+        } else if *a == actions::BACK || *a == actions::MENU {
+            self.select(&words, None, cx);
+            return Handled::Yes;
+        } else {
+            return Handled::No;
+        };
+        if to != index {
+            self.select(&words, Some(to), cx);
+        }
+        Handled::Yes
+    }
+}
+
+/// The area redrawn around a highlighted word.
+fn highlight(area: Rect) -> Rect {
+    Rect::new(
+        area.x.saturating_sub(6),
+        area.y.saturating_sub(6),
+        area.width + 12,
+        area.height + 12,
+    )
+}
+
+/// The word on the line above (or below) word `index` nearest to it.
+fn nearest_on_line(words: &[WordBox], index: usize, below: bool) -> usize {
+    let current = &words[index].area;
+    let center = |r: &Rect| i32::from(r.x) + i32::from(r.width) / 2;
+    let line = words
+        .iter()
+        .map(|w| w.area.y)
+        .filter(|&y| if below { y > current.y } else { y < current.y })
+        .min_by_key(|&y| y.abs_diff(current.y));
+    let Some(line) = line else {
+        return index;
+    };
+    words
+        .iter()
+        .enumerate()
+        .filter(|(_, w)| w.area.y == line)
+        .min_by_key(|(_, w)| center(&w.area).abs_diff(center(current)))
+        .map_or(index, |(i, _)| i)
 }
 
 impl Book {
@@ -490,6 +601,64 @@ impl Book {
         }
     }
 
+    /// The words of the page with their boxes on the screen, in reading
+    /// order, measured as they are drawn.
+    fn words(&self, env: &Env<'_>) -> Vec<WordBox> {
+        let t = &self.typography;
+        let Some(faces) = Faces::new(env, t) else {
+            return Vec::new();
+        };
+        let mut words: Vec<WordBox> = Vec::new();
+        for line in &self.page.lines {
+            let mut x = t.x + line.x;
+            // Inside a word that continues in the next run (e.g. bold).
+            let mut joined = false;
+            for run in &line.runs {
+                let font = faces.font(run.face);
+                let size = faces.size(run.face);
+                let (ascent, height) = faces.line(run.face);
+                let top = t.y + line.baseline - ascent;
+                let space = font.advance(size, ' ') + line.word_spacing;
+                for (i, part) in line.text[run.start..run.end].split(' ').enumerate() {
+                    if i > 0 {
+                        x += space;
+                        joined = false;
+                    }
+                    if part.is_empty() {
+                        continue;
+                    }
+                    let width = font.measure(size, part);
+                    match words.last_mut() {
+                        Some(last) if joined => {
+                            last.text.push_str(part);
+                            last.area.width = (x + width) as u16 - last.area.x;
+                        }
+                        _ => words.push(WordBox {
+                            area: Rect::new(x as u16, top as u16, width as u16, height as u16),
+                            text: part.to_string(),
+                        }),
+                    }
+                    x += width;
+                    joined = true;
+                }
+            }
+        }
+        words
+    }
+
+    /// The word at `point`, if any.
+    fn word_at(&self, env: &Env<'_>, point: Point) -> Option<WordBox> {
+        self.words(env).into_iter().find(|word| {
+            let area = word.area;
+            // A little slack between words and lines.
+            let slack = 4;
+            point.x >= i32::from(area.x) - slack
+                && point.x < area.right() as i32 + slack
+                && point.y >= i32::from(area.y)
+                && point.y < area.bottom() as i32
+        })
+    }
+
     fn draw_status(&self, canvas: &mut Canvas<'_>, env: &Env<'_>) {
         let r = self.typography.status;
         canvas.fill_rect(
@@ -524,6 +693,22 @@ impl Screen for ReaderScreen {
             Ok(book) => {
                 book.draw_page(canvas, env);
                 book.draw_status(canvas, env);
+                // The word chosen for looking up.
+                if let Some(word) = self
+                    .selected
+                    .and_then(|i| book.words(env).into_iter().nth(i))
+                {
+                    let r = highlight(word.area);
+                    let line = env.metrics.tenth_mm(4).max(2);
+                    canvas.stroke_rect(
+                        i32::from(r.x) + 2,
+                        i32::from(r.y) + 2,
+                        u32::from(r.width) - 4,
+                        u32::from(r.height) - 4,
+                        line,
+                        Color::BLACK,
+                    );
+                }
             }
             Err(message) => draw_message(canvas, env, message),
         }
@@ -552,6 +737,19 @@ impl Screen for ReaderScreen {
     }
 
     fn on_action(&mut self, action: &Id, cx: &mut Cx<'_, '_>) -> Handled {
+        if let Some(index) = self.selected {
+            return self.on_selection(action, index, cx);
+        }
+        if *action == crate::actions::LOOKUP {
+            // Choose a word with the buttons, starting at the first one.
+            let env = *cx.env();
+            if let Ok(book) = &self.book {
+                let words = book.words(&env);
+                let first = words.iter().position(|w| !w.lookup_text().is_empty());
+                self.select(&words, first, cx);
+            }
+            return Handled::Yes;
+        }
         let Ok(book) = &mut self.book else {
             return Handled::No;
         };
@@ -582,6 +780,36 @@ impl Screen for ReaderScreen {
         }
     }
 
+    /// A long press looks up the word under the finger.
+    fn on_gesture(&mut self, gesture: Gesture, cx: &mut Cx<'_, '_>) -> Handled {
+        let Ok(book) = &self.book else {
+            return Handled::No;
+        };
+        let env = *cx.env();
+        match gesture.kind {
+            GestureKind::LongPress => match book.word_at(&env, gesture.start) {
+                Some(word) => {
+                    Self::look_up(book, &word, cx);
+                    Handled::Yes
+                }
+                None => Handled::No,
+            },
+            // While choosing a word with buttons, a tap looks up the word
+            // tapped, or stops choosing.
+            GestureKind::Tap if self.selected.is_some() => {
+                match book.word_at(&env, gesture.start) {
+                    Some(word) => Self::look_up(book, &word, cx),
+                    None => {
+                        let words = book.words(&env);
+                        self.select(&words, None, cx);
+                    }
+                }
+                Handled::Yes
+            }
+            _ => Handled::No,
+        }
+    }
+
     fn on_event(&mut self, event: &Id, params: &Params, cx: &mut Cx<'_, '_>) {
         let Ok(book) = &mut self.book else {
             return;
@@ -590,12 +818,15 @@ impl Screen for ReaderScreen {
             && params.get(params::PATH) == Some(book.path.as_str())
             && let Some(at) = crate::toc::locator_of(params)
         {
+            // Another page: no word stays chosen.
+            self.selected = None;
             book.show(cx, at, true);
             return;
         }
         let id = params.get(params::ID).unwrap_or_default();
         let affects_layout = id.starts_with("reader.") && id != crate::settings::OPEN_LAST.as_str();
         if *event == events::SETTING_CHANGED && affects_layout {
+            self.selected = None;
             let env = *cx.env();
             book.relayout(&env);
             cx.request_redraw();

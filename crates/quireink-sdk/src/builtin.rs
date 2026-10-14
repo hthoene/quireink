@@ -51,6 +51,11 @@ pub mod slots {
     pub const MENU: Id = Id::new_static("core.menu");
     /// Shows and edits settings.
     pub const SETTINGS: Id = Id::new_static("core.settings");
+    /// Looks up a word (an overlay): opened with the parameters
+    /// [`WORD`](super::params::WORD) and, if known,
+    /// [`LANGUAGE`](super::params::LANGUAGE). The standard dictionary
+    /// binds here; translators or encyclopedias can too.
+    pub const LOOKUP: Id = Id::new_static("core.lookup");
 }
 
 /// Standard menus. Plugins add entries with
@@ -78,6 +83,10 @@ pub mod params {
     pub const TITLE: &str = "title";
     /// Reading progress in percent, e.g. `12.5`.
     pub const PROGRESS: &str = "progress";
+    /// A word, e.g. to look up.
+    pub const WORD: &str = "word";
+    /// A BCP 47 language tag, e.g. of the book a word is from.
+    pub const LANGUAGE: &str = "language";
 }
 
 /// Events emitted by the kernel.

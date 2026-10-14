@@ -1184,6 +1184,7 @@ version = "0.1.0"
 dependencies = [
  "quireink-core",
  "quireink-plugin-diagnostics",
+ "quireink-plugin-dictionary",
  "quireink-plugin-files",
  "quireink-plugin-fonts-default",
  "quireink-plugin-format-epub",
@@ -1294,6 +1295,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "quireink-plugin-dictionary"
+version = "0.1.0"
+dependencies = [
+ "quireink-i18n",
+ "quireink-sdk",
+ "quireink-stardict",
+]
+
+[[package]]
 name = "quireink-plugin-files"
 version = "0.1.0"
 dependencies = [
@@ -1391,6 +1401,16 @@ dependencies = [
  "quireink-text",
  "quireink-xml",
  "quireink-zip",
+]
+
+[[package]]
+name = "quireink-stardict"
+version = "0.1.0"
+dependencies = [
+ "miniz_oxide 0.8.9",
+ "quireink-fs",
+ "quireink-platform",
+ "quireink-sdk",
 ]
 
 [[package]]

@@ -14,11 +14,13 @@ members = [
     "crates/quireink-image",
     "crates/quireink-zip",
     "crates/quireink-xml",
+    "crates/quireink-stardict",
     "crates/quireink-sdk",
     "crates/quireink-core",
     "crates/quireink-app",
     "crates/quireink-fs",
     "plugins/diagnostics",
+    "plugins/dictionary",
     "plugins/fonts-default",
     "plugins/format-txt",
     "plugins/format-epub",
@@ -52,6 +54,7 @@ quireink-text = { path = "crates/quireink-text", version = "0.1.0" }
 quireink-document = { path = "crates/quireink-document", version = "0.1.0" }
 quireink-zip = { path = "crates/quireink-zip", version = "0.1.0" }
 quireink-xml = { path = "crates/quireink-xml", version = "0.1.0" }
+quireink-stardict = { path = "crates/quireink-stardict", version = "0.1.0" }
 quireink-layout = { path = "crates/quireink-layout", version = "0.1.0" }
 quireink-sdk = { path = "crates/quireink-sdk", version = "0.1.0" }
 quireink-core = { path = "crates/quireink-core", version = "0.1.0" }
@@ -60,6 +63,7 @@ quireink-image = { path = "crates/quireink-image", version = "0.1.0" }
 quireink-app = { path = "crates/quireink-app", version = "0.1.0" }
 quireink-fs = { path = "crates/quireink-fs", version = "0.1.0" }
 quireink-plugin-diagnostics = { path = "plugins/diagnostics", version = "0.1.0" }
+quireink-plugin-dictionary = { path = "plugins/dictionary", version = "0.1.0" }
 quireink-plugin-menu = { path = "plugins/menu", version = "0.1.0" }
 quireink-plugin-plugin-manager = { path = "plugins/plugin-manager", version = "0.1.0" }
 quireink-plugin-hyphenation = { path = "plugins/hyphenation", version = "0.1.0" }

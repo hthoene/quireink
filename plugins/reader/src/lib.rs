@@ -74,6 +74,9 @@ pub mod actions {
     pub const TOGGLE_JUSTIFY: Id = Id::new_static("reader.toggle-justify");
     /// Opens the table of contents.
     pub const TOC: Id = Id::new_static("reader.show-toc");
+    /// Chooses a word on the page with the buttons and looks it up (touch:
+    /// long-press the word).
+    pub const LOOKUP: Id = Id::new_static("reader.lookup-word");
 }
 
 /// The reader plugin.
@@ -108,6 +111,11 @@ impl Plugin for Reader {
         r.add_action(quireink_sdk::ActionSpec {
             id: actions::TOC,
             title: Cow::Borrowed("reader.toc"),
+            handler: None,
+        })?;
+        r.add_action(quireink_sdk::ActionSpec {
+            id: actions::LOOKUP,
+            title: Cow::Borrowed("reader.lookup"),
             handler: None,
         })?;
 
@@ -202,6 +210,7 @@ impl Plugin for Reader {
         // Settings in the menu show their state and change in place.
         for (item, order) in [
             (actions::TOC, 5),
+            (actions::LOOKUP, 7),
             (settings::FONT_SIZE, 10),
             (settings::JUSTIFY, 30),
             (core_settings::NIGHT_MODE, 40),

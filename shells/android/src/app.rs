@@ -26,6 +26,10 @@ use crate::{access, keys, pixels};
 const SHARED: &str = "storage";
 /// Data plugins on the shared storage, where users can copy them.
 const PLUGINS: &str = "QuireInk/plugins";
+/// Dictionaries on the shared storage.
+const DICTIONARIES: &str = "QuireInk/dictionaries";
+/// Where KOReader keeps dictionaries; used if it has any.
+const KOREADER_DICTIONARIES: &str = "koreader/data/dict";
 
 /// The running app once the window size is known.
 struct Running {
@@ -205,9 +209,11 @@ fn start_kernel(
         .then(|| access::storage_dir(app))
         .flatten()
         .and_then(|dir| {
-            // Data plugins are copied there, next to the books.
-            if let Err(e) = std::fs::create_dir_all(dir.join(PLUGINS)) {
-                log::warn!("{}: {e}", dir.join(PLUGINS).display());
+            // Data plugins and dictionaries are copied there.
+            for folder in [PLUGINS, DICTIONARIES] {
+                if let Err(e) = std::fs::create_dir_all(dir.join(folder)) {
+                    log::warn!("{}: {e}", dir.join(folder).display());
+                }
             }
             match DirStorage::new(&dir) {
                 Ok(shared) => Some(shared),
@@ -217,13 +223,18 @@ fn start_kernel(
                 }
             }
         });
+    // KOReader's dictionaries if there are any, else QuireInk's folder.
+    let dictionaries = access::storage_dir(app)
+        .filter(|dir| shared.is_some() && dir.join(KOREADER_DICTIONARIES).is_dir())
+        .map_or(DICTIONARIES, |_| KOREADER_DICTIONARIES);
     let shared_storage = shared.is_some();
     let mut builder = Kernel::builder(device).plugin_dir("plugins");
     builder = match shared {
         Some(shared) => builder
             .storage(Mounted::new(storage, SHARED, shared))
             .plugin_dir(format!("{SHARED}/{PLUGINS}"))
-            .setting_default("files.root", &format!("{SHARED}/Books")),
+            .setting_default("files.root", &format!("{SHARED}/Books"))
+            .setting_default("dictionary.folder", &format!("{SHARED}/{dictionaries}")),
         None => builder.storage(storage),
     };
     // The system language, unless the user chose another one.

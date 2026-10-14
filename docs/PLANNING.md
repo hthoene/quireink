@@ -564,7 +564,7 @@ architecture (G1–G12 below).
 
 | Feature users want | Built from | Gap |
 |--------------------|-----------|-----|
-| Dictionary lookup on long-press, Wikipedia, translation | gesture on page → hit test → word; `dictionary` service; popup overlay | G1, G5 |
+| Dictionary lookup on long-press, Wikipedia, translation | gesture on page → hit test → word → slot `core.lookup` (overlay); ✅ StarDict dictionary plugin (`quireink-stardict`: block index, dictzip, synonyms), word choice with buttons; Wikipedia/translation can bind the same slot | G1, G5 |
 | Highlights, notes, annotation export (Markdown, Readwise, Obsidian) | selection + locators; `annotations` service; display-list overlay filter; network/storage | G5 |
 | Footnote popups, internal links | link hit test; overlay | G1, G5 |
 | Reading statistics, streaks, goals, time-left estimates | `page.turned` events with timestamps; plugin storage; home widgets | G4 |
