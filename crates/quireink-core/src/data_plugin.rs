@@ -142,20 +142,42 @@ fn load(storage: &dyn Storage, path: &str, folder: &str) -> Result<DataPlugin, S
     })
 }
 
-/// The font files in `dir`, by name.
+/// The font files in `dir` and its folders (one level, e.g. a folder per
+/// family), by name.
 fn font_files(storage: &dyn Storage, dir: &str) -> Vec<String> {
     let mut files: Vec<String> = Vec::new();
-    let _ = storage.list(dir, &mut |entry| {
-        let name = entry.name.to_ascii_lowercase();
-        let font = [".ttf", ".otf", ".ttc"]
-            .iter()
-            .any(|ext| name.ends_with(ext));
-        if !entry.is_dir && font {
-            files.push(format!("{dir}/{}", entry.name));
-        }
-    });
+    let mut folders: Vec<String> = Vec::new();
+    list_fonts(storage, dir, &mut files, Some(&mut folders));
+    for folder in &folders {
+        list_fonts(storage, folder, &mut files, None);
+    }
     files.sort_unstable();
     files
+}
+
+/// Adds the font files in `dir` to `files` and its folders to `folders`.
+fn list_fonts(
+    storage: &dyn Storage,
+    dir: &str,
+    files: &mut Vec<String>,
+    mut folders: Option<&mut Vec<String>>,
+) {
+    let _ = storage.list(dir, &mut |entry| {
+        let name = entry.name.to_ascii_lowercase();
+        let path = format!("{dir}/{}", entry.name);
+        if entry.is_dir {
+            if let Some(folders) = folders.as_deref_mut()
+                && !name.starts_with('.')
+            {
+                folders.push(path);
+            }
+        } else if [".ttf", ".otf", ".ttc"]
+            .iter()
+            .any(|ext| name.ends_with(ext))
+        {
+            files.push(path);
+        }
+    });
 }
 
 /// The fonts of `dirs` as one plugin, `font-folder`; `None` without any.
@@ -280,7 +302,8 @@ mod tests {
             .with("plugins/serif/fonts/Book Antiqua-Bold.TTF", "x")
             .with("plugins/serif/fonts/readme.txt", "")
             .with("fonts/a.otf", "x")
-            .with("more-fonts/b.ttc", "x");
+            .with("more-fonts/b.ttc", "x")
+            .with("more-fonts/family/c.ttf", "x");
         let plugins = discover(&storage, "plugins", &mut |_| {});
         assert_eq!(
             *plugins[0].fonts.borrow(),
@@ -288,7 +311,10 @@ mod tests {
         );
         let dirs = [String::from("fonts"), String::from("more-fonts")];
         let folder = font_folder(&storage, &dirs).unwrap();
-        assert_eq!(*folder.fonts.borrow(), ["fonts/a.otf", "more-fonts/b.ttc"]);
+        assert_eq!(
+            *folder.fonts.borrow(),
+            ["fonts/a.otf", "more-fonts/b.ttc", "more-fonts/family/c.ttf"]
+        );
         assert!(font_folder(&storage, &[String::from("nothing")]).is_none());
         assert_eq!(slug("Book Antiqua-Bold.TTF"), "book-antiqua-bold");
         assert_eq!(slug("….ttf"), "font");

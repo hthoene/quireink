@@ -30,9 +30,11 @@ const PLUGINS: &str = "QuireInk/plugins";
 const DICTIONARIES: &str = "QuireInk/dictionaries";
 /// Where KOReader keeps dictionaries; used if it has any.
 const KOREADER_DICTIONARIES: &str = "koreader/data/dict";
-/// Fonts to read with: QuireInk's folder and KOReader's.
+/// Fonts to read with: QuireInk's folder, KOReader's and the one Boox's
+/// reader uses.
 const FONTS: &str = "QuireInk/fonts";
 const KOREADER_FONTS: &str = "koreader/fonts";
+const SYSTEM_FONTS: &str = "fonts";
 
 /// The running app once the window size is known.
 struct Running {
@@ -253,6 +255,7 @@ fn start_kernel(
             .plugin_dir(format!("{SHARED}/{PLUGINS}"))
             .font_dir(format!("{SHARED}/{FONTS}"))
             .font_dir(format!("{SHARED}/{KOREADER_FONTS}"))
+            .font_dir(format!("{SHARED}/{SYSTEM_FONTS}"))
             .setting_default("files.root", &format!("{SHARED}/Books"))
             .setting_default("dictionary.folder", &format!("{SHARED}/{dictionaries}")),
         None => builder.storage(storage),
