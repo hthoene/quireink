@@ -126,13 +126,13 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo install cargo-ndk --locked
+      # The runner's variables are not in the `env` context, so the NDK
+      # path is passed on through GITHUB_ENV.
+      - name: Find the NDK
+        run: echo "ANDROID_NDK_HOME=${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_ROOT}" >> "$GITHUB_ENV"
       - name: Lint the Android shell
-        env:
-          ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_LATEST_HOME }}
         run: cargo ndk -t arm64-v8a --platform 26 clippy -p quireink-android
       - name: Build the APK
-        env:
-          ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_LATEST_HOME }}
         run: shells/android/build-apk.sh
       - uses: actions/upload-artifact@v4
         with:
@@ -156,8 +156,9 @@ jobs:
           cp samples/library/books/*.txt fuzz/corpus/txt/
           mkdir -p fuzz/corpus/image
           cp crates/quireink-image/tests/data/*.jpg crates/quireink-image/tests/data/*.png fuzz/corpus/image/
+          # `+nightly` overrides rust-toolchain.toml, which pins stable.
           for target in epub txt xml hyphen image; do
-            cargo fuzz run "$target" -- -max_total_time=60 -rss_limit_mb=1024
+            cargo +nightly fuzz run "$target" -- -max_total_time=60 -rss_limit_mb=1024
           done
       - uses: actions/upload-artifact@v4
         if: failure()
