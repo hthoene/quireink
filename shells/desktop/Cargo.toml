@@ -1,0 +1,28 @@
+[package]
+name = "quireink-emulator"
+description = "QuireInk desktop shell: an e-ink device emulator with device profiles and memory budgets"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+publish = false
+
+[[bin]]
+name = "quireink-emu"
+path = "src/main.rs"
+
+[dependencies]
+quireink-core = { workspace = true, features = ["color"] }
+quireink-platform.workspace = true
+quireink-plugin-diagnostics.workspace = true
+png = "0.17"
+softbuffer = "0.4"
+# Without client-side decorations on Wayland: they pull in the unmaintained
+# `ttf-parser` (RUSTSEC-2026-0192).
+winit = { version = "0.30", default-features = false, features = ["rwh_06", "x11", "wayland", "wayland-dlopen"] }
+
+[lints]
+workspace = true

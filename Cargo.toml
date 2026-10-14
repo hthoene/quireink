@@ -1,0 +1,52 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/quireink-platform",
+    "crates/quireink-config",
+    "crates/quireink-i18n",
+    "crates/quireink-graphics",
+    "crates/quireink-sdk",
+    "crates/quireink-core",
+    "plugins/diagnostics",
+    "shells/desktop",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "Apache-2.0"
+repository = "https://github.com/hthoene/quireink"
+homepage = "https://github.com/hthoene/quireink"
+authors = ["The QuireInk Authors"]
+
+[workspace.dependencies]
+quireink-platform = { path = "crates/quireink-platform", version = "0.1.0" }
+quireink-config = { path = "crates/quireink-config", version = "0.1.0" }
+quireink-i18n = { path = "crates/quireink-i18n", version = "0.1.0" }
+quireink-graphics = { path = "crates/quireink-graphics", version = "0.1.0" }
+quireink-sdk = { path = "crates/quireink-sdk", version = "0.1.0" }
+quireink-core = { path = "crates/quireink-core", version = "0.1.0" }
+quireink-plugin-diagnostics = { path = "plugins/diagnostics", version = "0.1.0" }
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+missing_debug_implementations = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+# Core crates run on devices with a few hundred KB of RAM: make hidden
+# allocations and panics visible in review.
+unwrap_used = "warn"
+expect_used = "warn"
+
+[profile.release]
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+
+[profile.dev]
+# Keep debug builds usable on slow machines and in the emulator.
+opt-level = 1

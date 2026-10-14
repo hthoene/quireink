@@ -1,0 +1,27 @@
+[package]
+name = "quireink-core"
+description = "The QuireInk kernel: plugin host, registries, input routing and rendering (no_std)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+categories = ["no-std", "embedded"]
+keywords = ["e-reader", "e-ink", "epaper"]
+
+[features]
+default = []
+# Colour framebuffers for colour e-ink panels.
+color = ["quireink-graphics/color"]
+
+[dependencies]
+quireink-platform.workspace = true
+quireink-config.workspace = true
+quireink-graphics.workspace = true
+quireink-i18n.workspace = true
+quireink-sdk.workspace = true
+
+[lints]
+workspace = true

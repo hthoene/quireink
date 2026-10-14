@@ -1,0 +1,20 @@
+[package]
+name = "quireink-sdk"
+description = "The QuireInk plugin SDK — the only API plugins (including first-party ones) use"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+categories = ["no-std", "api-bindings"]
+keywords = ["e-reader", "plugin", "sdk"]
+
+[dependencies]
+quireink-platform.workspace = true
+quireink-graphics.workspace = true
+quireink-i18n.workspace = true
+
+[lints]
+workspace = true

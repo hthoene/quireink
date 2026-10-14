@@ -1,0 +1,18 @@
+[package]
+name = "quireink-i18n"
+description = "Lean message catalogs with fallback chains and plural rules for QuireInk (no_std)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+categories = ["no-std", "internationalization", "localization"]
+keywords = ["i18n", "translation", "no-std"]
+
+[dependencies]
+quireink-config.workspace = true
+
+[lints]
+workspace = true

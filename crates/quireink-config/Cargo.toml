@@ -1,0 +1,17 @@
+[package]
+name = "quireink-config"
+description = "Tiny, human-editable configuration format used by QuireInk (no_std)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+categories = ["no-std", "config", "parser-implementations"]
+keywords = ["ini", "config", "no-std"]
+
+[dependencies]
+
+[lints]
+workspace = true

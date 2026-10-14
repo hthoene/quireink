@@ -1,0 +1,133 @@
+//! Scripted, windowless runs for screenshots, CI and bug reports.
+//!
+//! A script is a comma-separated list of steps:
+//!
+//! | Step | Meaning |
+//! |------|---------|
+//! | `page-forward` | short press of a button |
+//! | `long:confirm` | long press of a button |
+//! | `tap:240:400` | tap at logical coordinates |
+//! | `long-tap:240:400` | long press on the touch screen |
+//! | `swipe:400:400:100:400` | swipe from one point to another |
+//! | `wait:500` | let 500 ms pass |
+
+use std::fs::File;
+use std::io::BufWriter;
+use std::path::Path;
+
+use quireink_platform::{ButtonState, InputEvent, Point, PointerEvent, PointerPhase, PointerTool};
+
+use crate::device::Device;
+
+/// Time between script steps, long enough to never look like a long press.
+const STEP_MS: u64 = 100;
+/// Comfortably above the default long-press threshold.
+const LONG_MS: u64 = 1200;
+
+pub fn run_script(device: &mut Device, script: &str) -> Result<(), String> {
+    for step in script.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+        run_step(device, step).map_err(|e| format!("step `{step}`: {e}"))?;
+        device.advance(STEP_MS);
+        device.tick_if_due();
+    }
+    Ok(())
+}
+
+fn run_step(device: &mut Device, step: &str) -> Result<(), String> {
+    let parts: Vec<&str> = step.split(':').collect();
+    let number = |s: &str| {
+        s.parse::<i32>()
+            .map_err(|_| format!("`{s}` is not a number"))
+    };
+    match parts.as_slice() {
+        ["wait", ms] => {
+            let ms: u64 = ms.parse().map_err(|_| format!("`{ms}` is not a number"))?;
+            device.advance(ms);
+            device.tick_if_due();
+        }
+        ["long", name] => press(device, button(device, name)?, LONG_MS),
+        ["tap", x, y] => touch(device, Point::new(number(x)?, number(y)?), None, 60),
+        ["long-tap", x, y] => touch(device, Point::new(number(x)?, number(y)?), None, LONG_MS),
+        ["swipe", x1, y1, x2, y2] => touch(
+            device,
+            Point::new(number(x1)?, number(y1)?),
+            Some(Point::new(number(x2)?, number(y2)?)),
+            150,
+        ),
+        [name] => press(device, button(device, name)?, 60),
+        _ => return Err("unknown step".into()),
+    }
+    Ok(())
+}
+
+fn button(device: &Device, name: &str) -> Result<&'static str, String> {
+    device
+        .profile
+        .buttons
+        .iter()
+        .copied()
+        .find(|b| *b == name)
+        .ok_or_else(|| {
+            format!(
+                "`{}` has no button `{name}` (buttons: {})",
+                device.profile.device.id,
+                device.profile.buttons.join(", ")
+            )
+        })
+}
+
+fn press(device: &mut Device, name: &'static str, hold_ms: u64) {
+    let event = |state| InputEvent::Button { name, state };
+    device.input(event(ButtonState::Pressed));
+    hold(device, hold_ms);
+    device.input(event(ButtonState::Released));
+}
+
+fn touch(device: &mut Device, start: Point, end: Option<Point>, hold_ms: u64) {
+    let event = |phase, point| {
+        InputEvent::Pointer(PointerEvent {
+            id: 0,
+            phase,
+            point,
+            tool: PointerTool::Finger,
+            pressure: 1000,
+        })
+    };
+    device.input(event(PointerPhase::Down, start));
+    hold(device, hold_ms);
+    let end = end.unwrap_or(start);
+    if end != start {
+        device.input(event(PointerPhase::Move, end));
+    }
+    device.input(event(PointerPhase::Up, end));
+}
+
+/// Lets time pass in small steps so due long presses fire on time.
+fn hold(device: &mut Device, millis: u64) {
+    let mut left = millis;
+    while left > 0 {
+        let step = left.min(50);
+        device.advance(step);
+        device.tick_if_due();
+        left -= step;
+    }
+}
+
+/// Writes what the panel currently shows to a PNG file.
+pub fn screenshot(device: &Device, path: &Path) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let file = File::create(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let mut encoder = png::Encoder::new(
+        BufWriter::new(file),
+        u32::from(device.panel.width()),
+        u32::from(device.panel.height()),
+    );
+    encoder.set_color(png::ColorType::Rgb);
+    encoder.set_depth(png::BitDepth::Eight);
+    let mut writer = encoder.write_header().map_err(|e| e.to_string())?;
+    writer
+        .write_image_data(&device.panel.rgb_bytes())
+        .map_err(|e| e.to_string())
+}
