@@ -42,12 +42,18 @@ struct Embedded {
     faces: Vec<(u8, bool, bool, usize)>,
 }
 
+/// Whether a book's own fonts are used: the font chosen is the book's
+/// (the default choice), and they render on this device.
+fn uses_book_fonts(env: &Env<'_>) -> bool {
+    use quireink_sdk::builtin::settings::{DEFAULT_FONT, READING_FONT};
+    quireink_sdk::text::OUTLINES && env.settings.text(READING_FONT.as_str()) == DEFAULT_FONT
+}
+
 impl Embedded {
-    /// The book's fonts, if the reader uses them and they render here.
+    /// The book's fonts, if the reader uses them (the font chosen is the
+    /// book's own) and they render here.
     fn load(env: &Env<'_>, document: &dyn Document) -> Option<Embedded> {
-        if !quireink_sdk::text::OUTLINES
-            || !env.settings.bool(crate::settings::EMBEDDED_FONTS.as_str())
-        {
+        if !uses_book_fonts(env) {
             return None;
         }
         let fonts = document.fonts(env.storage);
@@ -228,9 +234,7 @@ impl Typography {
                 style.paragraph_spacing,
                 hyphenation.as_deref().unwrap_or("-"),
                 settings.bool(crate::settings::PUBLISHER_STYLES.as_str()),
-                // Missing where embedded fonts do not render: always off.
-                quireink_sdk::text::OUTLINES
-                    && settings.bool(crate::settings::EMBEDDED_FONTS.as_str()),
+                uses_book_fonts(env),
             ))
         );
         Self {
@@ -1404,9 +1408,10 @@ impl Screen for ReaderScreen {
             return;
         };
         let id = params.get(params::ID).unwrap_or_default();
+        // The book's fonts are loaded with it.
         let reopen = [
             crate::settings::PUBLISHER_STYLES,
-            crate::settings::EMBEDDED_FONTS,
+            quireink_sdk::builtin::settings::READING_FONT,
         ];
         if *event == events::SETTING_CHANGED && reopen.iter().any(|r| r.as_str() == id) {
             // Another conversion of the book: open it again where it was.
