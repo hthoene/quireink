@@ -14,7 +14,9 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{IpAddr, Ipv4Addr, TcpListener, TcpStream, UdpSocket};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::sync::mpsc::{Receiver, Sender, SyncSender, TrySendError, channel, sync_channel};
+use std::sync::mpsc::{
+    Receiver, Sender, SyncSender, TryRecvError, TrySendError, channel, sync_channel,
+};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -23,8 +25,11 @@ use quireink_core::{ServedFile, ServerCall, ServerEvent};
 
 /// Size of the parts bodies go in.
 const PART: usize = 64 * 1024;
-/// Events and parts of a file waiting at most, per channel.
+/// Events waiting at most.
 const QUEUE: usize = 8;
+/// Parts of a file read ahead at most, per connection. The shell is
+/// woken each time half of them were sent, so it reads many at once.
+const READ_AHEAD: usize = 32;
 
 /// An answer for a waiting connection.
 struct Answer {
@@ -110,7 +115,7 @@ impl Servers {
                     return;
                 };
                 let file = file.map(|ServedFile { path, size }| {
-                    let (parts, receiver) = sync_channel(QUEUE);
+                    let (parts, receiver) = sync_channel(READ_AHEAD);
                     self.streams.push(Stream {
                         path,
                         size,
@@ -179,9 +184,20 @@ impl Servers {
     fn listen(&mut self, server: u32, port: u16) {
         let events = self.events.clone();
         let wake = self.wake.clone();
+        // The shell is woken once the event is there to take, and before
+        // waiting for room.
         let send = move |event: ServerEvent| {
+            match events.try_send(event) {
+                Ok(()) => {}
+                Err(TrySendError::Full(event)) => {
+                    wake();
+                    if events.send(event).is_err() {
+                        return;
+                    }
+                }
+                Err(TrySendError::Disconnected(_)) => return,
+            }
             wake();
-            let _ = events.send(event);
         };
         // The port asked for, else the next free ones.
         let listener = (port..port.saturating_add(20))
@@ -338,9 +354,24 @@ impl<F: Fn(ServerEvent)> Connection<F> {
             return;
         }
         if let Some((_, parts)) = answer.file {
-            // Each part taken makes room for the next: the shell reads it.
-            while let Ok(part) = parts.recv_timeout(Duration::from_secs(60)) {
-                (self.wake)();
+            let mut sent = 0;
+            loop {
+                let part = match parts.try_recv() {
+                    Ok(part) => part,
+                    Err(TryRecvError::Disconnected) => break,
+                    // Nothing read ahead: the shell reads on.
+                    Err(TryRecvError::Empty) => {
+                        (self.wake)();
+                        match parts.recv_timeout(Duration::from_secs(60)) {
+                            Ok(part) => part,
+                            Err(_) => break,
+                        }
+                    }
+                };
+                sent += 1;
+                if sent % (READ_AHEAD / 2) == 0 {
+                    (self.wake)();
+                }
                 if writer.write_all(&part).is_err() {
                     return;
                 }
