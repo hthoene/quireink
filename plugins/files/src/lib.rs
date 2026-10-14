@@ -402,7 +402,10 @@ fn draw_row(
             );
             ui::draw_image(canvas, env.storage, cover, area);
         }
-        None => draw_placeholder(canvas, env, style, thumb, &format, fg),
+        None => {
+            let title = book.and_then(|b| b.title.as_deref()).unwrap_or(stem);
+            draw_placeholder(canvas, env, style, thumb, title, &format, fg);
+        }
     }
     let title = book.and_then(|b| b.title.as_deref()).unwrap_or(stem);
     let progress = match book.and_then(|b| b.progress) {
@@ -428,12 +431,14 @@ fn draw_folder(canvas: &mut Canvas<'_>, style: &UiStyle, area: Rect, color: Colo
     canvas.fill_rect(x, y, w * 2 / 5, tab + line, color);
 }
 
-/// A book without a cover: an outline with its format.
+/// A book without a cover: an outline with the title's first letter,
+/// large, and the format below it.
 fn draw_placeholder(
     canvas: &mut Canvas<'_>,
     env: &Env<'_>,
     style: &UiStyle,
     area: Rect,
+    title: &str,
     format: &str,
     color: Color,
 ) {
@@ -448,9 +453,43 @@ fn draw_placeholder(
     let Some(font) = style.font(env) else {
         return;
     };
-    let width = font.measure(style.small, format);
-    let x = f32::from(area.x) + (f32::from(area.width) - width) / 2.0;
-    ui::draw_label(canvas, &font, style.small, x, area, format, color);
+    let center = |text: &str, size: f32| {
+        f32::from(area.x) + (f32::from(area.width) - font.measure(size, text)) / 2.0
+    };
+    let initial = title
+        .chars()
+        .find(|c| c.is_alphanumeric())
+        .map(|c| c.to_uppercase().collect::<String>());
+    let size = style.title * 1.3;
+    let (upper, lower) = (area.height * 3 / 5, area.height * 2 / 5);
+    match initial {
+        Some(initial) if font.line_metrics(size).line_height < f32::from(upper) => {
+            let top = Rect::new(area.x, area.y, area.width, upper);
+            ui::draw_label(
+                canvas,
+                &font,
+                size,
+                center(&initial, size),
+                top,
+                &initial,
+                color,
+            );
+            let bottom = Rect::new(area.x, area.y + upper, area.width, lower);
+            ui::draw_label(
+                canvas,
+                &font,
+                style.small,
+                center(format, style.small),
+                bottom,
+                format,
+                color,
+            );
+        }
+        _ => {
+            let x = center(format, style.small);
+            ui::draw_label(canvas, &font, style.small, x, area, format, color);
+        }
+    }
 }
 
 impl Screen for Browser {
