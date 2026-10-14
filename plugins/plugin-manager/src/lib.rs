@@ -6,8 +6,9 @@
 //!   so switching it off would leave no way back; once another plugin
 //!   provides them too, it can be switched off) or *Error*.
 //! - Confirming or tapping a row switches the plugin. The choice is saved
-//!   to `quireink.ini` (`[plugins] id = off`) and applies after a restart;
-//!   a *Restart now* row appears at the top until then.
+//!   to `quireink.ini` (`[plugins] id = off`) and applies after a restart:
+//!   the bar at the bottom then offers *Restart now*. The bar is always
+//!   there (with a hint before), so nothing moves when it changes.
 //! - Below each name: what happens to the plugin (if anything), its
 //!   description and version, readable without tapping it.
 //!
@@ -77,12 +78,12 @@ impl Plugin for PluginManager {
     }
 }
 
-/// One row of the list.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum Row {
+/// Where the focus is, for buttons.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Focus {
+    List,
+    /// The *Restart now* button of the bar.
     Restart,
-    /// A plugin, by id.
-    Plugin(Id),
 }
 
 #[derive(Debug)]
@@ -92,6 +93,9 @@ struct PluginList {
     style: UiStyle,
     header: ui::Header,
     list: ListView,
+    /// The bar at the bottom: a hint, or *Restart now*.
+    bar: Rect,
+    focus: Focus,
 }
 
 impl PluginList {
@@ -100,7 +104,9 @@ impl PluginList {
         let display = env.device.display;
         let header = ui::Header::new(env, &style, true);
         let top = header.area.height + style.gap as u16;
-        let height = display.height.saturating_sub(top);
+        let bar_height = style.row as u16 + style.gap as u16;
+        let bar = Rect::new(0, display.height - bar_height, display.width, bar_height);
+        let height = display.height.saturating_sub(top + bar_height);
         let area = Rect::new(0, top, display.width, height);
         let list = ListView::new(area, style.noted_row());
         let mut plugins: Vec<&PluginInfo> = env.plugins.iter().collect();
@@ -115,55 +121,41 @@ impl PluginList {
             style,
             header,
             list,
+            bar,
+            focus: Focus::List,
         }
     }
 
-    /// The rows: *Restart now* while a change is pending, then the plugins.
-    fn rows(&self, env: &Env<'_>) -> Vec<Row> {
-        let restart = env.plugins.restart_needed().then_some(Row::Restart);
-        restart
-            .into_iter()
-            .chain(self.plugins.iter().cloned().map(Row::Plugin))
-            .collect()
+    /// The *Restart now* button, while a change waits for a restart.
+    fn restart_button(&self, env: &Env<'_>) -> Option<Rect> {
+        if !env.plugins.restart_needed() {
+            return None;
+        }
+        let font = self.style.font(env)?;
+        let label = env.i18n.tr("plugin-manager.restart");
+        let pad = self.style.margin as u16;
+        let width = font.measure(self.style.text, label) as u16 + 2 * pad;
+        let height = ui::button_height(self.bar);
+        Some(Rect::new(
+            self.bar.width.saturating_sub(width + pad),
+            self.bar.y + (self.bar.height - height) / 2,
+            width,
+            height,
+        ))
     }
 
-    fn info<'e>(env: &Env<'e>, row: &Row) -> Option<&'e PluginInfo> {
-        match row {
-            Row::Plugin(id) => env.plugins.get(id.as_str()),
-            Row::Restart => None,
+    /// Switches the plugin `id`.
+    fn switch(&mut self, env: &Env<'_>, id: &Id, cx: &mut Cx<'_, '_>) {
+        let Some(info) = env.plugins.get(id.as_str()) else {
+            return;
+        };
+        if info.enabled && locked(info) {
+            // The description below says why.
+            return;
         }
-    }
-
-    /// Switches the plugin in `row`, or restarts.
-    fn activate(&mut self, env: &Env<'_>, row: &Row, cx: &mut Cx<'_, '_>) {
-        match row {
-            Row::Restart => cx.command(Command::Restart),
-            Row::Plugin(id) => {
-                let Some(info) = env.plugins.get(id.as_str()) else {
-                    return;
-                };
-                if info.enabled && locked(info) {
-                    // The description below says why.
-                    return;
-                }
-                let had_restart_row = env.plugins.restart_needed();
-                cx.command(Command::SetPluginEnabled(id.clone(), !info.enabled));
-                // Keep the focus on the plugin when the restart row comes
-                // or goes.
-                let pending = env
-                    .plugins
-                    .iter()
-                    .any(|p| p.manifest.id != *id && p.restart_needed())
-                    || !info.restart_needed();
-                match (had_restart_row, pending) {
-                    (false, true) => self.list.focus += 1,
-                    (true, false) => self.list.focus = self.list.focus.saturating_sub(1),
-                    _ => {}
-                }
-                cx.request_redraw();
-                cx.request_refresh(RefreshMode::Fast);
-            }
-        }
+        cx.command(Command::SetPluginEnabled(id.clone(), !info.enabled));
+        cx.request_redraw();
+        cx.request_refresh(RefreshMode::Fast);
     }
 }
 
@@ -258,9 +250,12 @@ fn moved(change: ListChange, cx: &mut Cx<'_, '_>) {
 impl Screen for PluginList {
     fn draw(&mut self, canvas: &mut Canvas<'_>, env: &Env<'_>) {
         let style = self.style;
-        let rows = self.rows(env);
-        let len = rows.len();
+        let len = self.plugins.len();
         self.list.focus = self.list.focus.min(len.saturating_sub(1));
+        if self.focus == Focus::Restart && self.restart_button(env).is_none() {
+            self.focus = Focus::List;
+        }
+        self.list.active = self.focus == Focus::List;
         self.header.draw(
             canvas,
             env,
@@ -269,32 +264,77 @@ impl Screen for PluginList {
             None,
             self.list.paging(len),
         );
-        self.list.draw(
-            canvas,
-            &style,
-            len,
-            |canvas, index, rect, focused| match Self::info(env, &rows[index]) {
-                Some(info) => {
+        let plugins = &self.plugins;
+        self.list
+            .draw(canvas, &style, len, |canvas, index, rect, focused| {
+                if let Some(info) = env.plugins.get(plugins[index].as_str()) {
                     let value = env.i18n.tr(state(info));
                     let name = info.name(env.i18n);
                     let note = details(env, info);
                     ui::draw_noted_row(canvas, env, &style, rect, focused, name, value, &note);
                 }
-                None => {
-                    let title = env.i18n.tr("plugin-manager.restart");
-                    let note = env.i18n.tr("plugin-manager.restart.help");
-                    ui::draw_noted_row(canvas, env, &style, rect, focused, title, "›", note);
-                }
-            },
-        );
+            });
+        // The bar: a line above it, the hint or what a restart does, and
+        // the button.
+        let line = Rect::new(0, self.bar.y, self.bar.width, (style.line as u16).max(1));
+        ui::fill(canvas, line, quireink_sdk::Color::gray(150));
+        let button = self.restart_button(env);
+        if let Some(button) = button {
+            let label = env.i18n.tr("plugin-manager.restart");
+            let focused = self.focus == Focus::Restart;
+            ui::draw_button(canvas, env, &style, button, label, true, focused);
+        }
+        if let Some(font) = style.font(env) {
+            let key = if button.is_some() {
+                "plugin-manager.restart.short"
+            } else {
+                "plugin-manager.hint"
+            };
+            let right = button.map_or(self.bar.width, |b| b.x);
+            let area = Rect::new(
+                0,
+                self.bar.y,
+                right.saturating_sub(style.gap as u16),
+                self.bar.height,
+            );
+            ui::draw_label(
+                canvas,
+                &font,
+                style.small,
+                style.margin as f32,
+                area,
+                env.i18n.tr(key),
+                quireink_sdk::Color::gray(60),
+            );
+        }
     }
 
     fn on_action(&mut self, action: &Id, cx: &mut Cx<'_, '_>) -> Handled {
         let env = *cx.env();
-        let rows = self.rows(&env);
-        let len = rows.len();
+        let len = self.plugins.len();
         let page = self.list.rows() as isize;
         let a = action;
+        // Down from the last plugin reaches the bar's button, up comes back.
+        let restart = self.restart_button(&env).is_some();
+        if self.focus == Focus::Restart {
+            if *a == actions::CONFIRM {
+                cx.command(Command::Restart);
+            } else if [actions::UP, actions::LEFT, actions::PREVIOUS].contains(a) {
+                self.focus = Focus::List;
+                cx.request_redraw();
+                cx.request_refresh(RefreshMode::Fast);
+            } else if *a != actions::DOWN && *a != actions::RIGHT && *a != actions::NEXT {
+                return Handled::No;
+            }
+            return Handled::Yes;
+        }
+        let down = [actions::DOWN, actions::RIGHT, actions::NEXT].contains(a);
+        if down && restart && self.list.focus + 1 >= len {
+            self.focus = Focus::Restart;
+            cx.request_redraw();
+            cx.request_refresh(RefreshMode::Fast);
+            return Handled::Yes;
+        }
         let delta = if *a == actions::UP || *a == actions::LEFT || *a == actions::PREVIOUS {
             -1
         } else if *a == actions::DOWN || *a == actions::RIGHT || *a == actions::NEXT {
@@ -304,8 +344,8 @@ impl Screen for PluginList {
         } else if *a == actions::PREV_PAGE {
             -page
         } else if *a == actions::CONFIRM {
-            if let Some(row) = rows.get(self.list.focus) {
-                self.activate(&env, row, cx);
+            if let Some(id) = self.plugins.get(self.list.focus).cloned() {
+                self.switch(&env, &id, cx);
             }
             return Handled::Yes;
         } else {
@@ -319,7 +359,7 @@ impl Screen for PluginList {
         if gesture.kind != GestureKind::Tap {
             return Handled::No;
         }
-        let paging = self.list.paging(self.rows(cx.env()).len());
+        let paging = self.list.paging(self.plugins.len());
         let tapped = self
             .header
             .tap(cx.env(), &self.style, gesture.start, paging);
@@ -328,16 +368,20 @@ impl Screen for PluginList {
             return Handled::Yes;
         }
         let env = *cx.env();
-        let rows = self.rows(&env);
-        let Some(index) = self.list.hit(gesture.start, rows.len()) else {
+        if self
+            .restart_button(&env)
+            .is_some_and(|b| b.contains(gesture.start))
+        {
+            cx.command(Command::Restart);
+            return Handled::Yes;
+        }
+        let Some(index) = self.list.hit(gesture.start, self.plugins.len()) else {
             return Handled::No;
         };
-        if index != self.list.focus {
-            self.list.focus = index;
-            cx.request_redraw();
-            cx.request_refresh(RefreshMode::Fast);
-        }
-        self.activate(&env, &rows[index], cx);
+        self.list.focus = index;
+        self.focus = Focus::List;
+        let id = self.plugins[index].clone();
+        self.switch(&env, &id, cx);
         Handled::Yes
     }
 }
