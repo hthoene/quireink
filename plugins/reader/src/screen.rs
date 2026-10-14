@@ -432,7 +432,7 @@ impl Screen for ReaderScreen {
             cx.wake_at(env.now.add_millis(STEP_DELAY_MS));
         } else if book.index.as_ref().is_some_and(PageIndex::is_complete) {
             // Page numbers are known now: update just the status line.
-            book.draw_status(cx.canvas(), &env);
+            cx.request_redraw_area(book.typography.status);
             cx.request_refresh(RefreshMode::Fast);
         }
     }

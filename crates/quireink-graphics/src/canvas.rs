@@ -14,7 +14,7 @@ pub struct Canvas<'a> {
 
 impl<'a> Canvas<'a> {
     pub(crate) fn new(framebuffer: &'a mut Framebuffer, clip: Rect) -> Self {
-        let clip = clip.intersection(&framebuffer.bounds()).unwrap_or_default();
+        let clip = clip.intersection(&framebuffer.band()).unwrap_or_default();
         Self { framebuffer, clip }
     }
 

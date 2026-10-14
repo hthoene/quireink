@@ -6,12 +6,21 @@ use crate::GraphicsError;
 use crate::canvas::Canvas;
 
 /// Pixels in a device's native format, plus dirty-region tracking.
+///
+/// A framebuffer holds either the whole screen or a *band* of rows
+/// ([`Framebuffer::banded`]): the screen is then drawn band by band, each
+/// passed to the panel before the next. Coordinates are always screen
+/// coordinates; drawing outside the current band is discarded.
 #[derive(Debug)]
 pub struct Framebuffer {
     width: u16,
     height: u16,
     format: PixelFormat,
     stride: usize,
+    /// First screen row held.
+    top: u16,
+    /// Number of rows held.
+    rows: u16,
     data: Vec<u8>,
     dirty: Option<Rect>,
     inverted: bool,
@@ -21,11 +30,23 @@ impl Framebuffer {
     /// Allocates a white framebuffer. Fails instead of aborting when memory
     /// is short, which matters on devices with a few hundred KB of RAM.
     pub fn new(width: u16, height: u16, format: PixelFormat) -> Result<Self, GraphicsError> {
+        Self::banded(width, height, height, format)
+    }
+
+    /// A framebuffer for a `width`×`height` screen that holds `rows` rows
+    /// at a time, starting with the top band.
+    pub fn banded(
+        width: u16,
+        height: u16,
+        rows: u16,
+        format: PixelFormat,
+    ) -> Result<Self, GraphicsError> {
         if format.is_color() && !cfg!(feature = "color") {
             return Err(GraphicsError::UnsupportedFormat(format));
         }
+        let rows = rows.clamp(1, height.max(1));
         let stride = format.stride(width);
-        let bytes = stride * height as usize;
+        let bytes = stride * rows as usize;
         let mut data = Vec::new();
         data.try_reserve_exact(bytes)
             .map_err(|_| GraphicsError::OutOfMemory { bytes })?;
@@ -35,6 +56,8 @@ impl Framebuffer {
             height,
             format,
             stride,
+            top: 0,
+            rows,
             data,
             dirty: None,
             inverted: false,
@@ -58,25 +81,80 @@ impl Framebuffer {
         Rect::from_size(self.width, self.height)
     }
 
+    /// Rows held at a time; the screen height unless banded.
+    pub fn rows(&self) -> u16 {
+        self.rows
+    }
+
+    /// The part of the screen currently held.
+    pub fn band(&self) -> Rect {
+        Rect::new(
+            0,
+            self.top,
+            self.width,
+            self.rows.min(self.height - self.top),
+        )
+    }
+
+    /// Moves the band to start at screen row `top`. The pixels are not
+    /// cleared; draw the band completely afterwards.
+    pub fn set_top(&mut self, top: u16) {
+        self.top = top.min(self.height.saturating_sub(1));
+    }
+
+    /// Copies `rows` (full-width rows in the same format, starting at
+    /// screen row `top`) into this framebuffer, e.g. to keep a copy of the
+    /// whole screen from bands. Rows outside the current band are skipped.
+    pub fn write_rows(&mut self, top: u16, rows: FrameView<'_>) {
+        if rows.format != self.format || rows.width != self.width {
+            return;
+        }
+        let band = self.band();
+        for y in 0..rows.height {
+            let screen_y = top.saturating_add(y);
+            if screen_y < band.y || u32::from(screen_y) >= band.bottom() {
+                continue;
+            }
+            let from = usize::from(y) * rows.stride;
+            let to = usize::from(screen_y - self.top) * self.stride;
+            let len = self.stride.min(rows.stride);
+            if let Some(source) = rows.data.get(from..from + len) {
+                self.data[to..to + len].copy_from_slice(source);
+            }
+        }
+    }
+
     /// Number of bytes used by the pixel data.
     pub fn byte_len(&self) -> usize {
         self.data.len()
     }
 
+    /// The rows held, starting at screen row [`Framebuffer::band`]`.y`.
     pub fn view(&self) -> FrameView<'_> {
+        self.view_rows(self.band())
+    }
+
+    /// The held rows that `region` covers, as full-width rows starting at
+    /// screen row `region.y` (clamped to the band).
+    pub fn view_rows(&self, region: Rect) -> FrameView<'_> {
+        let band = self.band();
+        let first = region.y.clamp(band.y, band.bottom() as u16);
+        let last = (region.bottom() as u16).clamp(first, band.bottom() as u16);
+        let start = usize::from(first - self.top) * self.stride;
+        let end = usize::from(last - self.top) * self.stride;
         FrameView {
             width: self.width,
-            height: self.height,
+            height: last - first,
             format: self.format,
             stride: self.stride,
-            data: &self.data,
+            data: &self.data[start..end],
         }
     }
 
-    /// A canvas covering the whole framebuffer.
+    /// A canvas covering the current band (the whole screen unless banded).
     pub fn canvas(&mut self) -> Canvas<'_> {
-        let bounds = self.bounds();
-        Canvas::new(self, bounds)
+        let band = self.band();
+        Canvas::new(self, band)
     }
 
     /// When inverted, every colour is drawn inverted (night mode). Changing
@@ -109,7 +187,7 @@ impl Framebuffer {
         let value = self.encode(color);
         for y in rect.y..rect.bottom() as u16 {
             if self.format == PixelFormat::Gray8 {
-                let row = usize::from(y) * self.stride;
+                let row = usize::from(y - self.top) * self.stride;
                 self.data[row + usize::from(rect.x)..row + rect.right() as usize].fill(value as u8);
                 continue;
             }
@@ -127,7 +205,7 @@ impl Framebuffer {
         let value = if alpha == 255 {
             color
         } else {
-            let stored = self.view().pixel(x, y);
+            let stored = self.view().pixel(x, y - self.top);
             let below = if self.inverted {
                 stored.inverted()
             } else {
@@ -149,7 +227,7 @@ impl Framebuffer {
 
     /// Writes an encoded pixel value.
     fn store(&mut self, x: u16, y: u16, value: u32) {
-        let row = usize::from(y) * self.stride;
+        let row = usize::from(y - self.top) * self.stride;
         let x = usize::from(x);
         match self.format.bits_per_pixel() as usize {
             bpp @ (1 | 2 | 4) => {
@@ -221,6 +299,29 @@ mod tests {
                 PixelFormat::Gray8,
             ]
         }
+    }
+
+    #[test]
+    fn bands_hold_their_rows_only() {
+        let mut full = Framebuffer::new(8, 10, PixelFormat::Gray2).unwrap();
+        let mut band = Framebuffer::banded(8, 10, 4, PixelFormat::Gray2).unwrap();
+        assert_eq!(band.byte_len(), full.byte_len() * 4 / 10);
+        for top in [0, 4, 8] {
+            band.set_top(top);
+            let mut canvas = band.canvas();
+            canvas.clear(Color::WHITE);
+            // A diagonal line across the whole screen.
+            for i in 0..10 {
+                canvas.set_pixel(quireink_platform::Point::new(i % 8, i), Color::BLACK);
+            }
+            assert_eq!(band.band().height, if top == 8 { 2 } else { 4 });
+            full.write_rows(top, band.view());
+        }
+        for i in 0..10u16 {
+            assert_eq!(full.view().pixel(i % 8, i), Color::BLACK, "row {i}");
+            assert_eq!(full.view().pixel((i + 1) % 8, i), Color::WHITE, "row {i}");
+        }
+        assert_eq!(full.view_rows(Rect::new(0, 3, 8, 2)).height, 2);
     }
 
     #[test]

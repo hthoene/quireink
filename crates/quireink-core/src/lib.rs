@@ -11,11 +11,21 @@
 //! talks to an operating system, so it runs unchanged on microcontrollers,
 //! Linux, Android and in the browser.
 //!
+//! Drawing is separate from event handling: after a call whose effects
+//! contain a refresh, the shell calls [`Kernel::render`], which draws what
+//! changed and hands it over as rows of pixels — the whole region at once,
+//! or band by band on devices that cannot hold a full frame in RAM
+//! ([`KernelBuilder::frame_rows`]). The panel controller keeps the frame.
+//!
 //! ```ignore
 //! let mut kernel = Kernel::builder(device).plugin(MyPlugin).build()?;
-//! let effects = kernel.start(clock.now());
+//! let mut effects = kernel.start(clock.now());
 //! loop {
-//!     execute(effects, &kernel);              // refresh the panel, arm timers
+//!     if let Some((region, mode)) = effects.refresh() {
+//!         kernel.render(&mut |top, rows| panel.write(top, rows));
+//!         panel.refresh(region, mode);
+//!     }
+//!     arm_timer(effects.wake_at());
 //!     effects = match wait_for_input_or_timer() {
 //!         Input(event) => kernel.handle(clock.now(), event),
 //!         Timer => kernel.tick(clock.now()),
@@ -168,6 +178,7 @@ pub struct KernelBuilder {
     device_keymap: Option<Cow<'static, str>>,
     user_config: Option<String>,
     glyph_cache: usize,
+    frame_rows: Option<u16>,
     storage: Option<Box<dyn Storage>>,
     setting_defaults: Vec<(String, String)>,
 }
@@ -224,9 +235,19 @@ impl KernelBuilder {
         self
     }
 
+    /// Draws frames in bands of `rows` rows instead of holding the whole
+    /// screen in RAM: the framebuffer shrinks to `rows / height` of its
+    /// size, while each band costs one more pass over the visible screens.
+    /// For devices whose panel controller keeps the frame (e.g. the X4).
+    pub fn frame_rows(mut self, rows: u16) -> Self {
+        self.frame_rows = Some(rows);
+        self
+    }
+
     pub fn build(self) -> Result<Kernel, KernelError> {
         let display = self.device.display;
-        let framebuffer = Framebuffer::new(display.width, display.height, display.format)
+        let rows = self.frame_rows.unwrap_or(display.height);
+        let framebuffer = Framebuffer::banded(display.width, display.height, rows, display.format)
             .map_err(KernelError::Graphics)?;
         let mut kernel = Kernel {
             shared: Shared {
@@ -239,6 +260,7 @@ impl KernelBuilder {
                 storage: self.storage.unwrap_or_else(|| Box::new(NoStorage)),
             },
             pending: None,
+            unrendered: None,
             framebuffer,
             registry: Registry::default(),
             keymap: Keymap::default(),
@@ -350,6 +372,8 @@ pub struct Kernel {
     screen_timer: Option<Instant>,
     /// The part of the screen to redraw at the end of the current call.
     pending: Option<Rect>,
+    /// What changed but has not been passed to [`Kernel::render`] yet.
+    unrendered: Option<Rect>,
     recognizer: Recognizer,
     /// Pointer ids captured by the active screen.
     captured: Vec<u8>,
@@ -382,6 +406,7 @@ impl Kernel {
             device_keymap: None,
             user_config: None,
             glyph_cache: DEFAULT_GLYPH_CACHE,
+            frame_rows: None,
             storage: None,
             setting_defaults: Vec::new(),
         }
@@ -430,8 +455,34 @@ impl Kernel {
         self.finish()
     }
 
-    /// The framebuffer the shell transfers to the panel.
-    pub fn frame(&self) -> FrameView<'_> {
+    /// Draws everything that changed since the last call and passes it to
+    /// `out` as full-width rows of pixels, top to bottom: `out(top, rows)`
+    /// with `top` the screen row of the first one. Call it after each
+    /// [`start`](Kernel::start), [`handle`](Kernel::handle) or
+    /// [`tick`](Kernel::tick) whose effects contain a refresh, then refresh
+    /// the panel.
+    pub fn render(&mut self, out: &mut dyn FnMut(u16, FrameView<'_>)) {
+        let Some(region) = self.unrendered.take() else {
+            return;
+        };
+        let rows = self.framebuffer.rows();
+        let mut top = region.y - region.y % rows;
+        while u32::from(top) < region.bottom() {
+            self.framebuffer.set_top(top);
+            if let Some(part) = region.intersection(&self.framebuffer.band()) {
+                self.redraw(part);
+                out(part.y, self.framebuffer.view_rows(part));
+            }
+            top = top.saturating_add(rows);
+            if top == u16::MAX {
+                break;
+            }
+        }
+    }
+
+    /// The framebuffer, for tests of a kernel that holds the whole screen.
+    #[cfg(test)]
+    pub(crate) fn frame(&self) -> FrameView<'_> {
         self.framebuffer.view()
     }
 
@@ -807,12 +858,15 @@ impl Kernel {
             let region = self.region_of(top);
             self.invalidate(region);
         }
-        if let Some(region) = self.pending.take() {
-            self.redraw(region);
+        if let Some(area) = self.output.redraw_area.take()
+            && let Some(area) = area.intersection(&self.framebuffer.bounds())
+        {
+            self.invalidate(area);
         }
         let requested = self.output.refresh.take();
         let mut effects = Effects::default();
-        if let Some(dirty) = self.framebuffer.take_dirty() {
+        if let Some(dirty) = self.pending.take() {
+            self.unrendered = Some(self.unrendered.map_or(dirty, |u| u.union(&dirty)));
             let interval = self
                 .shared
                 .settings
@@ -1020,7 +1074,7 @@ impl Kernel {
             return Handled::No;
         };
         let env = self.shared.env(self.now);
-        let mut cx = Cx::new(&env, self.framebuffer.canvas(), &mut self.output);
+        let mut cx = Cx::new(&env, &mut self.output);
         f(active.screen.as_mut(), &mut cx)
     }
 

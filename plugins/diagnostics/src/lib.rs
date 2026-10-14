@@ -272,15 +272,15 @@ impl DiagnosticsScreen {
 
     fn set_focus(&mut self, focus: usize, cx: &mut Cx<'_, '_>) {
         let previous = core::mem::replace(&mut self.focus, focus);
-        self.draw_box(cx.canvas(), previous);
-        self.draw_box(cx.canvas(), focus);
+        cx.request_redraw_area(self.layout.boxes[previous]);
+        cx.request_redraw_area(self.layout.boxes[focus]);
         // Focus feedback should be quick; ghosting is cleaned up later.
         cx.request_refresh(RefreshMode::Fast);
     }
 
     fn toggle(&mut self, index: usize, cx: &mut Cx<'_, '_>) {
         self.checked[index] = !self.checked[index];
-        self.draw_box(cx.canvas(), index);
+        cx.request_redraw_area(self.layout.boxes[index]);
         cx.request_refresh(RefreshMode::Partial);
     }
 }
@@ -355,9 +355,7 @@ impl Screen for DiagnosticsScreen {
             };
             if page != self.page {
                 self.page = page;
-                let env = *cx.env();
-                self.draw_page_label(cx.canvas(), &env, pages);
-                self.draw_progress(cx.canvas(), pages);
+                cx.request_redraw_area(self.layout.label.union(&self.layout.progress));
                 cx.request_refresh(RefreshMode::Partial);
             }
             Handled::Yes

@@ -43,12 +43,17 @@ pub enum Handled {
 /// A full-screen UI unit (home, library, reader, …).
 ///
 /// The kernel calls [`Screen::draw`] when the screen becomes visible and
-/// whenever a redraw is requested. Event handlers may also draw directly for
-/// small, partial updates; the kernel refreshes exactly the changed region.
+/// whenever a redraw is requested. Event handlers never draw; they request
+/// a redraw of the screen or of an area ([`Cx::request_redraw_area`]), and
+/// the kernel refreshes exactly that region.
 pub trait Screen {
     /// Draws the screen. For full screens the canvas has been cleared to
-    /// white; overlays paint their own background. The canvas may be
-    /// clipped to the part that needs redrawing.
+    /// white; overlays paint their own background.
+    ///
+    /// The canvas is clipped to the part being drawn. On small devices a
+    /// frame is drawn in bands, so `draw` may run several times per frame
+    /// for different parts: it must not change state, and it can skip what
+    /// lies outside [`Canvas::clip`].
     fn draw(&mut self, canvas: &mut Canvas<'_>, env: &Env<'_>);
 
     /// `None` for a full screen; `Some(region)` makes the screen an
@@ -108,6 +113,8 @@ pub struct Output {
     pub refresh: Option<RefreshMode>,
     /// Whether the whole screen should be redrawn.
     pub redraw: bool,
+    /// Part of the screen to redraw, in screen coordinates.
+    pub redraw_area: Option<Rect>,
     /// When the active screen wants [`Screen::on_timer`] to be called.
     pub wake_at: Option<Instant>,
 }
@@ -123,27 +130,17 @@ impl Output {
 #[derive(Debug)]
 pub struct Cx<'a, 'e> {
     env: &'a Env<'e>,
-    canvas: Canvas<'a>,
     output: &'a mut Output,
 }
 
 impl<'a, 'e> Cx<'a, 'e> {
     /// Used by the kernel and by tests.
-    pub fn new(env: &'a Env<'e>, canvas: Canvas<'a>, output: &'a mut Output) -> Self {
-        Self {
-            env,
-            canvas,
-            output,
-        }
+    pub fn new(env: &'a Env<'e>, output: &'a mut Output) -> Self {
+        Self { env, output }
     }
 
     pub fn env(&self) -> &Env<'e> {
         self.env
-    }
-
-    /// Draw here for partial updates.
-    pub fn canvas(&mut self) -> &mut Canvas<'a> {
-        &mut self.canvas
     }
 
     /// Queues a command for the kernel.
@@ -160,6 +157,12 @@ impl<'a, 'e> Cx<'a, 'e> {
     /// Requests a complete redraw via [`Screen::draw`].
     pub fn request_redraw(&mut self) {
         self.output.redraw = true;
+    }
+
+    /// Requests a redraw of `area` (screen coordinates) only, e.g. a status
+    /// line or a focused item: [`Screen::draw`] runs clipped to it.
+    pub fn request_redraw_area(&mut self, area: Rect) {
+        self.output.redraw_area = Some(self.output.redraw_area.map_or(area, |a| a.union(&area)));
     }
 
     /// Requests a call to [`Screen::on_timer`] at `at` (the earliest

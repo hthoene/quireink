@@ -3,6 +3,7 @@
 use std::time::Instant as StdInstant;
 
 use quireink_core::{Effects, Kernel, KernelError};
+use quireink_graphics::Framebuffer;
 use quireink_platform::{InputEvent, Instant};
 
 use crate::budget;
@@ -16,6 +17,10 @@ use crate::storage::DirStorage;
 pub struct Device {
     pub profile: &'static Profile,
     pub kernel: Kernel,
+    /// The panel controller's frame memory: the kernel writes changed rows
+    /// into it, possibly band by band. Not part of the heap budget, as on
+    /// the device.
+    controller: Framebuffer,
     pub panel: Panel,
     /// When the kernel wants to be ticked.
     pub wake_at: Option<Instant>,
@@ -49,6 +54,9 @@ impl Device {
                 .plugin(quireink_plugin_menu::Menu)
                 .plugin(quireink_plugin_settings::SettingsPlugin)
                 .plugin(quireink_plugin_diagnostics::Diagnostics);
+            if let Some(rows) = profile.frame_rows {
+                builder = builder.frame_rows(rows);
+            }
             builder = if profile.font_packs {
                 builder.plugin(quireink_plugin_fonts_default::DefaultFontPacks)
             } else {
@@ -65,9 +73,12 @@ impl Device {
             builder.build()
         })?;
         let display = profile.device.display;
+        let controller = Framebuffer::new(display.width, display.height, display.format)
+            .map_err(KernelError::Graphics)?;
         let mut device = Self {
             profile,
             kernel,
+            controller,
             panel: Panel::new(display.width, display.height, display.color),
             wake_at: None,
             clock: if simulated_time {
@@ -122,7 +133,9 @@ impl Device {
 
     fn execute(&mut self, effects: Effects) {
         if let Some((region, mode)) = effects.refresh() {
-            self.panel.refresh(self.kernel.frame(), region, mode);
+            let (kernel, controller) = (&mut self.kernel, &mut self.controller);
+            budget::track(|| kernel.render(&mut |top, rows| controller.write_rows(top, rows)));
+            self.panel.refresh(self.controller.view(), region, mode);
         }
         self.wake_at = effects.wake_at();
         self.report_warnings();

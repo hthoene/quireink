@@ -49,11 +49,9 @@ page.
 - Peak memory while converting is about 10 KiB (decoder) + up to 32 KiB
   (window) + about 8 KiB of buffers. Opening an already converted book
   needs much less.
-- On the X4 profile, books with small chapters fit the budget (Alice in
-  Wonderland: peak 191 of 192 KiB). Chapters larger than about 16 KiB do
-  not fit while a full 2-bit framebuffer is held in RAM. Reducing the
-  resident framebuffer (1-bit planes or banded rendering) is the next
-  memory step.
+- On the X4 profile, chapters of any size fit the budget since frames
+  are rendered in bands (ADR 0012); Die Verwandlung converts with a peak
+  of 115 of 192 KiB.
 - The first opening of a chapter costs one pass over it plus writes to
   the SD card; later page turns are cheap.
 - CSS, inline styles and images are not part of the block format yet.

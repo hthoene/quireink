@@ -132,7 +132,7 @@ impl Screen for TestScreen {
             .borrow_mut()
             .push(alloc::format!("{}:{}", self.name, action));
         if *action == actions::NEXT_PAGE {
-            cx.canvas().fill_rect(20, 20, 5, 5, Color::BLACK);
+            cx.request_redraw_area(Rect::new(20, 20, 5, 5));
             cx.request_refresh(RefreshMode::Partial);
             return Handled::Yes;
         }
@@ -143,6 +143,11 @@ impl Screen for TestScreen {
     }
 }
 
+/// Draws what changed, like a shell after each call.
+fn render(kernel: &mut Kernel) {
+    kernel.render(&mut |_, _| {});
+}
+
 fn press(kernel: &mut Kernel, at: u64, name: &'static str) -> crate::Effects {
     kernel.handle(
         Instant(at),
@@ -151,13 +156,15 @@ fn press(kernel: &mut Kernel, at: u64, name: &'static str) -> crate::Effects {
             state: ButtonState::Pressed,
         },
     );
-    kernel.handle(
+    let effects = kernel.handle(
         Instant(at + 50),
         InputEvent::Button {
             name,
             state: ButtonState::Released,
         },
-    )
+    );
+    render(kernel);
+    effects
 }
 
 fn tap(kernel: &mut Kernel, at: u64, x: i32, y: i32) -> crate::Effects {
@@ -171,7 +178,9 @@ fn tap(kernel: &mut Kernel, at: u64, x: i32, y: i32) -> crate::Effects {
         })
     };
     kernel.handle(Instant(at), event(PointerPhase::Down));
-    kernel.handle(Instant(at + 60), event(PointerPhase::Up))
+    let effects = kernel.handle(Instant(at + 60), event(PointerPhase::Up));
+    render(kernel);
+    effects
 }
 
 fn log() -> Log {
@@ -354,6 +363,7 @@ fn long_tap_toggles_night_mode() {
     let effects = kernel.tick(Instant(1500));
     assert!(kernel.settings().bool(settings::NIGHT_MODE.as_str()));
     assert_eq!(effects.refresh().map(|r| r.1), Some(RefreshMode::Full));
+    render(&mut kernel);
     assert_eq!(kernel.frame().pixel(0, 0), Color::BLACK);
 }
 
@@ -647,6 +657,7 @@ fn overlays_redraw_only_their_region_and_close_on_outside_taps() {
         .build()
         .unwrap();
     kernel.start(Instant(0));
+    render(&mut kernel);
     log.borrow_mut().clear();
 
     // The menu action opens the overlay bound to core.menu.
@@ -804,4 +815,56 @@ fn keymap_presets_follow_device_defaults_and_switch_at_runtime() {
         .build()
         .unwrap();
     assert_eq!(kernel.take_warnings().len(), 1);
+}
+
+#[test]
+fn banded_frames_match_full_frames() {
+    // Renders into a copy of the whole screen, as a panel controller keeps it.
+    fn screen(kernel: &mut Kernel, copy: &mut quireink_graphics::Framebuffer) -> Vec<u8> {
+        let mut bands = 0;
+        kernel.render(&mut |top, rows| {
+            bands += 1;
+            copy.write_rows(top, rows);
+        });
+        assert!(bands > 0);
+        copy.view().data.to_vec()
+    }
+    let build = |rows: Option<u16>| {
+        let builder = Kernel::builder(DEVICE).plugin(OverlayPlugin { log: log() });
+        match rows {
+            Some(rows) => builder.frame_rows(rows),
+            None => builder,
+        }
+        .build()
+        .unwrap()
+    };
+    let new_copy = || {
+        let display = DEVICE.display;
+        quireink_graphics::Framebuffer::new(display.width, display.height, display.format).unwrap()
+    };
+    let (mut full, mut banded) = (build(None), build(Some(16)));
+    let (mut full_copy, mut banded_copy) = (new_copy(), new_copy());
+    full.start(Instant(0));
+    banded.start(Instant(0));
+    assert_eq!(
+        screen(&mut full, &mut full_copy),
+        screen(&mut banded, &mut banded_copy)
+    );
+    // An overlay redraws only part of the screen, across band borders.
+    for kernel in [&mut full, &mut banded] {
+        for (at, state) in [(100, ButtonState::Pressed), (150, ButtonState::Released)] {
+            kernel.handle(
+                Instant(at),
+                InputEvent::Button {
+                    name: "menu",
+                    state,
+                },
+            );
+        }
+    }
+    assert_eq!(
+        screen(&mut full, &mut full_copy),
+        screen(&mut banded, &mut banded_copy)
+    );
+    assert!(banded.frame().height <= 16);
 }

@@ -1142,6 +1142,7 @@ version = "0.1.0"
 dependencies = [
  "png",
  "quireink-core",
+ "quireink-graphics",
  "quireink-platform",
  "quireink-plugin-diagnostics",
  "quireink-plugin-files",

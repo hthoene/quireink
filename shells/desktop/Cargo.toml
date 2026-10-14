@@ -16,6 +16,7 @@ path = "src/main.rs"
 
 [dependencies]
 quireink-core = { workspace = true, features = ["color", "outline"] }
+quireink-graphics = { workspace = true, features = ["color"] }
 quireink-platform.workspace = true
 quireink-plugin-diagnostics.workspace = true
 quireink-plugin-files.workspace = true
