@@ -62,7 +62,9 @@ pub use menus::{MenuEntry, MenuItem, Menus};
 pub use params::Params;
 pub use plugin::{Manifest, Plugin, Priority, RegisterError, Registrar, SlotSpec};
 pub use screen::{Cx, Handled, Output, Screen, ScreenFactory, ScreenSpec};
-pub use settings::{SettingError, SettingKind, SettingSpec, SettingValue, Settings};
+pub use settings::{
+    Level, SettingError, SettingGroupSpec, SettingKind, SettingSpec, SettingValue, Settings,
+};
 pub use version::{SDK_VERSION, Version};
 
 pub use quireink_graphics::Canvas;

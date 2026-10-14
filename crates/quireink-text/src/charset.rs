@@ -11,6 +11,7 @@ pub const LATIN: &[RangeInclusive<char>] = &[
     '\u{2030}'..='\u{203a}', // per mille, primes, guillemets
     '\u{20ac}'..='\u{20ac}', // euro sign
     '\u{2122}'..='\u{2122}', // trade mark
+    '\u{2212}'..='\u{2212}', // minus sign
     '\u{fffd}'..='\u{fffd}', // replacement character
 ];
 

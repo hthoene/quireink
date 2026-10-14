@@ -9,7 +9,7 @@ use crate::hyphenation::HyphenationSpec;
 use crate::id::Id;
 use crate::menus::MenuEntry;
 use crate::screen::ScreenSpec;
-use crate::settings::SettingSpec;
+use crate::settings::{SettingGroupSpec, SettingSpec};
 use crate::version::Version;
 
 /// Static information about a plugin.
@@ -104,6 +104,9 @@ pub trait Registrar {
     /// Puts an action into a menu. Menus can be extended by any plugin and
     /// redefined by the user.
     fn add_menu_entry(&mut self, entry: MenuEntry) -> Result<(), RegisterError>;
+
+    /// Adds a group for the settings screen.
+    fn add_setting_group(&mut self, group: SettingGroupSpec) -> Result<(), RegisterError>;
 
     /// Adds a file format.
     fn add_format(&mut self, format: FormatSpec) -> Result<(), RegisterError>;

@@ -21,7 +21,7 @@ use alloc::format;
 use alloc::string::{String, ToString};
 
 use listing::{Entry, Listing};
-use quireink_sdk::builtin::{actions, events, params, slots};
+use quireink_sdk::builtin::{actions, events, groups, params, slots};
 use quireink_sdk::ui::{self, ListChange, ListView, UiStyle};
 use quireink_sdk::{
     Arg, Canvas, Color, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Manifest, Params,
@@ -58,12 +58,17 @@ impl Plugin for Files {
         // is installed.
         r.bind_slot(slots::HOME, SCREEN, Priority::FALLBACK)?;
         r.bind_slot(slots::LIBRARY, SCREEN, Priority::DEFAULT)?;
-        r.add_setting(SettingSpec {
-            id: ROOT,
-            title: Cow::Borrowed("files.setting.root"),
-            kind: SettingKind::Text,
-            default: SettingValue::Text(Cow::Borrowed("books")),
-        })?;
+        r.add_setting(
+            SettingSpec::new(
+                ROOT,
+                "files.setting.root",
+                SettingKind::Text,
+                SettingValue::Text(Cow::Borrowed("books")),
+            )
+            .group(groups::LIBRARY)
+            .advanced()
+            .description("files.setting.root.help"),
+        )?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/en.ini")))?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/de.ini")))?;
         Ok(())

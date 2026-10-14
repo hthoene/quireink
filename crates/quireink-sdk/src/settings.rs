@@ -83,6 +83,78 @@ pub struct SettingSpec {
     pub title: Cow<'static, str>,
     pub kind: SettingKind,
     pub default: SettingValue,
+    /// The group it is shown in, e.g.
+    /// [`builtin::groups::READING`](crate::builtin::groups::READING).
+    pub group: Id,
+    pub level: Level,
+    /// Translation key of a short help text.
+    pub description: Option<Cow<'static, str>>,
+    /// Translation key that formats a number with its unit, with plural
+    /// forms, e.g. `core.unit.pt.other = {count} pt`.
+    pub unit: Option<Cow<'static, str>>,
+}
+
+impl SettingSpec {
+    /// A basic setting in the [`OTHER`](crate::builtin::groups::OTHER)
+    /// group; see the builder methods for the rest.
+    pub fn new(
+        id: Id,
+        title: impl Into<Cow<'static, str>>,
+        kind: SettingKind,
+        default: SettingValue,
+    ) -> Self {
+        Self {
+            id,
+            title: title.into(),
+            kind,
+            default,
+            group: crate::builtin::groups::OTHER,
+            level: Level::Basic,
+            description: None,
+            unit: None,
+        }
+    }
+
+    pub fn group(mut self, group: Id) -> Self {
+        self.group = group;
+        self
+    }
+
+    /// Shown only with advanced settings.
+    pub fn advanced(mut self) -> Self {
+        self.level = Level::Advanced;
+        self
+    }
+
+    pub fn description(mut self, key: impl Into<Cow<'static, str>>) -> Self {
+        self.description = Some(key.into());
+        self
+    }
+
+    pub fn unit(mut self, key: impl Into<Cow<'static, str>>) -> Self {
+        self.unit = Some(key.into());
+        self
+    }
+}
+
+/// How often a setting is needed.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Level {
+    /// What most readers change (font size, language, …).
+    #[default]
+    Basic,
+    /// Rarely needed; shown when the user asks for advanced settings.
+    Advanced,
+}
+
+/// A group of settings, shown together on one page.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SettingGroupSpec {
+    pub id: Id,
+    /// Translation key of the group's name.
+    pub title: Cow<'static, str>,
+    /// Groups are listed by order, smallest first.
+    pub order: i32,
 }
 
 /// Why a setting could not be changed.
@@ -114,6 +186,8 @@ pub struct Settings {
     values: VecMap<Id, SettingValue>,
     /// Ids in registration order, for settings UIs.
     order: Vec<Id>,
+    /// Groups by order.
+    groups: Vec<SettingGroupSpec>,
 }
 
 impl Settings {
@@ -126,6 +200,34 @@ impl Settings {
         self.specs.shrink_to_fit();
         self.values.shrink_to_fit();
         self.order.shrink_to_fit();
+        self.groups.shrink_to_fit();
+    }
+
+    /// Registers a group of settings.
+    pub fn add_group(&mut self, group: SettingGroupSpec) -> Result<(), RegisterError> {
+        if self.groups.iter().any(|g| g.id == group.id) {
+            return Err(RegisterError::Duplicate { id: group.id });
+        }
+        let at = self
+            .groups
+            .partition_point(|g| (g.order, g.id.as_str()) <= (group.order, group.id.as_str()));
+        self.groups.insert(at, group);
+        Ok(())
+    }
+
+    /// Groups by order.
+    pub fn groups(&self) -> impl Iterator<Item = &SettingGroupSpec> {
+        self.groups.iter()
+    }
+
+    /// The group a setting is shown in: its own if registered, else
+    /// [`OTHER`](crate::builtin::groups::OTHER).
+    pub fn group_of(&self, spec: &SettingSpec) -> Id {
+        if self.groups.iter().any(|g| g.id == spec.group) {
+            spec.group.clone()
+        } else {
+            crate::builtin::groups::OTHER
+        }
     }
 
     /// Registers a setting. Its default must be valid.
@@ -219,20 +321,20 @@ mod tests {
     fn settings() -> Settings {
         let mut settings = Settings::new();
         settings
-            .define(SettingSpec {
-                id: Id::new_static("test.count"),
-                title: Cow::Borrowed("test.count"),
-                kind: SettingKind::Int { min: 1, max: 10 },
-                default: SettingValue::Int(3),
-            })
+            .define(SettingSpec::new(
+                Id::new_static("test.count"),
+                "test.count",
+                SettingKind::Int { min: 1, max: 10 },
+                SettingValue::Int(3),
+            ))
             .unwrap();
         settings
-            .define(SettingSpec {
-                id: Id::new_static("test.mode"),
-                title: Cow::Borrowed("test.mode"),
-                kind: SettingKind::Choice(alloc::vec![Cow::Borrowed("a"), Cow::Borrowed("b")]),
-                default: SettingValue::Text(Cow::Borrowed("a")),
-            })
+            .define(SettingSpec::new(
+                Id::new_static("test.mode"),
+                "test.mode",
+                SettingKind::Choice(alloc::vec![Cow::Borrowed("a"), Cow::Borrowed("b")]),
+                SettingValue::Text(Cow::Borrowed("a")),
+            ))
             .unwrap();
         settings
     }
@@ -270,14 +372,42 @@ mod tests {
     }
 
     #[test]
+    fn groups_are_ordered_and_unknown_groups_fall_back() {
+        let mut s = settings();
+        for (id, order) in [("b.late", 20), ("a.early", 10), ("c.same", 10)] {
+            s.add_group(SettingGroupSpec {
+                id: Id::parse(id).unwrap(),
+                title: Cow::Borrowed(""),
+                order,
+            })
+            .unwrap();
+        }
+        let ids: Vec<&str> = s.groups().map(|g| g.id.as_str()).collect();
+        assert_eq!(ids, ["a.early", "c.same", "b.late"]);
+        let spec = SettingSpec::new(
+            Id::new_static("x.y"),
+            "",
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+        )
+        .group(Id::new_static("missing.group"));
+        assert_eq!(s.group_of(&spec), crate::builtin::groups::OTHER);
+        assert_eq!(
+            s.group_of(&spec.clone().group(Id::new_static("b.late")))
+                .as_str(),
+            "b.late"
+        );
+    }
+
+    #[test]
     fn rejects_duplicates_and_bad_defaults() {
         let mut s = settings();
-        let spec = SettingSpec {
-            id: Id::new_static("test.count"),
-            title: Cow::Borrowed(""),
-            kind: SettingKind::Bool,
-            default: SettingValue::Bool(false),
-        };
+        let spec = SettingSpec::new(
+            Id::new_static("test.count"),
+            "",
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+        );
         assert!(matches!(
             s.define(spec.clone()),
             Err(RegisterError::Duplicate { .. })

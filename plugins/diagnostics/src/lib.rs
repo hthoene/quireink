@@ -18,7 +18,7 @@ extern crate alloc;
 use alloc::borrow::Cow;
 use alloc::boxed::Box;
 
-use quireink_sdk::builtin::{actions, fonts, slots};
+use quireink_sdk::builtin::{actions, fonts, groups, slots};
 use quireink_sdk::{
     ActionSpec, Arg, Canvas, Color, Cx, Env, Gesture, GestureKind, Handled, Id, Manifest, Metrics,
     Plugin, Priority, Rect, RefreshMode, RegisterError, Registrar, SDK_VERSION, Screen, ScreenSpec,
@@ -56,15 +56,20 @@ impl Plugin for Diagnostics {
             title: Cow::Borrowed("diagnostics.action.reset"),
             handler: None,
         })?;
-        r.add_setting(SettingSpec {
-            id: PAGES,
-            title: Cow::Borrowed("diagnostics.setting.pages"),
-            kind: SettingKind::Int {
-                min: 1,
-                max: 10_000,
-            },
-            default: SettingValue::Int(20),
-        })?;
+        r.add_setting(
+            SettingSpec::new(
+                PAGES,
+                "diagnostics.setting.pages",
+                SettingKind::Int {
+                    min: 1,
+                    max: 10_000,
+                },
+                SettingValue::Int(20),
+            )
+            .group(groups::SYSTEM)
+            .advanced()
+            .description("diagnostics.setting.pages.help"),
+        )?;
         r.add_keymap(Cow::Borrowed(include_str!("../keymap.ini")))?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/en.ini")))?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/de.ini")))?;

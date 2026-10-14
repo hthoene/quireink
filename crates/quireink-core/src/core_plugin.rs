@@ -7,12 +7,12 @@ use alloc::boxed::Box;
 use alloc::vec::Vec;
 
 use quireink_sdk::builtin::{
-    actions, fonts, keymap_presets, menus, params, screens, settings, slots,
+    actions, fonts, groups, keymap_presets, menus, params, screens, settings, slots,
 };
 use quireink_sdk::{
     ActionHandler, ActionSpec, Canvas, Color, Command, Cx, Env, Handled, Id, Manifest, MenuEntry,
     Params, Plugin, Priority, RegisterError, Registrar, SDK_VERSION, Screen, ScreenSpec,
-    SettingKind, SettingSpec, SettingValue, SlotSpec,
+    SettingGroupSpec, SettingKind, SettingSpec, SettingValue, SlotSpec,
 };
 
 pub(crate) const CORE: Id = Id::new_static("core");
@@ -155,47 +155,90 @@ impl Plugin for CorePlugin {
             })?;
         }
 
-        r.add_setting(SettingSpec {
-            id: settings::LANGUAGE,
-            title: Cow::Borrowed("core.setting.language"),
-            kind: SettingKind::Language,
-            default: SettingValue::Text(Cow::Borrowed(quireink_i18n::FALLBACK_LANGUAGE)),
-        })?;
-        r.add_setting(SettingSpec {
-            id: settings::NIGHT_MODE,
-            title: Cow::Borrowed("core.setting.night-mode"),
-            kind: SettingKind::Bool,
-            default: SettingValue::Bool(false),
-        })?;
-        r.add_setting(SettingSpec {
-            id: settings::UI_SIZE,
-            title: Cow::Borrowed("core.setting.ui-size"),
-            kind: SettingKind::Int { min: 7, max: 24 },
-            default: SettingValue::Int(11),
-        })?;
-        r.add_setting(SettingSpec {
-            id: settings::KEYMAP_PRESET,
-            title: Cow::Borrowed("core.setting.keymap-preset"),
-            // The kernel fills in the registered presets.
-            kind: SettingKind::Choice(alloc::vec![Cow::Borrowed(keymap_presets::STANDARD_NAME)]),
-            default: SettingValue::Text(Cow::Borrowed(keymap_presets::STANDARD_NAME)),
-        })?;
+        for (id, title, order) in [
+            (groups::READING, "core.group.reading", 10),
+            (groups::DISPLAY, "core.group.display", 20),
+            (groups::CONTROLS, "core.group.controls", 30),
+            (groups::LIBRARY, "core.group.library", 40),
+            (groups::SYSTEM, "core.group.system", 90),
+            (groups::OTHER, "core.group.other", 100),
+        ] {
+            r.add_setting_group(SettingGroupSpec {
+                id,
+                title: Cow::Borrowed(title),
+                order,
+            })?;
+        }
 
-        r.add_setting(SettingSpec {
-            id: settings::FULL_REFRESH_INTERVAL,
-            title: Cow::Borrowed("core.setting.full-refresh-interval"),
-            kind: SettingKind::Int { min: 0, max: 1000 },
-            default: SettingValue::Int(6),
-        })?;
-        r.add_setting(SettingSpec {
-            id: settings::LONG_PRESS_MS,
-            title: Cow::Borrowed("core.setting.long-press-ms"),
-            kind: SettingKind::Int {
-                min: 200,
-                max: 3000,
-            },
-            default: SettingValue::Int(500),
-        })?;
+        r.add_setting(
+            SettingSpec::new(
+                settings::LANGUAGE,
+                "core.setting.language",
+                SettingKind::Language,
+                SettingValue::Text(Cow::Borrowed(quireink_i18n::FALLBACK_LANGUAGE)),
+            )
+            .group(groups::SYSTEM)
+            .description("core.setting.language.help"),
+        )?;
+        r.add_setting(
+            SettingSpec::new(
+                settings::NIGHT_MODE,
+                "core.setting.night-mode",
+                SettingKind::Bool,
+                SettingValue::Bool(false),
+            )
+            .group(groups::DISPLAY)
+            .description("core.setting.night-mode.help"),
+        )?;
+        r.add_setting(
+            SettingSpec::new(
+                settings::UI_SIZE,
+                "core.setting.ui-size",
+                SettingKind::Int { min: 7, max: 24 },
+                SettingValue::Int(11),
+            )
+            .group(groups::DISPLAY)
+            .unit("core.unit.pt")
+            .description("core.setting.ui-size.help"),
+        )?;
+        r.add_setting(
+            SettingSpec::new(
+                settings::KEYMAP_PRESET,
+                "core.setting.keymap-preset",
+                // The kernel fills in the registered presets.
+                SettingKind::Choice(alloc::vec![Cow::Borrowed(keymap_presets::STANDARD_NAME)]),
+                SettingValue::Text(Cow::Borrowed(keymap_presets::STANDARD_NAME)),
+            )
+            .group(groups::CONTROLS)
+            .description("core.setting.keymap-preset.help"),
+        )?;
+        r.add_setting(
+            SettingSpec::new(
+                settings::FULL_REFRESH_INTERVAL,
+                "core.setting.full-refresh-interval",
+                SettingKind::Int { min: 0, max: 1000 },
+                SettingValue::Int(6),
+            )
+            .group(groups::DISPLAY)
+            .advanced()
+            .unit("core.unit.pages")
+            .description("core.setting.full-refresh-interval.help"),
+        )?;
+        r.add_setting(
+            SettingSpec::new(
+                settings::LONG_PRESS_MS,
+                "core.setting.long-press-ms",
+                SettingKind::Int {
+                    min: 200,
+                    max: 3000,
+                },
+                SettingValue::Int(500),
+            )
+            .group(groups::CONTROLS)
+            .advanced()
+            .unit("core.unit.ms")
+            .description("core.setting.long-press-ms.help"),
+        )?;
 
         r.add_keymap(Cow::Borrowed(include_str!("../keymaps/default.ini")))?;
         r.add_keymap_preset(

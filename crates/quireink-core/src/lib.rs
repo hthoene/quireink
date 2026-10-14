@@ -643,6 +643,11 @@ impl Kernel {
             // Cannot fail: checked above.
             let _ = self.shared.formats.add(format);
         }
+        for group in staging.setting_groups.drain(..) {
+            if let Err(error) = self.shared.settings.add_group(group) {
+                self.warn(WarningSource::Runtime, None, format!("{error}"));
+            }
+        }
         for spec in staging.hyphenation.drain(..) {
             // Cannot fail: checked above and by the registrar.
             let _ = self.shared.hyphenation.add(spec);

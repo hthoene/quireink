@@ -97,12 +97,12 @@ impl Plugin for TestPlugin {
             title: Cow::Borrowed("test.special"),
             handler: None,
         })?;
-        r.add_setting(SettingSpec {
-            id: Id::parse(&alloc::format!("{}.level", self.id)).unwrap(),
-            title: Cow::Borrowed("test.level"),
-            kind: SettingKind::Int { min: 1, max: 5 },
-            default: SettingValue::Int(2),
-        })?;
+        r.add_setting(SettingSpec::new(
+            Id::parse(&alloc::format!("{}.level", self.id)).unwrap(),
+            "test.level",
+            SettingKind::Int { min: 1, max: 5 },
+            SettingValue::Int(2),
+        ))?;
         if let Some(keymap) = self.keymap {
             r.add_keymap(Cow::Borrowed(keymap))?;
         }

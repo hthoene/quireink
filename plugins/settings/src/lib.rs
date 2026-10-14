@@ -1,16 +1,22 @@
-//! The settings screen.
+//! The settings screens, generated from the settings every plugin declares
+//! (`Registrar::add_setting`) — no plugin needs its own settings UI.
 //!
-//! Lists every setting any plugin declared (`Registrar::add_setting`) and
-//! edits it according to its kind — no plugin needs its own settings UI.
-//! Changes are applied immediately and saved to `quireink.ini` by the
+//! - The main page lists the setting groups, and a switch for advanced
+//!   settings.
+//! - A group page lists its settings with their values and units; the
+//!   focused setting's description is shown below the list.
+//! - Choices and languages open a list to pick from.
+//!
+//! Changes apply immediately and are saved to `quireink.ini` by the
 //! kernel.
 //!
-//! Buttons: move to a setting, *confirm* toggles a switch or starts editing
-//! a value; while editing, left/right (or up/down, page buttons) change it
-//! and *confirm*/*back* finish. Touch: tap a switch to toggle it; tap the
-//! left third of a value to decrease it, elsewhere to increase it.
+//! Buttons: move to an item, *confirm* opens a group, toggles a switch,
+//! opens a choice or starts editing a number; while editing, left/right
+//! (or up/down, page buttons) change it and *confirm*/*back* finish.
+//! Touch: tap an item to open, toggle or choose it; a tapped number shows
+//! − and + buttons that change it.
 //!
-//! Bound to the `core.settings` slot.
+//! The main page is bound to the `core.settings` slot.
 
 #![no_std]
 
@@ -22,16 +28,25 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use quireink_sdk::builtin::{actions, events, slots};
+use quireink_sdk::builtin::{actions, events, groups, slots};
 use quireink_sdk::ui::{self, ListChange, ListView, UiStyle};
 use quireink_sdk::{
-    Arg, Canvas, Color, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Manifest, Params,
-    Plugin, Priority, Rect, RefreshMode, RegisterError, Registrar, SDK_VERSION, Screen, ScreenSpec,
-    SettingKind, SettingSpec, SettingValue, Version,
+    Arg, Canvas, Color, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Level, Manifest,
+    Params, Plugin, Priority, Rect, RefreshMode, RegisterError, Registrar, SDK_VERSION, Screen,
+    ScreenSpec, SettingKind, SettingSpec, SettingValue, Version,
 };
 
 pub const PLUGIN: Id = Id::new_static("settings");
+/// The main page: setting groups.
 pub const SCREEN: Id = Id::new_static("settings.list");
+/// The settings of one group; parameter `id`.
+pub const GROUP_SCREEN: Id = Id::new_static("settings.group");
+/// Picks a value of a choice or language setting; parameter `id`.
+pub const CHOOSE_SCREEN: Id = Id::new_static("settings.choose");
+/// Show advanced settings too.
+pub const ADVANCED: Id = Id::new_static("settings.advanced");
+
+const ID: &str = "id";
 
 /// The settings plugin.
 #[derive(Debug, Default)]
@@ -51,37 +66,366 @@ impl Plugin for SettingsPlugin {
         r.add_screen(ScreenSpec {
             id: SCREEN,
             title: Cow::Borrowed("settings.title"),
-            factory: Box::new(|env, _| Box::new(SettingsScreen::new(env))),
+            factory: Box::new(|env, _| Box::new(GroupList::new(env))),
+        })?;
+        r.add_screen(ScreenSpec {
+            id: GROUP_SCREEN,
+            title: Cow::Borrowed("settings.title"),
+            factory: Box::new(|env, params| {
+                let group = params.get(ID).and_then(|id| Id::parse(id).ok());
+                Box::new(GroupPage::new(env, group.unwrap_or(groups::OTHER)))
+            }),
+        })?;
+        r.add_screen(ScreenSpec {
+            id: CHOOSE_SCREEN,
+            title: Cow::Borrowed("settings.title"),
+            factory: Box::new(|env, params| {
+                let id = params.get(ID).unwrap_or_default();
+                Box::new(Chooser::new(env, id))
+            }),
         })?;
         r.bind_slot(slots::SETTINGS, SCREEN, Priority::DEFAULT)?;
+        r.add_setting(
+            SettingSpec::new(
+                ADVANCED,
+                "settings.advanced",
+                SettingKind::Bool,
+                SettingValue::Bool(false),
+            )
+            .group(groups::SYSTEM)
+            .description("settings.advanced.help"),
+        )?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/en.ini")))?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/de.ini")))?;
         Ok(())
     }
 }
 
+/// Whether a setting is shown with the current level.
+fn visible(env: &Env<'_>, spec: &SettingSpec) -> bool {
+    spec.level == Level::Basic || env.settings.bool(ADVANCED.as_str())
+}
+
+/// The header, list area and list for a screen with a footer of
+/// `footer` text lines.
+fn frame(env: &Env<'_>, footer: u32) -> (UiStyle, Rect, ListView) {
+    let style = UiStyle::new(env);
+    let display = env.device.display;
+    let header = Rect::new(0, 0, display.width, style.header as u16);
+    let top = header.height + style.gap as u16;
+    // Room for `footer` lines of small text below the list.
+    let footer = if footer == 0 {
+        0
+    } else {
+        (footer as f32 * style.small * 1.5) as u16 + style.gap as u16
+    };
+    let height = display.height.saturating_sub(top).saturating_sub(footer);
+    let area = Rect::new(0, top, display.width, height);
+    (style, header, ListView::new(area, style.row))
+}
+
+fn moved(change: ListChange, cx: &mut Cx<'_, '_>) {
+    if change != ListChange::None {
+        cx.request_redraw();
+        cx.request_refresh(if change == ListChange::Page {
+            RefreshMode::Partial
+        } else {
+            RefreshMode::Fast
+        });
+    }
+}
+
+/// Moves `list` by the navigation actions; `None` if `action` is another.
+fn navigate(list: &mut ListView, len: usize, action: &Id) -> Option<ListChange> {
+    let rows = list.rows() as isize;
+    let delta =
+        if *action == actions::UP || *action == actions::LEFT || *action == actions::PREVIOUS {
+            -1
+        } else if *action == actions::DOWN || *action == actions::RIGHT || *action == actions::NEXT
+        {
+            1
+        } else if *action == actions::NEXT_PAGE {
+            rows
+        } else if *action == actions::PREV_PAGE {
+            -rows
+        } else {
+            return None;
+        };
+    Some(list.move_focus(delta, len))
+}
+
+fn page_note(env: &Env<'_>, list: &ListView, len: usize) -> Option<String> {
+    (list.pages(len) > 1).then(|| {
+        env.i18n.format(
+            "settings.page",
+            &[
+                ("page", Arg::Int(list.page() as i64 + 1)),
+                ("pages", Arg::Int(list.pages(len) as i64)),
+            ],
+        )
+    })
+}
+
+/// Draws a row: `title` on the left, `value` right-aligned.
+fn draw_row(
+    canvas: &mut Canvas<'_>,
+    env: &Env<'_>,
+    style: &UiStyle,
+    rect: Rect,
+    focused: bool,
+    title: &str,
+    value: &str,
+) {
+    let Some(font) = style.font(env) else {
+        return;
+    };
+    let color = if focused { Color::WHITE } else { Color::BLACK };
+    let margin = style.margin as f32;
+    let value_width = font.measure(style.text, value);
+    let value_x = f32::from(rect.x) + f32::from(rect.width) - margin - value_width;
+    ui::draw_label(canvas, &font, style.text, value_x, rect, value, color);
+    let title = ui::fit(&font, style.text, title, value_x - margin * 3.0);
+    ui::draw_label(canvas, &font, style.text, margin, rect, &title, color);
+}
+
+/// The − and + buttons of a focused number row, with room for `value`
+/// between them.
+fn stepper(env: &Env<'_>, style: &UiStyle, rect: Rect, value: &str) -> Option<(Rect, Rect)> {
+    let font = style.font(env)?;
+    let size = (u32::from(rect.height) * 7 / 10) as u16;
+    let y = rect.y + (rect.height - size) / 2;
+    let margin = style.margin as u16;
+    let gap = style.gap as u16;
+    let right = rect.x + rect.width - margin;
+    let plus = Rect::new(right.saturating_sub(size), y, size, size);
+    let value_width = font.measure(style.text, value) as u16;
+    let minus_x = plus.x.saturating_sub(2 * gap + value_width + size);
+    Some((Rect::new(minus_x, y, size, size), plus))
+}
+
+/// A focused number: title, then `[−] value [+]`. While editing with
+/// buttons the boxes are filled.
+fn draw_stepper(
+    canvas: &mut Canvas<'_>,
+    env: &Env<'_>,
+    style: &UiStyle,
+    rect: Rect,
+    title: &str,
+    value: &str,
+    editing: bool,
+) {
+    let (Some(font), Some((minus, plus))) = (style.font(env), stepper(env, style, rect, value))
+    else {
+        return;
+    };
+    let margin = style.margin as f32;
+    let title = ui::fit(&font, style.text, title, f32::from(minus.x) - margin * 2.0);
+    ui::draw_label(
+        canvas,
+        &font,
+        style.text,
+        margin,
+        rect,
+        &title,
+        Color::WHITE,
+    );
+    let value_x = f32::from(minus.x + minus.width + style.gap as u16);
+    ui::draw_label(
+        canvas,
+        &font,
+        style.text,
+        value_x,
+        rect,
+        value,
+        Color::WHITE,
+    );
+    for (button, glyph) in [(minus, "−"), (plus, "+")] {
+        let (x, y, w, h) = (
+            i32::from(button.x),
+            i32::from(button.y),
+            u32::from(button.width),
+            u32::from(button.height),
+        );
+        let glyph_color = if editing {
+            canvas.fill_rect(x, y, w, h, Color::WHITE);
+            Color::BLACK
+        } else {
+            canvas.stroke_rect(x, y, w, h, style.line.max(2), Color::WHITE);
+            Color::WHITE
+        };
+        let glyph_width = font.measure(style.text, glyph);
+        let glyph_x = f32::from(button.x) + (f32::from(button.width) - glyph_width) / 2.0;
+        ui::draw_label(canvas, &font, style.text, glyph_x, rect, glyph, glyph_color);
+    }
+}
+
+// ---- Main page: groups -------------------------------------------------
+
 #[derive(Debug)]
-struct SettingsScreen {
+struct GroupList {
+    /// Groups with visible settings, by order.
+    groups: Vec<(Id, String)>,
+    style: UiStyle,
+    header: Rect,
+    list: ListView,
+}
+
+impl GroupList {
+    fn new(env: &Env<'_>) -> Self {
+        let (style, header, list) = frame(env, 0);
+        let groups = env
+            .settings
+            .groups()
+            .filter(|group| {
+                env.settings
+                    .specs()
+                    .any(|spec| env.settings.group_of(spec) == group.id && visible(env, spec))
+            })
+            .map(|group| (group.id.clone(), env.i18n.tr(&group.title).to_string()))
+            .collect();
+        Self {
+            groups,
+            style,
+            header,
+            list,
+        }
+    }
+
+    /// Groups, then the switch for advanced settings.
+    fn len(&self) -> usize {
+        self.groups.len() + 1
+    }
+
+    fn choose(&self, index: usize, cx: &mut Cx<'_, '_>) {
+        match self.groups.get(index) {
+            Some((id, _)) => cx.command(Command::OpenScreen(
+                GROUP_SCREEN,
+                Params::new().with(ID, id.as_str().to_string()),
+            )),
+            None => {
+                let advanced = cx.env().settings.bool(ADVANCED.as_str());
+                cx.command(Command::SetSetting(ADVANCED, SettingValue::Bool(!advanced)));
+            }
+        }
+    }
+}
+
+impl Screen for GroupList {
+    fn draw(&mut self, canvas: &mut Canvas<'_>, env: &Env<'_>) {
+        let style = self.style;
+        let len = self.len();
+        let note = page_note(env, &self.list, len);
+        ui::draw_header(
+            canvas,
+            env,
+            &style,
+            self.header,
+            env.i18n.tr("settings.title"),
+            note.as_deref(),
+        );
+        let groups = &self.groups;
+        let advanced = if env.settings.bool(ADVANCED.as_str()) {
+            env.i18n.tr("settings.on")
+        } else {
+            env.i18n.tr("settings.off")
+        };
+        self.list.draw(
+            canvas,
+            &style,
+            len,
+            |canvas, index, rect, focused| match groups.get(index) {
+                Some((_, title)) => {
+                    draw_row(canvas, env, &style, rect, focused, title, "›");
+                }
+                None => draw_row(
+                    canvas,
+                    env,
+                    &style,
+                    rect,
+                    focused,
+                    env.i18n.tr("settings.advanced"),
+                    advanced,
+                ),
+            },
+        );
+    }
+
+    fn on_action(&mut self, action: &Id, cx: &mut Cx<'_, '_>) -> Handled {
+        let len = self.len();
+        if let Some(change) = navigate(&mut self.list, len, action) {
+            moved(change, cx);
+        } else if *action == actions::CONFIRM {
+            self.choose(self.list.focus, cx);
+        } else {
+            return Handled::No;
+        }
+        Handled::Yes
+    }
+
+    fn on_gesture(&mut self, gesture: Gesture, cx: &mut Cx<'_, '_>) -> Handled {
+        if gesture.kind != GestureKind::Tap {
+            return Handled::No;
+        }
+        match self.list.hit(gesture.start, self.len()) {
+            Some(index) => {
+                self.list.focus = index;
+                self.choose(index, cx);
+                Handled::Yes
+            }
+            None => Handled::No,
+        }
+    }
+
+    fn on_event(&mut self, event: &Id, _: &Params, cx: &mut Cx<'_, '_>) {
+        if *event == events::SETTING_CHANGED {
+            // Language, UI size or the advanced switch may have changed.
+            let env = *cx.env();
+            let focus = self.list.focus;
+            *self = Self::new(&env);
+            self.list.focus = focus.min(self.len() - 1);
+            cx.request_redraw();
+        }
+    }
+}
+
+// ---- Group page: settings ----------------------------------------------
+
+/// Lines of description below the list.
+const FOOTER_LINES: u32 = 3;
+
+#[derive(Debug)]
+struct GroupPage {
+    group: Id,
+    title: String,
     specs: Vec<SettingSpec>,
     style: UiStyle,
     header: Rect,
     list: ListView,
-    /// The focused value is being edited.
+    /// The focused number is being edited.
     editing: bool,
 }
 
-impl SettingsScreen {
-    fn new(env: &Env<'_>) -> Self {
-        let style = UiStyle::new(env);
-        let display = env.device.display;
-        let header = Rect::new(0, 0, display.width, style.header as u16);
-        let top = header.height + style.gap as u16;
-        let area = Rect::new(0, top, display.width, display.height.saturating_sub(top));
+impl GroupPage {
+    fn new(env: &Env<'_>, group: Id) -> Self {
+        let (style, header, list) = frame(env, FOOTER_LINES);
+        let title = env
+            .settings
+            .groups()
+            .find(|g| g.id == group)
+            .map_or_else(String::new, |g| env.i18n.tr(&g.title).to_string());
+        let specs = env
+            .settings
+            .specs()
+            .filter(|spec| env.settings.group_of(spec) == group && visible(env, spec))
+            .cloned()
+            .collect();
         Self {
-            specs: env.settings.specs().cloned().collect(),
-            list: ListView::new(area, style.row),
+            group,
+            title,
+            specs,
             style,
             header,
+            list,
             editing: false,
         }
     }
@@ -90,7 +434,7 @@ impl SettingsScreen {
         self.specs.get(self.list.focus)
     }
 
-    /// Changes the focused setting by `step` (toggle, ±1, next option).
+    /// Changes a number by `step` or toggles a switch.
     fn change(&self, env: &Env<'_>, step: i64, cx: &mut Cx<'_, '_>) {
         let Some(spec) = self.focused() else {
             return;
@@ -101,123 +445,133 @@ impl SettingsScreen {
             (SettingKind::Int { min, max }, Some(SettingValue::Int(v))) => {
                 SettingValue::Int((v + step).clamp(*min, *max))
             }
-            (SettingKind::Choice(options), Some(SettingValue::Text(v))) => {
-                let options: Vec<&str> = options.iter().map(|o| o.as_ref()).collect();
-                SettingValue::Text(Cow::Owned(cycle(&options, v, step).to_string()))
-            }
-            (SettingKind::Language, Some(SettingValue::Text(v))) => {
-                let tags: Vec<&str> = env.i18n.languages().into_iter().map(|(t, _)| t).collect();
-                SettingValue::Text(Cow::Owned(cycle(&tags, v, step).to_string()))
-            }
             _ => return,
         };
         if Some(&value) != current {
             cx.command(Command::SetSetting(spec.id.clone(), value));
             cx.request_redraw();
-            cx.request_refresh(RefreshMode::Partial);
+            cx.request_refresh(RefreshMode::Fast);
         }
     }
 
-    fn editable(spec: &SettingSpec) -> bool {
-        !matches!(spec.kind, SettingKind::Text)
-    }
-
-    fn moved(&mut self, change: ListChange, cx: &mut Cx<'_, '_>) {
-        if change != ListChange::None {
-            self.editing = false;
-            cx.request_redraw();
-            cx.request_refresh(if change == ListChange::Page {
-                RefreshMode::Partial
-            } else {
-                RefreshMode::Fast
-            });
+    /// What confirming (or tapping) the focused setting does.
+    fn activate(&mut self, env: &Env<'_>, step: i64, cx: &mut Cx<'_, '_>) {
+        let Some(spec) = self.focused() else {
+            return;
+        };
+        match spec.kind {
+            SettingKind::Bool => self.change(env, 1, cx),
+            SettingKind::Int { .. } if self.editing => self.change(env, step, cx),
+            SettingKind::Int { .. } => {
+                self.editing = true;
+                cx.request_redraw();
+                cx.request_refresh(RefreshMode::Fast);
+            }
+            SettingKind::Choice(_) | SettingKind::Language => {
+                cx.command(Command::OpenScreen(
+                    CHOOSE_SCREEN,
+                    Params::new().with(ID, spec.id.as_str().to_string()),
+                ));
+            }
+            // Text needs a keyboard (planned); edit it in quireink.ini.
+            _ => {}
         }
     }
 }
 
-/// The option `step` positions after `current`, wrapping around.
-fn cycle<'a>(options: &[&'a str], current: &str, step: i64) -> &'a str {
-    if options.is_empty() {
-        return "";
-    }
-    let len = options.len() as i64;
-    let index = options.iter().position(|o| *o == current).unwrap_or(0) as i64;
-    options[(index + step).rem_euclid(len) as usize]
-}
-
-/// The value of a setting for display.
+/// The value of a setting for display, with its unit.
 fn display_value(env: &Env<'_>, spec: &SettingSpec) -> String {
     match env.settings.get(spec.id.as_str()) {
         Some(SettingValue::Bool(true)) => env.i18n.tr("settings.on").to_string(),
         Some(SettingValue::Bool(false)) => env.i18n.tr("settings.off").to_string(),
-        Some(SettingValue::Int(v)) => format!("{v}"),
-        Some(SettingValue::Text(v)) if spec.kind == SettingKind::Language => env
-            .i18n
-            .languages()
-            .into_iter()
-            .find(|(tag, _)| *tag == v.as_ref())
-            .map_or(v.to_string(), |(_, name)| name.to_string()),
-        // Choices are ids; their translation is their display name.
-        Some(SettingValue::Text(v)) if matches!(spec.kind, SettingKind::Choice(_)) => {
-            env.i18n.tr(v).to_string()
-        }
-        Some(SettingValue::Text(v)) => v.to_string(),
+        Some(SettingValue::Int(v)) => match &spec.unit {
+            Some(unit) => env.i18n.plural(unit, *v, &[]),
+            None => format!("{v}"),
+        },
+        Some(SettingValue::Text(v)) => option_name(env, spec, v),
         None => String::new(),
     }
 }
 
-impl Screen for SettingsScreen {
+/// The display name of a choice or language value.
+fn option_name(env: &Env<'_>, spec: &SettingSpec, value: &str) -> String {
+    match spec.kind {
+        SettingKind::Language => env
+            .i18n
+            .languages()
+            .into_iter()
+            .find(|(tag, _)| *tag == value)
+            .map_or(value.to_string(), |(_, name)| name.to_string()),
+        // Choices are ids; their translation is their display name.
+        SettingKind::Choice(_) => env.i18n.tr(value).to_string(),
+        _ => value.to_string(),
+    }
+}
+
+impl Screen for GroupPage {
     fn draw(&mut self, canvas: &mut Canvas<'_>, env: &Env<'_>) {
         let style = self.style;
         let len = self.specs.len();
-        let note = (self.list.pages(len) > 1).then(|| {
-            env.i18n.format(
-                "settings.page",
-                &[
-                    ("page", Arg::Int(self.list.page() as i64 + 1)),
-                    ("pages", Arg::Int(self.list.pages(len) as i64)),
-                ],
-            )
-        });
+        let note = page_note(env, &self.list, len);
         ui::draw_header(
             canvas,
             env,
             &style,
             self.header,
-            env.i18n.tr("settings.title"),
+            &self.title,
             note.as_deref(),
         );
-        let Some(font) = style.font(env) else {
-            return;
-        };
         let specs = &self.specs;
         let editing = self.editing;
         self.list
             .draw(canvas, &style, len, |canvas, index, rect, focused| {
                 let spec = &specs[index];
-                let color = if focused { Color::WHITE } else { Color::BLACK };
+                let title = env.i18n.tr(&spec.title);
                 let mut value = display_value(env, spec);
-                if focused && editing {
-                    value = format!("‹ {value} ›");
+                if focused && matches!(spec.kind, SettingKind::Int { .. }) {
+                    draw_stepper(canvas, env, &style, rect, title, &value, editing);
+                    return;
                 }
-                let margin = style.margin as f32;
-                let value_width = font.measure(style.text, &value);
-                let value_x = f32::from(rect.x) + f32::from(rect.width) - margin - value_width;
-                ui::draw_label(canvas, &font, style.text, value_x, rect, &value, color);
-                let title = ui::fit(
-                    &font,
-                    style.text,
-                    env.i18n.tr(&spec.title),
-                    value_x - margin * 3.0,
-                );
-                ui::draw_label(canvas, &font, style.text, margin, rect, &title, color);
+                if matches!(spec.kind, SettingKind::Choice(_) | SettingKind::Language) {
+                    value.push_str(" ›");
+                }
+                draw_row(canvas, env, &style, rect, focused, title, &value);
             });
+
+        // The focused setting's description.
+        let Some(help) = self.focused().and_then(|s| s.description.as_deref()) else {
+            return;
+        };
+        let Some(font) = style.font(env) else {
+            return;
+        };
+        let margin = style.margin as f32;
+        let display = env.device.display;
+        let width = f32::from(display.width) - 2.0 * margin;
+        let line = style.small * 1.5;
+        let top = f32::from(self.list.area.y) + f32::from(self.list.area.height);
+        for (n, range) in font
+            .wrap(style.small, env.i18n.tr(help), width)
+            .into_iter()
+            .take(FOOTER_LINES as usize)
+            .enumerate()
+        {
+            let text = &env.i18n.tr(help)[range];
+            let baseline = top + line * (n as f32 + 0.8);
+            font.draw(
+                canvas,
+                style.small,
+                margin,
+                baseline as i32,
+                text,
+                Color::gray(80),
+            );
+        }
     }
 
     fn on_action(&mut self, action: &Id, cx: &mut Cx<'_, '_>) -> Handled {
         let env = *cx.env();
         let len = self.specs.len();
-        let a = action;
         if self.editing {
             let decrease = [
                 actions::LEFT,
@@ -231,11 +585,11 @@ impl Screen for SettingsScreen {
                 actions::NEXT_PAGE,
                 actions::NEXT,
             ];
-            if decrease.contains(a) {
+            if decrease.contains(action) {
                 self.change(&env, -1, cx);
-            } else if increase.contains(a) {
+            } else if increase.contains(action) {
                 self.change(&env, 1, cx);
-            } else if *a == actions::CONFIRM || *a == actions::BACK {
+            } else if *action == actions::CONFIRM || *action == actions::BACK {
                 self.editing = false;
                 cx.request_redraw();
                 cx.request_refresh(RefreshMode::Fast);
@@ -244,29 +598,14 @@ impl Screen for SettingsScreen {
             }
             return Handled::Yes;
         }
-        let rows = self.list.rows() as isize;
-        if *a == actions::UP || *a == actions::LEFT || *a == actions::PREVIOUS {
-            let change = self.list.move_focus(-1, len);
-            self.moved(change, cx);
-        } else if *a == actions::DOWN || *a == actions::RIGHT || *a == actions::NEXT {
-            let change = self.list.move_focus(1, len);
-            self.moved(change, cx);
-        } else if *a == actions::NEXT_PAGE {
-            let change = self.list.move_focus(rows, len);
-            self.moved(change, cx);
-        } else if *a == actions::PREV_PAGE {
-            let change = self.list.move_focus(-rows, len);
-            self.moved(change, cx);
-        } else if *a == actions::CONFIRM {
-            match self.focused().map(|s| &s.kind) {
-                Some(SettingKind::Bool) => self.change(&env, 1, cx),
-                Some(_) if self.focused().is_some_and(Self::editable) => {
-                    self.editing = true;
-                    cx.request_redraw();
-                    cx.request_refresh(RefreshMode::Fast);
-                }
-                _ => {}
+        if let Some(change) = navigate(&mut self.list, len, action) {
+            moved(change, cx);
+            if change != ListChange::None {
+                // The description below changes with the focus.
+                cx.request_redraw();
             }
+        } else if *action == actions::CONFIRM {
+            self.activate(&env, 1, cx);
         } else {
             return Handled::No;
         }
@@ -281,24 +620,50 @@ impl Screen for SettingsScreen {
             return Handled::No;
         };
         let env = *cx.env();
+        let is_number = matches!(
+            self.specs.get(index).map(|s| &s.kind),
+            Some(SettingKind::Int { .. })
+        );
+        if is_number {
+            // The first tap selects a number; then its − and + buttons
+            // change it, so a value never changes by accident.
+            if index != self.list.focus {
+                self.list.focus = index;
+                self.editing = false;
+                cx.request_redraw();
+                cx.request_refresh(RefreshMode::Fast);
+                return Handled::Yes;
+            }
+            let Some(spec) = self.focused() else {
+                return Handled::Yes;
+            };
+            let rect = self.list.row_rect(index % self.list.rows());
+            let value = display_value(&env, spec);
+            if let Some((minus, plus)) = stepper(&env, &self.style, rect, &value) {
+                let x = gesture.start.x;
+                let within = |r: Rect| x >= i32::from(r.x) && x < r.right() as i32;
+                if within(minus) {
+                    self.change(&env, -1, cx);
+                } else if within(plus) {
+                    self.change(&env, 1, cx);
+                }
+            }
+            return Handled::Yes;
+        }
         if index != self.list.focus {
             self.list.focus = index;
             self.editing = false;
             cx.request_redraw();
         }
-        let width = i32::from(self.list.area.width);
-        let step = if gesture.start.x < width / 3 { -1 } else { 1 };
-        self.change(&env, step, cx);
+        self.activate(&env, 1, cx);
         Handled::Yes
     }
 
     fn on_event(&mut self, event: &Id, _: &Params, cx: &mut Cx<'_, '_>) {
         if *event == events::SETTING_CHANGED {
-            // Values or the UI size may have changed elsewhere.
             let env = *cx.env();
-            let focus = self.list.focus;
-            let editing = self.editing;
-            *self = Self::new(&env);
+            let (focus, editing) = (self.list.focus, self.editing);
+            *self = Self::new(&env, self.group.clone());
             self.list.focus = focus.min(self.specs.len().saturating_sub(1));
             self.editing = editing;
             cx.request_redraw();
@@ -306,9 +671,109 @@ impl Screen for SettingsScreen {
     }
 }
 
+// ---- Choosing a value ---------------------------------------------------
+
+#[derive(Debug)]
+struct Chooser {
+    spec: Option<SettingSpec>,
+    /// (value, display name)
+    options: Vec<(String, String)>,
+    style: UiStyle,
+    header: Rect,
+    list: ListView,
+}
+
+impl Chooser {
+    fn new(env: &Env<'_>, id: &str) -> Self {
+        let (style, header, mut list) = frame(env, 0);
+        let spec = env.settings.specs().find(|s| s.id.as_str() == id).cloned();
+        let options: Vec<(String, String)> = match spec.as_ref().map(|s| (&s.kind, s)) {
+            Some((SettingKind::Language, _)) => env
+                .i18n
+                .languages()
+                .into_iter()
+                .map(|(tag, name)| (tag.to_string(), name.to_string()))
+                .collect(),
+            Some((SettingKind::Choice(values), spec)) => values
+                .iter()
+                .map(|v| (v.to_string(), option_name(env, spec, v)))
+                .collect(),
+            _ => Vec::new(),
+        };
+        let current = env.settings.text(id);
+        list.focus = options.iter().position(|(v, _)| v == current).unwrap_or(0);
+        Self {
+            spec,
+            options,
+            style,
+            header,
+            list,
+        }
+    }
+
+    fn choose(&self, index: usize, cx: &mut Cx<'_, '_>) {
+        let (Some(spec), Some((value, _))) = (&self.spec, self.options.get(index)) else {
+            return;
+        };
+        cx.command(Command::Back);
+        cx.command(Command::SetSetting(
+            spec.id.clone(),
+            SettingValue::Text(Cow::Owned(value.clone())),
+        ));
+    }
+}
+
+impl Screen for Chooser {
+    fn draw(&mut self, canvas: &mut Canvas<'_>, env: &Env<'_>) {
+        let style = self.style;
+        let len = self.options.len();
+        let title = self
+            .spec
+            .as_ref()
+            .map_or("", |spec| env.i18n.tr(&spec.title));
+        let note = page_note(env, &self.list, len);
+        ui::draw_header(canvas, env, &style, self.header, title, note.as_deref());
+        let options = &self.options;
+        let current = self
+            .spec
+            .as_ref()
+            .map_or("", |spec| env.settings.text(spec.id.as_str()));
+        self.list
+            .draw(canvas, &style, len, |canvas, index, rect, focused| {
+                let (value, name) = &options[index];
+                let mark = if value == current { "•" } else { "" };
+                draw_row(canvas, env, &style, rect, focused, name, mark);
+            });
+    }
+
+    fn on_action(&mut self, action: &Id, cx: &mut Cx<'_, '_>) -> Handled {
+        let len = self.options.len();
+        if let Some(change) = navigate(&mut self.list, len, action) {
+            moved(change, cx);
+        } else if *action == actions::CONFIRM {
+            self.choose(self.list.focus, cx);
+        } else {
+            return Handled::No;
+        }
+        Handled::Yes
+    }
+
+    fn on_gesture(&mut self, gesture: Gesture, cx: &mut Cx<'_, '_>) -> Handled {
+        if gesture.kind != GestureKind::Tap {
+            return Handled::No;
+        }
+        match self.list.hit(gesture.start, self.options.len()) {
+            Some(index) => {
+                self.choose(index, cx);
+                Handled::Yes
+            }
+            None => Handled::No,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::*;
     use quireink_i18n::{Catalog, check};
 
     #[test]
@@ -317,15 +782,5 @@ mod tests {
         let de = Catalog::parse(include_str!("../i18n/de.ini")).unwrap();
         let issues = check::compare(&en, &de);
         assert!(issues.is_empty(), "{issues:?}");
-    }
-
-    #[test]
-    fn cycles_through_options() {
-        let options = ["de", "en", "fr"];
-        assert_eq!(cycle(&options, "en", 1), "fr");
-        assert_eq!(cycle(&options, "fr", 1), "de");
-        assert_eq!(cycle(&options, "de", -1), "fr");
-        assert_eq!(cycle(&options, "xx", 1), "en");
-        assert_eq!(cycle(&[], "en", 1), "");
     }
 }

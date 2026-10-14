@@ -141,6 +141,24 @@ pub mod keymap_presets {
 pub const CONFIG_FILE: &str = "quireink.ini";
 
 /// Font roles.
+/// Groups of the generated settings screen; plugins can add their own.
+pub mod groups {
+    use crate::Id;
+
+    /// Book text: font size, spacing, hyphenation, …
+    pub const READING: Id = Id::new_static("core.group.reading");
+    /// Screen: night mode, menu size, refresh.
+    pub const DISPLAY: Id = Id::new_static("core.group.display");
+    /// Buttons and gestures.
+    pub const CONTROLS: Id = Id::new_static("core.group.controls");
+    /// Books and folders.
+    pub const LIBRARY: Id = Id::new_static("core.group.library");
+    /// Language and everything about the device.
+    pub const SYSTEM: Id = Id::new_static("core.group.system");
+    /// Settings whose plugin names no registered group.
+    pub const OTHER: Id = Id::new_static("core.group.other");
+}
+
 pub mod fonts {
     use crate::Id;
 

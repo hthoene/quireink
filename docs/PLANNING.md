@@ -413,7 +413,7 @@ overridden per screen.
   families are a few lines in `quireink-i18n`.
 - CI checks every catalog against English (missing/unknown keys, placeholders).
 
-### 6.7 Settings structure (planned, next UI step)
+### 6.7 Settings structure
 
 The generated settings screen is a flat list in registration order — fine
 for a dozen settings, confusing for many. Planned, keeping it generated
@@ -437,6 +437,13 @@ from contributions so every plugin benefits automatically:
 - **Search** on devices with a keyboard or touch.
 - **Contributed settings pages:** a plugin may replace the generated page
   for its group with its own screen (e.g. Wi-Fi with scanning).
+
+Status: ✅ groups as contributions (`add_setting_group`; reading,
+display, controls, library, system, other), basic/advanced levels with a
+switch on the main page, descriptions shown below the list, units with
+plural forms, a chooser list for choices and languages, `−`/`+` buttons
+for numbers (a first tap only selects). ⬜ sliders, on-screen keyboard
+for text, live preview, search, contributed pages.
 
 ---
 
@@ -748,7 +755,7 @@ If the X4 has not arrived by the end of M3, M6 (Boox) is done before M4.
 |-----------|---------|---------------|
 | **M0 Foundation** ✅ | Workspace, CI, license, ADRs, platform vocabulary, config + i18n crates, SDK 0.1 with plugin/registry/slot/action/key-map model, raw input + gesture recognition, timers, kernel, emulator with device profiles and heap cap, `diagnostics` plugin | Emulator shows the diagnostics screen contributed by a plugin; CI green on all targets |
 | **M1 Plain text** ✅ | Fonts, rasterizer, bitmap packs + `fontgen`, line breaking, storage service, document model, layout engine, TXT plugin, reader (progress, background page index, reopen last book), file browser, events, timers | ✅ A 5.3 MB TXT reads in the X4 profile within the heap budget (peak 159 KiB of 192 KiB); index of 18,844 pages built in the background |
-| **M2 UI** 🔶 | ✅ home screen (continue reading, recently read, shortcuts as menu `home.actions`), standard reading events `core.book-opened`/`core.page-turned`, key map presets (two-button layout), device setting defaults, `core.next`/`core.previous`, overlays, menus as contributions (+ `[menus]`), generated settings screen, settings saved to `quireink.ini`, screen events, `ui` building blocks, `core.ui-size`, reader menu with live re-layout · ⬜ settings structure (§6.7), themes beyond `core.ui-size`, layout files for dashboards, library service, widget semantics, on-screen keyboard, snapshot tests | Full button-only flow ✅ (also with two buttons); home screen replaceable by config ✅; snapshot tests ⬜ |
+| **M2 UI** 🔶 | ✅ home screen (continue reading, recently read, shortcuts as menu `home.actions`), standard reading events `core.book-opened`/`core.page-turned`, key map presets (two-button layout), device setting defaults, `core.next`/`core.previous`, overlays, menus as contributions (+ `[menus]`), generated settings screen, settings saved to `quireink.ini`, screen events, `ui` building blocks, `core.ui-size`, reader menu with live re-layout · ✅ settings structure (§6.7: groups, levels, descriptions, units, choosers) · ⬜ themes beyond `core.ui-size`, layout files for dashboards, library service, widget semantics, on-screen keyboard, snapshot tests | Full button-only flow ✅ (also with two buttons); home screen replaceable by config ✅; snapshot tests ⬜ |
 | **M3 EPUB** 🔶 | ✅ streaming ZIP (`quireink-zip`), incremental XML tokenizer (`quireink-xml`), EPUB 2/3 package, spine, metadata, TOC (nav + NCX) with anchors, chapter conversion into a block cache (ADR 0011), TOC screen + `reader.goto`, `DocumentError::OutOfMemory`, hyphenation (Liang patterns read in place, `quireink-hyphen`; German and English as the `hyphenation` plugin; contribution `add_hyphenation`; setting `reader.hyphenate`), styled text: bold/italic runs (`<b>`, `<i>`, `<em>`, `<strong>`, inline `style`), alignment (`<center>`, `align`, `text-align`), headings in a larger bold face that never end a page, Literata bold/italic faces, CSS subset (element and class selectors from the book's stylesheets and `<style>`: `text-align`, `font-weight`, `font-style`, `display: none`; parsed once into the cache) · ⬜ images (dithered), fuzzing, more CSS (margins, font sizes, small caps) | Standard Ebooks / Gutenberg test corpus renders correctly; Gutenberg EPUBs within the X4 budget (✅ peak 115 of 192 KiB with banded rendering, ADR 0012) |
 | **M4 Xteink X4** | ESP32 shell: display, buttons, SD, sleep, firmware backup/restore | Read an EPUB on real hardware; battery measurement |
 | **M5 Plugins v1** | SDK 0.1 published + docs, plugin manifests loaded from storage, events/filters/services complete, kosync, OPDS | Progress syncs with KOReader; a sample community plugin lives outside the repo |

@@ -25,7 +25,7 @@ use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use quireink_sdk::builtin::{actions as core_actions, events, params, slots};
+use quireink_sdk::builtin::{actions as core_actions, events, groups, params, slots};
 use quireink_sdk::{
     Command, Env, Id, Manifest, Params, Plugin, Priority, RegisterError, Registrar, SDK_VERSION,
     ScreenSpec, SettingKind, SettingSpec, SettingValue, Version,
@@ -106,32 +106,51 @@ impl Plugin for Reader {
             handler: None,
         })?;
 
-        let int = |id, title, min, max, default| SettingSpec {
-            id,
-            title: Cow::Borrowed(title),
-            kind: SettingKind::Int { min, max },
-            default: SettingValue::Int(default),
+        let int = |id, key: &'static str, (min, max, default), unit: &'static str| {
+            SettingSpec::new(
+                id,
+                key,
+                SettingKind::Int { min, max },
+                SettingValue::Int(default),
+            )
+            .group(groups::READING)
+            .unit(unit)
         };
-        let flag = |id, title, default| SettingSpec {
-            id,
-            title: Cow::Borrowed(title),
-            kind: SettingKind::Bool,
-            default: SettingValue::Bool(default),
+        let flag = |id, key: &'static str, default| {
+            SettingSpec::new(id, key, SettingKind::Bool, SettingValue::Bool(default))
+                .group(groups::READING)
         };
         for setting in [
-            int(settings::FONT_SIZE, "reader.setting.font-size", 6, 40, 11),
+            int(
+                settings::FONT_SIZE,
+                "reader.setting.font-size",
+                (6, 40, 11),
+                "core.unit.pt",
+            )
+            .description("reader.setting.font-size.help"),
             int(
                 settings::LINE_SPACING,
                 "reader.setting.line-spacing",
-                100,
-                250,
-                135,
-            ),
-            int(settings::MARGIN, "reader.setting.margin", 0, 30, 4),
-            flag(settings::JUSTIFY, "reader.setting.justify", true),
-            flag(settings::HYPHENATE, "reader.setting.hyphenate", true),
-            flag(settings::INDENT, "reader.setting.indent", true),
-            flag(settings::OPEN_LAST, "reader.setting.open-last", true),
+                (100, 250, 135),
+                "core.unit.percent",
+            )
+            .description("reader.setting.line-spacing.help"),
+            int(
+                settings::MARGIN,
+                "reader.setting.margin",
+                (0, 30, 4),
+                "core.unit.mm",
+            )
+            .description("reader.setting.margin.help"),
+            flag(settings::JUSTIFY, "reader.setting.justify", true)
+                .description("reader.setting.justify.help"),
+            flag(settings::HYPHENATE, "reader.setting.hyphenate", true)
+                .description("reader.setting.hyphenate.help"),
+            flag(settings::INDENT, "reader.setting.indent", true)
+                .advanced()
+                .description("reader.setting.indent.help"),
+            flag(settings::OPEN_LAST, "reader.setting.open-last", true)
+                .description("reader.setting.open-last.help"),
         ] {
             r.add_setting(setting)?;
         }
