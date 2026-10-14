@@ -1,0 +1,157 @@
+//! Access to the shared `Books` folder, where Boox and other e-readers keep
+//! books.
+//!
+//! Android 11 and later need "All files access" for that
+//! (`MANAGE_EXTERNAL_STORAGE`, granted on a system settings page); older
+//! versions need the storage permission. QuireInk never asks on its own: the
+//! home screen offers it ("Use the Books folder"), and the app restarts
+//! with the folder when the user comes back with access granted.
+
+use std::path::PathBuf;
+
+use android_activity::AndroidApp;
+use jni::objects::{JObject, JValue};
+use jni::{JNIEnv, JavaVM};
+
+/// Android 11, from which "All files access" replaces the storage
+/// permission.
+const ANDROID_11: i32 = 30;
+const READ_STORAGE: &str = "android.permission.READ_EXTERNAL_STORAGE";
+
+/// Runs `f` with the JNI environment and the activity, clearing any Java
+/// exception it leaves; `None` on failure.
+fn with_activity<T>(
+    app: &AndroidApp,
+    f: impl FnOnce(&mut JNIEnv<'_>, &JObject<'_>) -> jni::errors::Result<T>,
+) -> Option<T> {
+    // SAFETY: android-activity provides the process's Java VM and a global
+    // reference to the activity, both valid while the app runs; the
+    // activity reference is borrowed, never deleted here.
+    let vm = unsafe { JavaVM::from_raw(app.vm_as_ptr().cast()) }.ok()?;
+    let mut env = vm.attach_current_thread_permanently().ok()?;
+    let activity = unsafe { JObject::from_raw(app.activity_as_ptr().cast()) };
+    let result = f(&mut env, &activity);
+    if env.exception_check().unwrap_or(false) {
+        let _ = env.exception_describe();
+        let _ = env.exception_clear();
+    }
+    result.ok()
+}
+
+fn sdk_int(env: &mut JNIEnv<'_>) -> jni::errors::Result<i32> {
+    env.get_static_field("android/os/Build$VERSION", "SDK_INT", "I")?
+        .i()
+}
+
+/// Whether QuireInk may read the shared storage.
+pub fn granted(app: &AndroidApp) -> bool {
+    with_activity(app, |env, activity| {
+        if sdk_int(env)? >= ANDROID_11 {
+            env.call_static_method(
+                "android/os/Environment",
+                "isExternalStorageManager",
+                "()Z",
+                &[],
+            )?
+            .z()
+        } else {
+            let permission = env.new_string(READ_STORAGE)?;
+            let result = env
+                .call_method(
+                    activity,
+                    "checkSelfPermission",
+                    "(Ljava/lang/String;)I",
+                    &[JValue::Object(&permission)],
+                )?
+                .i()?;
+            Ok(result == 0)
+        }
+    })
+    .unwrap_or(false)
+}
+
+/// The shared `Books` folder, e.g. `/storage/emulated/0/Books`.
+pub fn books_dir(app: &AndroidApp) -> Option<PathBuf> {
+    with_activity(app, |env, _| {
+        let dir = env
+            .call_static_method(
+                "android/os/Environment",
+                "getExternalStorageDirectory",
+                "()Ljava/io/File;",
+                &[],
+            )?
+            .l()?;
+        let path = env
+            .call_method(&dir, "getAbsolutePath", "()Ljava/lang/String;", &[])?
+            .l()?;
+        let path: String = env.get_string(&path.into())?.into();
+        Ok(PathBuf::from(path).join("Books"))
+    })
+}
+
+/// Asks the user for access: opens the "All files access" page for
+/// QuireInk (Android 11+) or shows the permission dialog.
+pub fn request(app: &AndroidApp) {
+    let opened = with_activity(app, |env, activity| {
+        if sdk_int(env)? < ANDROID_11 {
+            let class = env.find_class("java/lang/String")?;
+            let permissions = env.new_object_array(1, class, JObject::null())?;
+            let permission = env.new_string(READ_STORAGE)?;
+            env.set_object_array_element(&permissions, 0, permission)?;
+            env.call_method(
+                activity,
+                "requestPermissions",
+                "([Ljava/lang/String;I)V",
+                &[JValue::Object(&permissions), JValue::Int(1)],
+            )?;
+            return Ok(true);
+        }
+        let package = env
+            .call_method(activity, "getPackageName", "()Ljava/lang/String;", &[])?
+            .l()?;
+        let package: String = env.get_string(&package.into())?.into();
+        let uri_text = env.new_string(format!("package:{package}"))?;
+        let uri = env
+            .call_static_method(
+                "android/net/Uri",
+                "parse",
+                "(Ljava/lang/String;)Landroid/net/Uri;",
+                &[JValue::Object(&uri_text)],
+            )?
+            .l()?;
+        let action = env.new_string("android.settings.MANAGE_APP_ALL_FILES_ACCESS_PERMISSION")?;
+        let intent = env.new_object(
+            "android/content/Intent",
+            "(Ljava/lang/String;Landroid/net/Uri;)V",
+            &[JValue::Object(&action), JValue::Object(&uri)],
+        )?;
+        env.call_method(
+            activity,
+            "startActivity",
+            "(Landroid/content/Intent;)V",
+            &[JValue::Object(&intent)],
+        )?;
+        Ok(true)
+    });
+    if opened.is_none() {
+        // Some devices lack the per-app page: open the list of all apps.
+        let fallback = with_activity(app, |env, activity| {
+            let action = env.new_string("android.settings.MANAGE_ALL_FILES_ACCESS_PERMISSION")?;
+            let intent = env.new_object(
+                "android/content/Intent",
+                "(Ljava/lang/String;)V",
+                &[JValue::Object(&action)],
+            )?;
+            env.call_method(
+                activity,
+                "startActivity",
+                "(Landroid/content/Intent;)V",
+                &[JValue::Object(&intent)],
+            )?;
+            Ok(())
+        });
+        if fallback.is_none() {
+            log::warn!("cannot open the storage access settings");
+        }
+    }
+}

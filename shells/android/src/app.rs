@@ -13,11 +13,12 @@ use quireink_core::{Effects, Kernel};
 use quireink_fs::DirStorage;
 use quireink_graphics::Framebuffer;
 use quireink_platform::{
-    ButtonState, DeviceInfo, DisplayInfo, InputCaps, InputEvent, Instant, PixelFormat, Point,
-    PointerEvent, PointerPhase, PointerTool, Rotation,
+    ButtonState, DeviceInfo, DisplayInfo, InputCaps, InputEvent, Instant, Mounted, PixelFormat,
+    Point, PointerEvent, PointerPhase, PointerTool, Rotation,
 };
 
-use crate::{keys, pixels};
+use crate::plugin::AndroidPlugin;
+use crate::{access, keys, pixels};
 
 /// The running app once the window size is known.
 struct Running {
@@ -27,6 +28,8 @@ struct Running {
     wake_at: Option<Instant>,
     /// The kernel asked to be built again (e.g. plugins were switched).
     restart: bool,
+    /// The library is the shared `Books` folder.
+    books_folder: bool,
 }
 
 #[unsafe(no_mangle)]
@@ -66,6 +69,16 @@ fn android_main(app: AndroidApp) {
                 MainEvent::RedrawNeeded { .. } | MainEvent::WindowResized { .. } => {
                     if let (Some(window), Some(running)) = (&window, &running) {
                         present(window, &running.frame);
+                    }
+                }
+                MainEvent::Resume { .. } => {
+                    // Back from the settings page that grants storage
+                    // access: restart with the `Books` folder.
+                    if let Some(running) = running.as_mut()
+                        && !running.books_folder
+                        && access::granted(&app)
+                    {
+                        running.restart = true;
                     }
                 }
                 MainEvent::TerminateWindow { .. } => window = None,
@@ -110,7 +123,9 @@ fn android_main(app: AndroidApp) {
             && let Some(window) = &window
         {
             log::info!("restarting");
-            running = None;
+            // The old kernel goes first: its files are closed and its
+            // memory is free before the new one starts.
+            drop(running.take());
             running = start_kernel(&app, window, now());
             if let Some(running) = &running {
                 present(window, &running.frame);
@@ -152,12 +167,33 @@ fn start_kernel(app: &AndroidApp, window: &NativeWindow, now: Instant) -> Option
             return None;
         }
     };
-    let mut builder = Kernel::builder(device).storage(storage);
+    // The shared `Books` folder as `books`, if the user allowed access.
+    let books = access::granted(app)
+        .then(|| access::books_dir(app))
+        .flatten()
+        .and_then(|dir| match DirStorage::new(&dir) {
+            Ok(books) => Some(books),
+            Err(e) => {
+                log::warn!("{}: {e}", dir.display());
+                None
+            }
+        });
+    let books_folder = books.is_some();
+    let mut builder = Kernel::builder(device);
+    builder = match books {
+        Some(books) => builder.storage(Mounted::new(storage, "books", books)),
+        None => builder.storage(storage),
+    };
     // The system language, unless the user chose another one.
     if let Some(language) = app.config().language() {
         builder = builder.setting_default("core.language", &language);
     }
-    let mut kernel = match quireink_app::install(builder, quireink_app::Fonts::Outline).build() {
+    let builder =
+        quireink_app::install(builder, quireink_app::Fonts::Outline).plugin(AndroidPlugin {
+            app: app.clone(),
+            books_folder,
+        });
+    let mut kernel = match builder.build() {
         Ok(kernel) => kernel,
         Err(e) => {
             log::error!("cannot start: {e}");
@@ -176,6 +212,7 @@ fn start_kernel(app: &AndroidApp, window: &NativeWindow, now: Instant) -> Option
         frame,
         wake_at: None,
         restart: false,
+        books_folder,
     };
     apply(&mut running, effects);
     Some(running)

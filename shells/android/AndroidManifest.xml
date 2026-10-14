@@ -3,11 +3,20 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="io.github.hthoene.quireink">
 
+    <!-- The shared Books folder: "All files access" from Android 11 on, the
+         storage permission before. Asked for only when the user chooses
+         "Use the Books folder" on the home screen. -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+
     <application
         android:label="QuireInk"
         android:hasCode="false"
         android:extractNativeLibs="true"
-        android:allowBackup="true">
+        android:allowBackup="true"
+        android:requestLegacyExternalStorage="true">
 
         <activity
             android:name="android.app.NativeActivity"

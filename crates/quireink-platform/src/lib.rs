@@ -23,7 +23,7 @@ pub use input::{
     ButtonState, InputCaps, InputEvent, Instant, PointerEvent, PointerPhase, PointerTool, buttons,
 };
 pub use pixel::{Color, PixelFormat};
-pub use storage::{DirEntry, NoStorage, Storage, StorageError};
+pub use storage::{DirEntry, Mounted, NoStorage, Storage, StorageError};
 
 /// Static description of a device, provided by its shell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

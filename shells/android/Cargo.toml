@@ -21,10 +21,12 @@ quireink-core = { workspace = true, features = ["color", "outline"] }
 quireink-fs.workspace = true
 quireink-graphics = { workspace = true, features = ["color"] }
 quireink-platform.workspace = true
+quireink-sdk.workspace = true
 
 [target.'cfg(target_os = "android")'.dependencies]
 android-activity = { version = "0.6", features = ["native-activity"] }
 android_logger = { version = "0.15", default-features = false }
+jni = "0.21"
 log = "0.4"
 ndk = "0.9"
 

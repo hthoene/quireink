@@ -112,6 +112,75 @@ impl Storage for NoStorage {
     }
 }
 
+/// Two storages in one: paths below the mount point `at` go to `mounted`
+/// (with `at/` removed), all others to `base`. Shells use it to put the
+/// user's book folder next to QuireInk's private files, e.g. `books` on
+/// Android's shared `Books` folder. Nest it for several mount points.
+#[derive(Debug, Clone)]
+pub struct Mounted<B, M> {
+    base: B,
+    at: &'static str,
+    mounted: M,
+}
+
+impl<B: Storage, M: Storage> Mounted<B, M> {
+    /// Mounts `mounted` at `at`, a single valid path segment.
+    pub fn new(base: B, at: &'static str, mounted: M) -> Self {
+        Self { base, at, mounted }
+    }
+
+    /// The storage and path inside it for `path`.
+    fn route<'p>(&self, path: &'p str) -> (&dyn Storage, &'p str) {
+        if path == self.at {
+            return (&self.mounted, "");
+        }
+        match path
+            .strip_prefix(self.at)
+            .and_then(|rest| rest.strip_prefix('/'))
+        {
+            Some(rest) => (&self.mounted, rest),
+            None => (&self.base, path),
+        }
+    }
+}
+
+impl<B: Storage, M: Storage> Storage for Mounted<B, M> {
+    fn read_at(&self, path: &str, offset: u64, buf: &mut [u8]) -> Result<usize, StorageError> {
+        let (storage, path) = self.route(path);
+        storage.read_at(path, offset, buf)
+    }
+
+    fn size(&self, path: &str) -> Result<u64, StorageError> {
+        let (storage, path) = self.route(path);
+        storage.size(path)
+    }
+
+    fn write(&self, path: &str, data: &[u8]) -> Result<(), StorageError> {
+        let (storage, path) = self.route(path);
+        storage.write(path, data)
+    }
+
+    fn append(&self, path: &str, data: &[u8]) -> Result<(), StorageError> {
+        let (storage, path) = self.route(path);
+        storage.append(path, data)
+    }
+
+    fn list(&self, dir: &str, visit: &mut dyn FnMut(DirEntry<'_>)) -> Result<(), StorageError> {
+        let (storage, dir) = self.route(dir);
+        storage.list(dir, visit)
+    }
+
+    fn remove(&self, path: &str) -> Result<(), StorageError> {
+        let (storage, path) = self.route(path);
+        storage.remove(path)
+    }
+
+    fn exists(&self, path: &str) -> bool {
+        let (storage, path) = self.route(path);
+        storage.exists(path)
+    }
+}
+
 /// Whether `path` is a valid virtual file path: relative, `/`-separated,
 /// without empty, `.` or `..` segments and without backslashes, colons or
 /// NUL bytes.
@@ -126,6 +195,61 @@ pub fn is_valid_path(path: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A storage holding one file, `name`, of `size` bytes.
+    struct One(&'static str, u64);
+
+    impl Storage for One {
+        fn read_at(&self, _: &str, _: u64, _: &mut [u8]) -> Result<usize, StorageError> {
+            Ok(0)
+        }
+
+        fn size(&self, path: &str) -> Result<u64, StorageError> {
+            if path == self.0 {
+                Ok(self.1)
+            } else {
+                Err(StorageError::NotFound)
+            }
+        }
+
+        fn write(&self, _: &str, _: &[u8]) -> Result<(), StorageError> {
+            Err(StorageError::Unsupported)
+        }
+
+        fn append(&self, _: &str, _: &[u8]) -> Result<(), StorageError> {
+            Err(StorageError::Unsupported)
+        }
+
+        fn list(&self, dir: &str, visit: &mut dyn FnMut(DirEntry<'_>)) -> Result<(), StorageError> {
+            if !dir.is_empty() {
+                return Err(StorageError::NotFound);
+            }
+            visit(DirEntry {
+                name: self.0,
+                is_dir: false,
+                size: self.1,
+            });
+            Ok(())
+        }
+
+        fn remove(&self, _: &str) -> Result<(), StorageError> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn mounted_storage_routes_by_prefix() {
+        let storage = Mounted::new(One("quireink.ini", 1), "books", One("alice.epub", 2));
+        assert_eq!(storage.size("quireink.ini"), Ok(1));
+        assert_eq!(storage.size("books/alice.epub"), Ok(2));
+        assert!(!storage.exists("alice.epub"));
+        assert!(!storage.exists("booksx/alice.epub"));
+        let mut size = 0;
+        storage
+            .list("books", &mut |entry| size = entry.size)
+            .unwrap();
+        assert_eq!(size, 2, "lists the mounted folder");
+    }
 
     #[test]
     fn validates_paths() {

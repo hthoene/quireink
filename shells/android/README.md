@@ -32,10 +32,13 @@ USB debugging*.
 
 ## Using it
 
-- **Books:** `Android/data/io.github.hthoene.quireink/files/books` on the
-  device's storage, reachable over USB from a computer. The sample books
-  are copied there on first start, and `quireink.ini` lives in the folder
-  above.
+- **Books:** the shared `Books` folder, where Boox and most e-readers
+  keep books. Choose *Use the Books folder* on the home screen and allow
+  *All files access* (Android 11+) or the storage permission (older
+  versions); QuireInk restarts with the folder. Until then the library is
+  `Android/data/io.github.hthoene.quireink/files/books` with the sample
+  books. `quireink.ini` and all caches stay in
+  `Android/data/io.github.hthoene.quireink/files`.
 - **Touch:** tap the left or right side to turn pages, the middle for the
   menu, or swipe. Long-press for more options.
 - **Buttons:** page keys and volume keys turn pages; Back goes back.
@@ -48,5 +51,4 @@ These are planned:
 - E-ink refresh modes are left to the device. Boox's optimization settings
   for the app apply; Onyx's SDK will map QuireInk's refresh requests later.
 - Rendering is grayscale, also on colour panels.
-- Only the app's own folder is read, not the whole shared storage.
 - There is no frontlight control and no app icon yet.
