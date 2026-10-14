@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 use core::cell::Cell;
 
 use quireink_sdk::document::{
-    Block, Document, DocumentError, Locator, Metadata, OffsetMap, TocEntry,
+    Align, Block, Document, DocumentError, Locator, Metadata, OffsetMap, Run, TextStyle, TocEntry,
 };
 use quireink_sdk::zip::ZipArchive;
 use quireink_sdk::{Env, Storage, StorageError};
@@ -133,6 +133,7 @@ impl EpubDocument {
         let mut header = [0u8; HEADER as usize];
         storage.read_at(&paths.text, u64::from(start - HEADER), &mut header)?;
         let len = usize::from(u16::from_le_bytes([header[4], header[5]]));
+        let run_count = usize::from(u16::from_le_bytes([header[6], header[7]]));
         let mut text = alloc::vec![0u8; len];
         let mut filled = 0;
         while filled < len {
@@ -147,6 +148,19 @@ impl EpubDocument {
             filled += n;
         }
         text.truncate(filled);
+        let mut runs = Vec::new();
+        if run_count > 0 {
+            let mut data = alloc::vec![0u8; run_count * convert::RUN];
+            let read = storage.read_at(&paths.text, u64::from(start) + len as u64, &mut data)?;
+            runs = data[..read]
+                .chunks_exact(convert::RUN)
+                .map(|r| Run {
+                    start: u32::from(u16::from_le_bytes([r[0], r[1]])),
+                    end: u32::from(u16::from_le_bytes([r[2], r[3]])),
+                    style: TextStyle::from_bits(r[4]),
+                })
+                .collect();
+        }
         Ok(Block {
             kind: convert::decode_kind(header[0], header[1]),
             continues: convert::continues(header[2]),
@@ -154,6 +168,8 @@ impl EpubDocument {
             end,
             text: String::from_utf8_lossy(&text).into_owned(),
             map: OffsetMap::IDENTITY,
+            runs,
+            align: Align::from_bits(header[3]),
         })
     }
 

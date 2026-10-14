@@ -34,18 +34,20 @@ pub fn wrap_lines(
     width: impl Fn(usize) -> f32,
     advance: impl Fn(char) -> f32,
 ) -> Vec<Line> {
-    wrap_lines_hyphenated(text, width, advance, None)
+    wrap_lines_hyphenated(text, width, |_, c| advance(c), None)
 }
 
-/// Like [`wrap_lines`], but a word that does not fit at the end of a line
-/// is hyphenated where `hyphenate` allows, as far as it fits.
+/// Like [`wrap_lines`], but `advance(index, c)` also gets the byte index of
+/// the character (for text in several styles), and a word that does not fit
+/// at the end of a line is hyphenated where `hyphenate` allows, as far as it
+/// fits.
 ///
 /// Lines only depend on the text from their start, so laying out from the
 /// start of any line gives the same lines as laying out the whole text.
 pub fn wrap_lines_hyphenated(
     text: &str,
     width: impl Fn(usize) -> f32,
-    advance: impl Fn(char) -> f32,
+    advance: impl Fn(usize, char) -> f32,
     hyphenate: Option<Hyphenate<'_>>,
 ) -> Vec<Line> {
     let mut lines = Vec::new();
@@ -72,10 +74,16 @@ pub fn wrap_lines_hyphenated(
             word_start = line_start;
             continue;
         }
-        let w = advance(c);
+        let w = advance(i, c);
         let available = width(lines.len());
         if c != ' ' && line_width + w > available && i > line_start {
-            let measure = |range: Range<usize>| -> f32 { text[range].chars().map(&advance).sum() };
+            let measure = |range: Range<usize>| -> f32 {
+                let start = range.start;
+                text[range]
+                    .char_indices()
+                    .map(|(k, c)| advance(start + k, c))
+                    .sum()
+            };
             let before = line_width - measure(word_start..i);
             let hyphenated = hyphenate.and_then(|hyphenate| {
                 hyphen_break(
@@ -161,7 +169,7 @@ fn hyphen_break(
     before: f32,
     available: f32,
     measure: &dyn Fn(Range<usize>) -> f32,
-    advance: &dyn Fn(char) -> f32,
+    advance: &dyn Fn(usize, char) -> f32,
     hyphenate: Hyphenate<'_>,
 ) -> Option<(usize, f32)> {
     let end = text[word_start..]
@@ -176,14 +184,14 @@ fn hyphen_break(
     if !core.chars().all(char::is_alphabetic) || !core.chars().any(char::is_lowercase) {
         return None;
     }
-    let hyphen = advance('-');
     let mut best = None;
     hyphenate(core, &mut |at| {
         let cut = word_start + first + at;
         if cut <= line_start {
             return;
         }
-        let width = before + measure(word_start..cut) + hyphen;
+        // The hyphen is set like the letter before it.
+        let width = before + measure(word_start..cut) + advance(cut - 1, '-');
         if width <= available {
             best = Some((cut, width));
         }
@@ -290,7 +298,7 @@ mod tests {
             }
         };
         let text = "ab abcdefghi, xy";
-        let result = wrap_lines_hyphenated(text, |_| 9.0, |_| 1.0, Some(&hyphenate));
+        let result = wrap_lines_hyphenated(text, |_| 9.0, |_, _| 1.0, Some(&hyphenate));
         let got: Vec<(&str, f32, bool)> = result
             .iter()
             .map(|l| (&text[l.range.clone()], l.width, l.hyphen))
@@ -305,7 +313,7 @@ mod tests {
             ]
         );
         // Words in capitals are not hyphenated.
-        let caps = wrap_lines_hyphenated("ab ABCDEFGHI", |_| 9.0, |_| 1.0, Some(&hyphenate));
+        let caps = wrap_lines_hyphenated("ab ABCDEFGHI", |_| 9.0, |_, _| 1.0, Some(&hyphenate));
         assert!(caps.iter().all(|l| !l.hyphen));
         // Without hyphenation the word moves to the next line.
         assert_eq!(lines(text, 9.0), vec!["ab", "abcdefghi", ", xy"]);
@@ -319,10 +327,10 @@ mod tests {
             }
         };
         let text = "Lorem ipsum dolor sitametconsectetur adipiscing elit sed doeiusmod";
-        let all = wrap_lines_hyphenated(text, |_| 12.0, |_| 1.0, Some(&hyphenate));
+        let all = wrap_lines_hyphenated(text, |_| 12.0, |_, _| 1.0, Some(&hyphenate));
         for line in &all[1..] {
             let from = line.range.start;
-            let rest = wrap_lines_hyphenated(&text[from..], |_| 12.0, |_| 1.0, Some(&hyphenate));
+            let rest = wrap_lines_hyphenated(&text[from..], |_| 12.0, |_, _| 1.0, Some(&hyphenate));
             assert_eq!(
                 text[from + rest[0].range.start..from + rest[0].range.end],
                 text[line.range.clone()]

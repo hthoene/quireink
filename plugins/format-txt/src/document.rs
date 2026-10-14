@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 
 use quireink_sdk::Storage;
 use quireink_sdk::document::{
-    Block, BlockKind, Document, DocumentError, Locator, Metadata, OffsetMap,
+    Align, Block, BlockKind, Document, DocumentError, Locator, Metadata, OffsetMap,
 };
 
 /// Bytes inspected to detect encoding, paragraph style and metadata.
@@ -356,6 +356,8 @@ impl Document for TxtDocument {
                 end,
                 text,
                 map,
+                runs: Vec::new(),
+                align: Align::Auto,
             }));
         }
         Ok(None)

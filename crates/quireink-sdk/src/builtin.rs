@@ -148,6 +148,12 @@ pub mod fonts {
     pub const UI: Id = Id::new_static("core.font-ui");
     /// Book text.
     pub const READING: Id = Id::new_static("core.font-reading");
+    /// Bold book text; readers fall back to [`READING`] without it.
+    pub const READING_BOLD: Id = Id::new_static("core.font-reading-bold");
+    /// Italic book text; readers fall back to [`READING`] without it.
+    pub const READING_ITALIC: Id = Id::new_static("core.font-reading-italic");
+    /// Bold italic book text; readers fall back to [`READING_BOLD`].
+    pub const READING_BOLD_ITALIC: Id = Id::new_static("core.font-reading-bold-italic");
 }
 
 /// The name of the key map layer that applies everywhere.

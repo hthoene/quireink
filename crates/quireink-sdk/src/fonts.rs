@@ -114,6 +114,24 @@ impl Fonts {
         user.or_else(proposed).or_else(first)
     }
 
+    /// The font bound to `role` by the user or proposed by a plugin; unlike
+    /// [`Fonts::role`], no fallback, for optional roles such as bold faces.
+    pub fn bound(&self, role: &str) -> Option<FontHandle<'_>> {
+        let user = self.user.get(role).and_then(|id| self.get(id.as_str()));
+        user.or_else(|| {
+            self.candidates
+                .iter()
+                .filter(|(r, font, _)| r.as_str() == role && self.contains(font.as_str()))
+                .max_by_key(|(_, _, priority)| *priority)
+                .and_then(|(_, font, _)| self.get(font.as_str()))
+        })
+    }
+
+    /// Whether the user chose the font for `role` in the configuration.
+    pub fn user_bound(&self, role: &str) -> bool {
+        self.user.contains_key(role)
+    }
+
     /// Bytes used by the glyph cache.
     pub fn cache_bytes(&self) -> usize {
         self.cache.borrow().bytes()

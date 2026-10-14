@@ -6,9 +6,13 @@ use std::path::{Path, PathBuf};
 /// Pixel sizes for packs; covers UI and reading text on ~220 dpi screens.
 const DEFAULT_SIZES: &str = "20,24,28,32,36,40,48";
 
-const FONTS: &[(&str, &str)] = &[
-    ("literata", "fonts/Literata.ttf"),
-    ("atkinson", "fonts/AtkinsonHyperlegibleNext.ttf"),
+/// (pack name, font file, weight)
+const FONTS: &[(&str, &str, f32)] = &[
+    ("literata", "fonts/Literata.ttf", 400.0),
+    ("literata-bold", "fonts/Literata.ttf", 700.0),
+    ("literata-italic", "fonts/Literata-Italic.ttf", 400.0),
+    ("literata-bold-italic", "fonts/Literata-Italic.ttf", 700.0),
+    ("atkinson", "fonts/AtkinsonHyperlegibleNext.ttf", 400.0),
 ];
 
 fn main() {
@@ -34,9 +38,9 @@ fn main() {
     let out = PathBuf::from(
         std::env::var_os("OUT_DIR").unwrap_or_else(|| panic!("OUT_DIR is set by cargo")),
     );
-    for (name, path) in FONTS {
+    for &(name, path, weight) in FONTS {
         let data = std::fs::read(path).unwrap_or_else(|e| panic!("{path}: {e}"));
-        let font = quireink_text::OutlineFont::new(data, &[("wght", 400.0)])
+        let font = quireink_text::OutlineFont::new(data, &[("wght", weight)])
             .unwrap_or_else(|e| panic!("{path}: {e}"));
         let chars = quireink_text::charset::chars(quireink_text::charset::LATIN);
         let pack = quireink_text::build_pack(&font, &sizes, chars);

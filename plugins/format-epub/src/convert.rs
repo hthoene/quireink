@@ -1,8 +1,9 @@
 //! Converts an XHTML chapter into QuireInk's compact block format while it
 //! is inflated, and stores the result in the plugin's cache:
 //!
-//! - `<n>.txt`: records of a 6-byte header (kind, heading level, flags,
-//!   reserved, text length as u16) followed by the block's UTF-8 text.
+//! - `<n>.txt`: records of an 8-byte header (kind, heading level, flags,
+//!   alignment, text length and number of style runs as u16), the block's
+//!   UTF-8 text and its style runs (start and end as u16, style as u8).
 //! - `<n>.idx`: the offset of every record's text as u32, for binary
 //!   search.
 //! - `<n>.anc`: `id<TAB>offset` lines for anchors (table of contents).
@@ -17,14 +18,16 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use quireink_sdk::Storage;
-use quireink_sdk::document::{BlockKind, DocumentError};
+use quireink_sdk::document::{Align, BlockKind, DocumentError, Run, TextStyle};
 use quireink_sdk::xml::{Token, Tokenizer, decode, local_name};
 use quireink_sdk::zip::{Entry, ZipArchive};
 
 use crate::package::error;
 
 /// Size of a record header.
-pub(crate) const HEADER: u32 = 6;
+pub(crate) const HEADER: u32 = 8;
+/// Size of a style run after a record's text.
+pub(crate) const RUN: usize = 5;
 /// Longer paragraphs are split into continued blocks.
 const LIMIT: usize = 4000;
 /// Output is written to storage in chunks of about this size.
@@ -63,6 +66,67 @@ pub(crate) fn continues(flags: u8) -> bool {
     flags & FLAG_CONTINUES != 0
 }
 
+/// An open element: the style and alignment its content inherits.
+struct Frame {
+    tag: String,
+    style: TextStyle,
+    align: Align,
+}
+
+/// Style and alignment set by an element's name and attributes.
+fn element_style(
+    tag: &str,
+    attrs: &quireink_sdk::xml::Attrs<'_>,
+) -> (Option<bool>, Option<bool>, Option<Align>) {
+    let (mut bold, mut italic, mut align) = match tag {
+        "b" | "strong" => (Some(true), None, None),
+        "i" | "em" | "cite" | "dfn" | "var" => (None, Some(true), None),
+        "center" => (None, None, Some(Align::Center)),
+        _ => (None, None, None),
+    };
+    let parse_align = |value: &str| match value.trim().to_ascii_lowercase().as_str() {
+        "center" => Some(Align::Center),
+        "right" | "end" => Some(Align::End),
+        "left" | "start" => Some(Align::Start),
+        "justify" => Some(Align::Justify),
+        _ => None,
+    };
+    if let Some(value) = attrs.get("align") {
+        align = parse_align(&value).or(align);
+    }
+    if let Some(css) = attrs.get("style") {
+        for declaration in css.split(';') {
+            let Some((property, value)) = declaration.split_once(':') else {
+                continue;
+            };
+            let value = value
+                .trim()
+                .trim_end_matches("!important")
+                .trim()
+                .to_ascii_lowercase();
+            match property.trim().to_ascii_lowercase().as_str() {
+                "text-align" => align = parse_align(&value).or(align),
+                "font-weight" => {
+                    bold = match value.as_str() {
+                        "bold" | "bolder" | "600" | "700" | "800" | "900" => Some(true),
+                        "normal" | "lighter" | "100" | "200" | "300" | "400" | "500" => Some(false),
+                        _ => bold,
+                    }
+                }
+                "font-style" => {
+                    italic = match value.as_str() {
+                        "italic" | "oblique" => Some(true),
+                        "normal" => Some(false),
+                        _ => italic,
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    (bold, italic, align)
+}
+
 struct Converter<'a> {
     storage: &'a dyn Storage,
     paths: &'a CachePaths,
@@ -72,6 +136,12 @@ struct Converter<'a> {
     index: Vec<u8>,
     anchors: String,
     text: String,
+    /// Style runs of `text`.
+    runs: Vec<Run>,
+    /// Alignment of the current block, set by its first character.
+    align: Option<Align>,
+    /// Open elements.
+    stack: Vec<Frame>,
     kind: BlockKind,
     continues: bool,
     /// Depth inside elements whose content is not shown.
@@ -79,10 +149,59 @@ struct Converter<'a> {
     /// Depth inside `<pre>`.
     pre: u32,
     space: bool,
+    /// Style where the pending space was, e.g. inside a bold word group.
+    space_style: TextStyle,
     failed: Option<DocumentError>,
 }
 
 impl Converter<'_> {
+    fn frame(&self) -> (TextStyle, Align) {
+        self.stack
+            .last()
+            .map_or((TextStyle::REGULAR, Align::Auto), |f| (f.style, f.align))
+    }
+
+    /// Appends text in the current style.
+    fn push(&mut self, c: char) {
+        let (style, _) = self.frame();
+        self.push_styled(c, style);
+    }
+
+    /// Appends text in `style`.
+    fn push_styled(&mut self, c: char, style: TextStyle) {
+        let (_, align) = self.frame();
+        if self.text.is_empty() {
+            self.align.get_or_insert(align);
+        }
+        let start = self.text.len() as u32;
+        self.text.push(c);
+        let end = self.text.len() as u32;
+        if style == TextStyle::REGULAR {
+            return;
+        }
+        match self.runs.last_mut() {
+            Some(run) if run.end == start && run.style == style => run.end = end,
+            _ => self.runs.push(Run { start, end, style }),
+        }
+    }
+
+    fn push_str(&mut self, text: &str) {
+        for c in text.chars() {
+            self.push(c);
+        }
+    }
+
+    /// Removes the first `n` bytes of the text, keeping the runs in step.
+    fn drop_front(&mut self, n: usize) {
+        self.text.replace_range(..n, "");
+        let n = n as u32;
+        self.runs.retain_mut(|run| {
+            run.start = run.start.saturating_sub(n);
+            run.end = run.end.saturating_sub(n);
+            run.end > run.start
+        });
+    }
+
     /// Where the next character of the current block will be.
     fn position(&self) -> u32 {
         self.length + HEADER + self.text.len() as u32
@@ -90,6 +209,15 @@ impl Converter<'_> {
 
     fn start(&mut self, name: &str, attrs: quireink_sdk::xml::Attrs<'_>, self_closing: bool) {
         let tag = local_name(name).to_ascii_lowercase();
+        let hides = matches!(tag.as_str(), "head" | "script" | "style" | "title" | "svg");
+        // Block elements end the block before them (before their anchor is
+        // placed, so it points at the new block), in the old style.
+        if !hides
+            && self.hidden == 0
+            && (is_block(&tag) || matches!(tag.as_str(), "li" | "pre" | "hr"))
+        {
+            self.flush();
+        }
         if let Some(id) = attrs.get("id") {
             let at = if self.text.is_empty() {
                 // The element starts the next block.
@@ -102,7 +230,7 @@ impl Converter<'_> {
                 self.write_anchors();
             }
         }
-        if matches!(tag.as_str(), "head" | "script" | "style" | "title" | "svg") {
+        if hides {
             if !self_closing {
                 self.hidden += 1;
             }
@@ -111,30 +239,51 @@ impl Converter<'_> {
         if self.hidden > 0 {
             return;
         }
+        let (style, align) = self.frame();
+        let (bold, italic, own_align) = element_style(&tag, &attrs);
+        let mut style = style;
+        if let Some(bold) = bold {
+            style = TextStyle::from_bits(style.bits() & !TextStyle::BOLD.bits()).union(if bold {
+                TextStyle::BOLD
+            } else {
+                TextStyle::REGULAR
+            });
+        }
+        if let Some(italic) = italic {
+            style =
+                TextStyle::from_bits(style.bits() & !TextStyle::ITALIC.bits()).union(if italic {
+                    TextStyle::ITALIC
+                } else {
+                    TextStyle::REGULAR
+                });
+        }
+        // Self-closing elements are ended right away by the caller.
+        self.stack.push(Frame {
+            tag: tag.clone(),
+            style,
+            align: own_align.unwrap_or(align),
+        });
         match tag.as_str() {
             "br" => {
                 if !self.text.is_empty() {
-                    self.text.push('\n');
+                    self.push('\n');
                 }
                 self.space = false;
             }
             "hr" => {
-                self.flush();
-                self.text.push_str("* * *");
+                self.align = Some(Align::Center);
+                self.push_str("* * *");
                 self.flush();
             }
             "li" => {
-                self.flush();
-                self.text.push_str("• ");
+                self.push_str("• ");
             }
             "td" | "th" => self.space = true,
             "pre" => {
-                self.flush();
                 self.kind = BlockKind::Preformatted;
                 self.pre += 1;
             }
             tag if is_block(tag) => {
-                self.flush();
                 if let Some(level) = heading_level(tag) {
                     self.kind = BlockKind::Heading(level);
                 }
@@ -158,6 +307,10 @@ impl Converter<'_> {
         } else if tag == "li" || is_block(&tag) {
             self.flush();
         }
+        // Close the element (and any left open inside it).
+        if let Some(open) = self.stack.iter().rposition(|f| f.tag == tag) {
+            self.stack.truncate(open);
+        }
     }
 
     fn characters(&mut self, text: &str) {
@@ -168,19 +321,20 @@ impl Converter<'_> {
             if self.pre > 0 {
                 match c {
                     '\r' => {}
-                    '\t' => self.text.push(' '),
-                    c => self.text.push(c),
+                    '\t' => self.push(' '),
+                    c => self.push(c),
                 }
             } else if c == '\u{ad}' {
                 // Soft hyphens: dropped until hyphenation uses them.
             } else if c.is_whitespace() && c != '\u{a0}' {
                 self.space = true;
+                self.space_style = self.frame().0;
             } else {
                 if self.space && !self.text.is_empty() && !self.text.ends_with(['\n', ' ']) {
-                    self.text.push(' ');
+                    self.push_styled(' ', self.space_style);
                 }
                 self.space = false;
-                self.text.push(c);
+                self.push(c);
             }
             if self.text.len() >= LIMIT {
                 self.split();
@@ -204,7 +358,7 @@ impl Converter<'_> {
         self.write_record(kind, cut);
         // Keep the rest in place, so the buffer is never reallocated.
         let rest = self.text.len() - self.text.trim_start().len();
-        self.text.replace_range(..rest, "");
+        self.drop_front(rest);
         self.continues = true;
     }
 
@@ -217,6 +371,8 @@ impl Converter<'_> {
             self.write_record(kind, self.text.len());
         }
         self.text.clear();
+        self.runs.clear();
+        self.align = None;
         self.kind = BlockKind::Paragraph;
         self.continues = false;
         self.space = false;
@@ -232,8 +388,21 @@ impl Converter<'_> {
         if self.index.len() >= FLUSH_SMALL {
             self.write_index();
         }
-        self.out.extend_from_slice(&[kind, level, flags, 0]);
+        let runs: Vec<Run> = self
+            .runs
+            .iter()
+            .filter(|run| (run.start as usize) < len)
+            .map(|run| Run {
+                end: run.end.min(len as u32),
+                ..*run
+            })
+            .collect();
+        let align = self.align.unwrap_or_default();
+        self.out
+            .extend_from_slice(&[kind, level, flags, align.bits()]);
         self.out.extend_from_slice(&(len as u16).to_le_bytes());
+        self.out
+            .extend_from_slice(&(runs.len() as u16).to_le_bytes());
         if self.out.len() + len > FLUSH {
             // Long blocks go straight to storage instead of growing `out`.
             self.write_out();
@@ -242,8 +411,14 @@ impl Converter<'_> {
         } else {
             self.out.extend_from_slice(&self.text.as_bytes()[..len]);
         }
-        self.length += HEADER + len as u32;
-        self.text.replace_range(..len, "");
+        for run in &runs {
+            self.out
+                .extend_from_slice(&(run.start as u16).to_le_bytes());
+            self.out.extend_from_slice(&(run.end as u16).to_le_bytes());
+            self.out.push(run.style.bits());
+        }
+        self.length += HEADER + len as u32 + (runs.len() * RUN) as u32;
+        self.drop_front(len);
     }
 
     fn append(&self, path: &str, data: &[u8]) -> Option<DocumentError> {
@@ -335,11 +510,15 @@ pub(crate) fn convert(
         anchors: String::new(),
         // Blocks are split before they outgrow this, so it never grows.
         text: String::with_capacity(LIMIT + 4),
+        runs: Vec::new(),
+        align: None,
+        stack: Vec::new(),
         kind: BlockKind::Paragraph,
         continues: false,
         hidden: 0,
         pre: 0,
         space: false,
+        space_style: TextStyle::REGULAR,
         failed: None,
     };
     let mut tokenizer = Tokenizer::new();

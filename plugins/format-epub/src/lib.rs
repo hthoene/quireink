@@ -70,7 +70,7 @@ mod tests {
     use alloc::vec::Vec;
     use quireink_i18n::{Catalog, check};
     use quireink_sdk::MemoryStorage;
-    use quireink_sdk::document::{BlockKind, Locator};
+    use quireink_sdk::document::{Align, BlockKind, Locator, TextStyle};
     use quireink_sdk::zip::testing::ZipBuilder;
 
     #[test]
@@ -204,6 +204,43 @@ mod tests {
         let block = doc.block_at(storage, later).unwrap().unwrap();
         assert_eq!(block.text, "Später.");
         assert!(doc.progress(Locator::new(1, 0)) > 0.5);
+    }
+
+    #[test]
+    fn keeps_styles_and_alignment() {
+        let ch2 = String::from(
+            "<html><body><center><p>Mitte <b>fett <i>beides</i></b>              <span style=\"font-style: italic\">kursiv</span></p></center>             <p>Normal <em>betont <span style=\"font-style:normal\">aufrecht</span></em></p>             <p align=\"right\">Rechts</p></body></html>",
+        );
+        let storage = epub(ch2);
+        let doc = EpubDocument::open(&storage, "books/test.epub").unwrap();
+        let block = doc.block_at(&storage, Locator::new(1, 0)).unwrap().unwrap();
+        assert_eq!(block.text, "Mitte fett beides kursiv");
+        assert_eq!(block.align, Align::Center);
+        let styled: Vec<(&str, TextStyle)> = block
+            .runs
+            .iter()
+            .map(|r| (&block.text[r.start as usize..r.end as usize], r.style))
+            .collect();
+        assert_eq!(
+            styled,
+            [
+                ("fett ", TextStyle::BOLD),
+                ("beides", TextStyle::BOLD_ITALIC),
+                ("kursiv", TextStyle::ITALIC)
+            ]
+        );
+        let second = doc
+            .block_at(&storage, Locator::new(1, block.end))
+            .unwrap()
+            .unwrap();
+        assert_eq!(second.align, Align::Auto);
+        assert_eq!(second.style_at(7), TextStyle::ITALIC);
+        assert_eq!(second.style_at(second.text.len() - 1), TextStyle::REGULAR);
+        let third = doc
+            .block_at(&storage, Locator::new(1, second.end))
+            .unwrap()
+            .unwrap();
+        assert_eq!((third.text.as_str(), third.align), ("Rechts", Align::End));
     }
 
     #[test]

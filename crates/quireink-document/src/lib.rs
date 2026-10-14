@@ -66,6 +66,83 @@ pub enum BlockKind {
     Preformatted,
 }
 
+/// The character style of a run of text.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct TextStyle(u8);
+
+impl TextStyle {
+    pub const REGULAR: TextStyle = TextStyle(0);
+    pub const BOLD: TextStyle = TextStyle(1);
+    pub const ITALIC: TextStyle = TextStyle(2);
+    pub const BOLD_ITALIC: TextStyle = TextStyle(3);
+
+    pub const fn bold(self) -> bool {
+        self.0 & 1 != 0
+    }
+
+    pub const fn italic(self) -> bool {
+        self.0 & 2 != 0
+    }
+
+    /// Both styles combined, e.g. bold text in an italic paragraph.
+    pub const fn union(self, other: TextStyle) -> TextStyle {
+        TextStyle(self.0 | other.0)
+    }
+
+    /// For storing styles compactly.
+    pub const fn bits(self) -> u8 {
+        self.0
+    }
+
+    pub const fn from_bits(bits: u8) -> TextStyle {
+        TextStyle(bits & 3)
+    }
+}
+
+/// A run of styled text: byte range `start..end` of a block's text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Run {
+    pub start: u32,
+    pub end: u32,
+    pub style: TextStyle,
+}
+
+/// Horizontal alignment of a block's lines.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum Align {
+    /// As the reader prefers (justified or flush left).
+    #[default]
+    Auto,
+    Start,
+    Center,
+    End,
+    Justify,
+}
+
+impl Align {
+    /// For storing alignments compactly.
+    pub const fn bits(self) -> u8 {
+        match self {
+            Align::Auto => 0,
+            Align::Start => 1,
+            Align::Center => 2,
+            Align::End => 3,
+            Align::Justify => 4,
+        }
+    }
+
+    pub const fn from_bits(bits: u8) -> Align {
+        match bits {
+            1 => Align::Start,
+            2 => Align::Center,
+            3 => Align::End,
+            4 => Align::Justify,
+            _ => Align::Auto,
+        }
+    }
+}
+
 /// A block of text, e.g. a paragraph.
 ///
 /// `text` is normalized (decoded to UTF-8, whitespace collapsed); `map`
@@ -82,9 +159,23 @@ pub struct Block {
     pub end: u32,
     pub text: String,
     pub map: OffsetMap,
+    /// Styled runs of `text`, sorted and not overlapping; text outside any
+    /// run is regular.
+    pub runs: Vec<Run>,
+    pub align: Align,
 }
 
 impl Block {
+    /// The style of the character at byte `index` of `text`.
+    pub fn style_at(&self, index: usize) -> TextStyle {
+        let index = index as u32;
+        let at = self.runs.partition_point(|run| run.end <= index);
+        match self.runs.get(at) {
+            Some(run) if run.start <= index => run.style,
+            _ => TextStyle::REGULAR,
+        }
+    }
+
     /// The source offset of byte `index` of `text`.
     pub fn source_offset(&self, index: usize) -> u32 {
         if index >= self.text.len() {
@@ -272,7 +363,31 @@ mod tests {
             end,
             text: String::from(text),
             map,
+            runs: Vec::new(),
+            align: Align::Auto,
         }
+    }
+
+    #[test]
+    fn styles_by_run() {
+        let mut b = block("plain bold italic", 0, 17, OffsetMap::IDENTITY);
+        b.runs = alloc::vec![
+            Run {
+                start: 6,
+                end: 10,
+                style: TextStyle::BOLD
+            },
+            Run {
+                start: 11,
+                end: 17,
+                style: TextStyle::ITALIC
+            },
+        ];
+        assert_eq!(b.style_at(0), TextStyle::REGULAR);
+        assert_eq!(b.style_at(6), TextStyle::BOLD);
+        assert_eq!(b.style_at(10), TextStyle::REGULAR);
+        assert_eq!(b.style_at(16), TextStyle::ITALIC);
+        assert!(TextStyle::BOLD.union(TextStyle::ITALIC).italic());
     }
 
     #[test]

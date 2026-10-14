@@ -1,7 +1,7 @@
 //! QuireInk's default fonts, contributed like any other plugin:
 //!
 //! - **Literata** for reading (`fonts-default.literata`), designed for long
-//!   texts on screens.
+//!   texts on screens, with bold, italic and bold italic faces.
 //! - **Atkinson Hyperlegible Next** for the UI (`fonts-default.atkinson`),
 //!   designed for maximum legibility.
 //!
@@ -30,18 +30,76 @@ use quireink_sdk::{
 
 pub const PLUGIN: Id = Id::new_static("fonts-default");
 pub const LITERATA: Id = Id::new_static("fonts-default.literata");
+pub const LITERATA_BOLD: Id = Id::new_static("fonts-default.literata-bold");
+pub const LITERATA_ITALIC: Id = Id::new_static("fonts-default.literata-italic");
+pub const LITERATA_BOLD_ITALIC: Id = Id::new_static("fonts-default.literata-bold-italic");
 pub const ATKINSON: Id = Id::new_static("fonts-default.atkinson");
+
+/// The faces: id, role, font data and weight (for variable fonts).
+type Faces = [(Id, Id, &'static [u8], f32); 5];
 
 #[cfg(feature = "outline")]
 mod outlines {
-    pub const LITERATA: &[u8] = include_bytes!("../fonts/Literata.ttf");
-    pub const ATKINSON: &[u8] = include_bytes!("../fonts/AtkinsonHyperlegibleNext.ttf");
+    const LITERATA: &[u8] = include_bytes!("../fonts/Literata.ttf");
+    const LITERATA_ITALIC: &[u8] = include_bytes!("../fonts/Literata-Italic.ttf");
+    const ATKINSON: &[u8] = include_bytes!("../fonts/AtkinsonHyperlegibleNext.ttf");
+
+    /// Bold faces are instances of the variable fonts.
+    pub fn faces() -> super::Faces {
+        use super::*;
+        [
+            (LITERATA, fonts::READING, self::LITERATA, 400.0),
+            (LITERATA_BOLD, fonts::READING_BOLD, self::LITERATA, 700.0),
+            (
+                LITERATA_ITALIC,
+                fonts::READING_ITALIC,
+                self::LITERATA_ITALIC,
+                400.0,
+            ),
+            (
+                LITERATA_BOLD_ITALIC,
+                fonts::READING_BOLD_ITALIC,
+                self::LITERATA_ITALIC,
+                700.0,
+            ),
+            (ATKINSON, fonts::UI, self::ATKINSON, 400.0),
+        ]
+    }
 }
 
 #[cfg(any(feature = "packs", not(feature = "outline")))]
 mod packs {
-    pub const LITERATA: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/literata.qifp"));
-    pub const ATKINSON: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/atkinson.qifp"));
+    macro_rules! pack {
+        ($name:literal) => {
+            include_bytes!(concat!(env!("OUT_DIR"), "/", $name, ".qifp"))
+        };
+    }
+
+    pub fn faces() -> super::Faces {
+        use super::*;
+        [
+            (LITERATA, fonts::READING, pack!("literata"), 400.0),
+            (
+                LITERATA_BOLD,
+                fonts::READING_BOLD,
+                pack!("literata-bold"),
+                700.0,
+            ),
+            (
+                LITERATA_ITALIC,
+                fonts::READING_ITALIC,
+                pack!("literata-italic"),
+                400.0,
+            ),
+            (
+                LITERATA_BOLD_ITALIC,
+                fonts::READING_BOLD_ITALIC,
+                pack!("literata-bold-italic"),
+                700.0,
+            ),
+            (ATKINSON, fonts::UI, pack!("atkinson"), 400.0),
+        ]
+    }
 }
 
 #[cfg(feature = "outline")]
@@ -67,20 +125,18 @@ fn manifest() -> Manifest {
     }
 }
 
-fn register(
-    r: &mut dyn Registrar,
-    literata: &'static [u8],
-    atkinson: &'static [u8],
-) -> Result<(), RegisterError> {
-    let regular = [("wght", 400.0)];
-    for (id, data) in [(LITERATA, literata), (ATKINSON, atkinson)] {
-        let font = Font::from_data(data, &regular).map_err(|e| RegisterError::Invalid {
-            message: Cow::Owned(alloc::format!("{id}: {e}")),
+fn register(r: &mut dyn Registrar, faces: Faces) -> Result<(), RegisterError> {
+    for (id, role, data, weight) in faces {
+        let font =
+            Font::from_data(data, &[("wght", weight)]).map_err(|e| RegisterError::Invalid {
+                message: Cow::Owned(alloc::format!("{id}: {e}")),
+            })?;
+        r.add_font(FontSpec {
+            id: id.clone(),
+            font,
         })?;
-        r.add_font(FontSpec { id, font })?;
+        r.bind_font(role, id, Priority::DEFAULT)?;
     }
-    r.bind_font(fonts::READING, LITERATA, Priority::DEFAULT)?;
-    r.bind_font(fonts::UI, ATKINSON, Priority::DEFAULT)?;
     Ok(())
 }
 
@@ -90,7 +146,7 @@ impl Plugin for DefaultFonts {
     }
 
     fn register(&self, r: &mut dyn Registrar) -> Result<(), RegisterError> {
-        register(r, preferred::LITERATA, preferred::ATKINSON)
+        register(r, preferred::faces())
     }
 }
 
@@ -101,6 +157,6 @@ impl Plugin for DefaultFontPacks {
     }
 
     fn register(&self, r: &mut dyn Registrar) -> Result<(), RegisterError> {
-        register(r, packs::LITERATA, packs::ATKINSON)
+        register(r, packs::faces())
     }
 }

@@ -5,7 +5,7 @@ use alloc::vec::Vec;
 
 use quireink_sdk::builtin::{actions, events, fonts, params, slots};
 use quireink_sdk::document::{Document, DocumentError, Locator};
-use quireink_sdk::layout::{Hyphenate, Page, Style, layout_page};
+use quireink_sdk::layout::{Face, Hyphenate, Page, Style, Typesetter, layout_page};
 use quireink_sdk::{
     Arg, Canvas, Color, Command, Cx, Env, FontHandle, Handled, Id, Params, Rect, RefreshMode,
     Screen,
@@ -23,9 +23,79 @@ const STEP_DELAY_MS: u64 = 2;
 const HISTORY: usize = 64;
 
 /// Page geometry and text style, derived from settings and the screen.
+/// Relative sizes of headings 1 to 6.
+const HEADING_SCALE: [f32; 6] = [1.6, 1.4, 1.2, 1.1, 1.0, 1.0];
+
+/// The reading fonts by face, for layout and drawing.
+struct Faces<'a> {
+    /// Regular, bold, italic and bold italic.
+    fonts: [FontHandle<'a>; 4],
+    size: f32,
+    ascent: f32,
+    line_height: f32,
+}
+
+impl<'a> Faces<'a> {
+    /// The reading faces; missing ones fall back to the nearest face, and
+    /// a font the user chose for book text is not mixed with the default
+    /// bold or italic faces.
+    fn new(env: &Env<'a>, t: &Typography) -> Option<Self> {
+        let fonts_ = env.fonts;
+        let regular = fonts_.role(fonts::READING.as_str())?;
+        let custom = fonts_.user_bound(fonts::READING.as_str());
+        let face = |role: &quireink_sdk::Id| {
+            if custom && !fonts_.user_bound(role.as_str()) {
+                None
+            } else {
+                fonts_.bound(role.as_str())
+            }
+        };
+        let bold = face(&fonts::READING_BOLD).unwrap_or(regular);
+        let italic = face(&fonts::READING_ITALIC).unwrap_or(regular);
+        let bold_italic = face(&fonts::READING_BOLD_ITALIC).unwrap_or(bold);
+        Some(Self {
+            fonts: [regular, bold, italic, bold_italic],
+            size: t.size,
+            ascent: t.ascent,
+            line_height: t.line_height,
+        })
+    }
+
+    fn font(&self, face: Face) -> &FontHandle<'a> {
+        &self.fonts[usize::from(face.style.bits() & 3)]
+    }
+
+    fn size(&self, face: Face) -> f32 {
+        match face.heading {
+            0 => self.size,
+            level => self.size * HEADING_SCALE[usize::from(level.clamp(1, 6)) - 1],
+        }
+    }
+}
+
+impl Typesetter for Faces<'_> {
+    fn advance(&self, face: Face, c: char) -> f32 {
+        self.font(face).advance(self.size(face), c)
+    }
+
+    fn line(&self, face: Face) -> (f32, f32) {
+        if face.heading == 0 {
+            return (self.ascent, self.line_height);
+        }
+        let size = self.size(face);
+        let metrics = self.font(face).line_metrics(size);
+        let natural = metrics.ascent + metrics.descent;
+        let line_height = (size * 1.2).max(natural);
+        (metrics.ascent + (line_height - natural) / 2.0, line_height)
+    }
+}
+
 #[derive(Debug, Clone)]
 struct Typography {
     size: f32,
+    /// Body text lines: baseline from the top of a line, line height.
+    ascent: f32,
+    line_height: f32,
     style: Style,
     /// Content box.
     x: f32,
@@ -51,9 +121,8 @@ impl Typography {
         let line_height = (size * settings.int(LINE_SPACING.as_str()) as f32 / 100.0).max(natural);
         let indent = settings.bool(INDENT.as_str());
         let justify = settings.bool(JUSTIFY.as_str());
+        let ascent = metrics.ascent + (line_height - natural) / 2.0;
         let style = Style {
-            ascent: metrics.ascent + (line_height - natural) / 2.0,
-            line_height,
             paragraph_spacing: if indent { 0.0 } else { line_height * 0.6 },
             indent: if indent { size * 1.5 } else { 0.0 },
             justify,
@@ -76,8 +145,11 @@ impl Typography {
         let key = format!(
             "{:016x}",
             fnv(&format!(
-                "{}|{size}|{line_height}|{}|{}|{justify}|{width}x{height}|{}",
+                "{}|{}|{}|{}|{size}|{line_height}|{}|{}|{justify}|{width}x{height}|{}",
                 font.id(),
+                face_id(env, &fonts::READING_BOLD),
+                face_id(env, &fonts::READING_ITALIC),
+                face_id(env, &fonts::READING_BOLD_ITALIC),
                 style.indent,
                 style.paragraph_spacing,
                 hyphenation.as_deref().unwrap_or("-"),
@@ -85,6 +157,8 @@ impl Typography {
         );
         Self {
             size,
+            ascent,
+            line_height,
             style,
             x: margin,
             y: margin,
@@ -217,11 +291,10 @@ impl Book {
     }
 
     fn layout(&self, env: &Env<'_>, at: Locator) -> Result<Page, DocumentError> {
-        let Some(font) = self.font(env) else {
+        let t = &self.typography;
+        let Some(faces) = Faces::new(env, t) else {
             return Ok(Page::default());
         };
-        let t = &self.typography;
-        let advance = |c: char| font.advance(t.size, c);
         let patterns = t
             .hyphenation
             .as_deref()
@@ -238,7 +311,7 @@ impl Book {
             t.width,
             t.height,
             &t.style,
-            &advance,
+            &faces,
             patterns.is_some().then_some(&hyphenate as Hyphenate<'_>),
         )
     }
@@ -381,23 +454,35 @@ impl Book {
     }
 
     fn draw_page(&self, canvas: &mut Canvas<'_>, env: &Env<'_>) {
-        let Some(font) = self.font(env) else {
+        let t = &self.typography;
+        let Some(faces) = Faces::new(env, t) else {
             return;
         };
-        let t = &self.typography;
-        let space = font.advance(t.size, ' ');
+        let clip = canvas.clip();
         for line in &self.page.lines {
             let baseline = (t.y + line.baseline + 0.5) as i32;
-            let mut x = t.x + line.x;
-            if line.word_spacing == 0.0 {
-                font.draw(canvas, t.size, x, baseline, &line.text, Color::BLACK);
+            // Lines outside the part being drawn (e.g. another band).
+            let top = baseline - (2.0 * t.line_height) as i32;
+            let bottom = baseline + t.line_height as i32;
+            if bottom < i32::from(clip.y) || top > clip.bottom() as i32 {
                 continue;
             }
-            for (i, word) in line.text.split(' ').enumerate() {
-                if i > 0 {
-                    x += space + line.word_spacing;
+            let mut x = t.x + line.x;
+            for run in &line.runs {
+                let font = faces.font(run.face);
+                let size = faces.size(run.face);
+                let text = &line.text[run.start..run.end];
+                if line.word_spacing == 0.0 {
+                    x += font.draw(canvas, size, x, baseline, text, Color::BLACK);
+                    continue;
                 }
-                x += font.draw(canvas, t.size, x, baseline, word, Color::BLACK);
+                let space = font.advance(size, ' ');
+                for (i, word) in text.split(' ').enumerate() {
+                    if i > 0 {
+                        x += space + line.word_spacing;
+                    }
+                    x += font.draw(canvas, size, x, baseline, word, Color::BLACK);
+                }
             }
         }
     }
@@ -515,6 +600,13 @@ impl Screen for ReaderScreen {
             cx.wake_at(now);
         }
     }
+}
+
+/// The font bound to an optional reading face, for the layout key.
+fn face_id(env: &Env<'_>, role: &quireink_sdk::Id) -> String {
+    env.fonts
+        .bound(role.as_str())
+        .map_or_else(String::new, |font| font.id().to_string())
 }
 
 /// Centred, wrapped message text (errors, missing book).
