@@ -67,8 +67,12 @@ cargo ndk -t arm64-v8a --platform 26 -o "$out/apk/lib" build "${cargo_profile[@]
 
 echo "Packaging"
 cp samples/library/books/*.epub samples/library/books/*.txt "$out/assets/books/"
+# Resources: the launcher icon (drawn by tools/android-icon.py).
+rm -f "$out/res.zip"
+"$aapt2" compile --dir shells/android/res -o "$out/res.zip"
 "$aapt2" link -o "$out/unsigned.apk" \
     --manifest shells/android/AndroidManifest.xml \
+    "$out/res.zip" \
     -I "$platform" \
     --min-sdk-version 26 --target-sdk-version 35 \
     --version-code 1 --version-name "$(cargo metadata --no-deps --format-version 1 \

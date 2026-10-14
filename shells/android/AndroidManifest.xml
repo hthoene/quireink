@@ -13,6 +13,7 @@
 
     <application
         android:label="QuireInk"
+        android:icon="@mipmap/ic_launcher"
         android:hasCode="false"
         android:extractNativeLibs="true"
         android:allowBackup="true"

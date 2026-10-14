@@ -51,4 +51,4 @@ These are planned:
 - E-ink refresh modes are left to the device. Boox's optimization settings
   for the app apply; Onyx's SDK will map QuireInk's refresh requests later.
 - Rendering is grayscale, also on colour panels.
-- There is no frontlight control and no app icon yet.
+- There is no frontlight control yet.
