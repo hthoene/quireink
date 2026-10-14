@@ -195,6 +195,12 @@ pub struct Block {
     /// run is regular.
     pub runs: Vec<Run>,
     pub align: Align,
+    /// The book's indent of the first line, in hundredths of an em;
+    /// `None` leaves it to the reader.
+    pub indent: Option<i16>,
+    /// The book's space above the block, in hundredths of an em; `None`
+    /// leaves it to the reader.
+    pub space: Option<u16>,
     /// The image of an [`BlockKind::Image`] block.
     pub image: Option<ImageRef>,
 }
@@ -386,6 +392,22 @@ pub trait Document {
         Ok(None)
     }
 
+    /// Position `at` as other readers write it, to sync reading positions
+    /// with them: for EPUB, KOReader's XPointer to the paragraph (e.g.
+    /// `/body/DocFragment[3]/body/div[2]/p[5]`). `None` where the format
+    /// has no such positions.
+    fn xpointer(&self, storage: &dyn Storage, at: Locator) -> Option<String> {
+        let _ = (storage, at);
+        None
+    }
+
+    /// The position of an XPointer (see [`Document::xpointer`]), to the
+    /// precision of a paragraph; `None` if it does not fit the document.
+    fn locate_xpointer(&self, storage: &dyn Storage, xpointer: &str) -> Option<Locator> {
+        let _ = (storage, xpointer);
+        None
+    }
+
     /// The fonts the document embeds; text in their families carries the
     /// family in its [`TextStyle`].
     fn fonts(&self, storage: &dyn Storage) -> Vec<EmbeddedFont> {
@@ -429,6 +451,8 @@ mod tests {
             map,
             runs: Vec::new(),
             align: Align::Auto,
+            indent: None,
+            space: None,
             image: None,
         }
     }

@@ -239,6 +239,7 @@ impl Typography {
         let style = Style {
             paragraph_spacing: if indent { 0.0 } else { line_height * 0.6 },
             indent: if indent { size * 1.5 } else { 0.0 },
+            em: size,
             justify,
         };
 
@@ -259,7 +260,8 @@ impl Typography {
         let key = format!(
             "{:016x}",
             fnv(&format!(
-                "{}|{}|{}|{}|{size}|{line_height}|{}|{}|{justify}|{width}x{height}|{}|{}|{}|{word_spacing}",
+                "{}|{}|{}|{}|{}|{size}|{line_height}|{}|{}|{justify}|{width}x{height}|{}|{}|{}|{word_spacing}",
+                quireink_sdk::layout::VERSION,
                 font.id(),
                 face_id(env, &fonts::READING_BOLD),
                 face_id(env, &fonts::READING_ITALIC),
@@ -733,6 +735,8 @@ impl Book {
             .with(params::PATH, self.path.clone())
             .with(params::TITLE, self.title.clone())
             .with(params::PROGRESS, format!("{:.1}", self.percent()))
+            .with(params::SECTION, format!("{}", self.page.start.section))
+            .with(params::OFFSET, format!("{}", self.page.start.offset))
     }
 
     fn open_index(&self, env: &Env<'_>) -> PageIndex {

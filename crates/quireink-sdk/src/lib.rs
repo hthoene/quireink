@@ -52,7 +52,7 @@ pub mod ui;
 mod version;
 
 pub use action::{ActionHandler, ActionSpec, Actions};
-pub use command::Command;
+pub use command::{Command, HttpRequest, http_params};
 pub use env::{Env, Metrics};
 pub use event::EventHandler;
 pub use fonts::{FontHandle, FontSet, FontSpec, Fonts};

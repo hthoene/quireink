@@ -4,9 +4,15 @@
 //! - `<n>.txt`: records of an 8-byte header (kind, heading level, flags,
 //!   alignment, text length and number of style runs as u16), the block's
 //!   UTF-8 text and its style runs (start and end as u16, style as u8).
-//! - `<n>.idx`: the offset of every record's text as u32, for binary
-//!   search.
+//! - `<n>.idx`: for every record, the offset of its text as u32 (for
+//!   binary search), the book's indent as i16 and the book's space above
+//!   as u16, in hundredths of an em ([`NO_INDENT`] and [`NO_SPACE`] if it
+//!   sets none). Kept apart from the text so positions in it stay the same
+//!   when more is stored per block.
 //! - `<n>.anc`: `id<TAB>offset` lines for anchors (table of contents).
+//! - `<n>.pos`: `offset<TAB>path` lines: the element each record comes
+//!   from, as a path below `<body>` such as `div[2]/p[22]`, for positions
+//!   other readers understand (KOReader's XPointers).
 //! - `<n>.end`: the length of `<n>.txt` as u32. Written last, so its
 //!   presence marks a complete conversion.
 //!
@@ -27,6 +33,11 @@ use crate::package::error;
 
 /// Size of a record header.
 pub(crate) const HEADER: u32 = 8;
+/// Bytes per record in `<n>.idx`.
+pub(crate) const INDEX: u32 = 8;
+/// A record without the book's indent or space.
+pub(crate) const NO_INDENT: i16 = i16::MIN;
+pub(crate) const NO_SPACE: u16 = u16::MAX;
 /// Size of a style run after a record's text.
 pub(crate) const RUN: usize = 5;
 /// Longer paragraphs are split into continued blocks.
@@ -46,6 +57,7 @@ pub(crate) struct CachePaths {
     pub text: String,
     pub index: String,
     pub anchors: String,
+    pub positions: String,
     pub end: String,
 }
 
@@ -81,6 +93,14 @@ pub(crate) fn image_path(dir: &str, archive_path: &str) -> String {
     alloc::format!("{dir}/img-{hash:016x}.gray")
 }
 
+/// The larger of two spaces, as collapsing margins are.
+fn larger(a: Option<u16>, b: Option<u16>) -> Option<u16> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(a.max(b)),
+        (a, b) => a.or(b),
+    }
+}
+
 pub(crate) fn continues(flags: u8) -> bool {
     flags & FLAG_CONTINUES != 0
 }
@@ -90,8 +110,18 @@ struct Frame {
     tag: String,
     style: TextStyle,
     align: Align,
+    /// The book's indent, inherited as in CSS.
+    indent: Option<i16>,
+    /// The margin and padding below the element, taken over by the next
+    /// block.
+    after: (Option<u16>, Option<u16>),
     /// The element's content is not shown (`<head>`, `display: none`, …).
     hides: bool,
+    /// Its number among its parent's children of the same name (1 for
+    /// the first).
+    index: u32,
+    /// How many children of each name it has had so far.
+    children: Vec<(String, u32)>,
 }
 
 /// What an element sets: defaults for its name, then the stylesheet
@@ -149,11 +179,22 @@ struct Converter<'a> {
     out: Vec<u8>,
     index: Vec<u8>,
     anchors: String,
+    /// Pending `<n>.pos` lines.
+    positions: String,
+    /// The element path of the block being collected.
+    block_path: String,
     text: String,
     /// Style runs of `text`.
     runs: Vec<Run>,
     /// Alignment of the current block, set by its first character.
     align: Option<Align>,
+    /// The book's indent of the current block, set by its first character.
+    indent: Option<i16>,
+    /// The book's space above the next block, as in CSS: the largest of
+    /// the margins met since the last block (margins collapse) plus all
+    /// paddings.
+    margin: Option<u16>,
+    padding: Option<u16>,
     /// Open elements.
     stack: Vec<Frame>,
     /// The book's stylesheet rules, plus those of `<style>` elements.
@@ -195,6 +236,8 @@ impl Converter<'_> {
         let (_, align) = self.frame();
         if self.text.is_empty() {
             self.align.get_or_insert(align);
+            self.indent = self.stack.last().and_then(|f| f.indent);
+            self.block_path = self.element_path();
         }
         let start = self.text.len() as u32;
         self.text.push(c);
@@ -289,10 +332,35 @@ impl Converter<'_> {
         }
         // Self-closing elements are ended right away by the caller.
         let (style, align) = self.frame();
+        if self.text.is_empty() {
+            self.margin = larger(self.margin, props.margin_top);
+            self.padding = css::sum(self.padding, props.padding_top);
+        }
+        let indent = props
+            .indent
+            .or_else(|| self.stack.last().and_then(|f| f.indent));
+        // Its number among its parent's children of the same name.
+        let index = match self.stack.last_mut() {
+            Some(parent) => match parent.children.iter_mut().find(|(t, _)| *t == tag) {
+                Some((_, count)) => {
+                    *count += 1;
+                    *count
+                }
+                None => {
+                    parent.children.push((tag.clone(), 1));
+                    1
+                }
+            },
+            None => 1,
+        };
         self.stack.push(Frame {
+            index,
+            children: Vec::new(),
             tag: tag.clone(),
             style: styled(style, &props),
             align: props.align.unwrap_or(align),
+            indent,
+            after: (props.margin_bottom, props.padding_bottom),
             hides,
         });
         if hides {
@@ -356,10 +424,17 @@ impl Converter<'_> {
             }
         }
         // Close the element (and any left open inside it).
+        let (mut margin, mut padding) = (None, None);
         for frame in self.stack.drain(open..) {
             if frame.hides {
                 self.hidden = self.hidden.saturating_sub(1);
             }
+            margin = larger(margin, frame.after.0);
+            padding = css::sum(padding, frame.after.1);
+        }
+        if self.text.is_empty() {
+            self.margin = larger(self.margin, margin);
+            self.padding = css::sum(self.padding, padding);
         }
     }
 
@@ -428,6 +503,7 @@ impl Converter<'_> {
         self.text.clear();
         self.runs.clear();
         self.align = None;
+        self.indent = None;
         self.kind = BlockKind::Paragraph;
         self.continues = false;
         self.space = false;
@@ -438,8 +514,25 @@ impl Converter<'_> {
     fn write_record(&mut self, kind: BlockKind, len: usize) {
         let (kind, level) = encode_kind(kind);
         let flags = if self.continues { FLAG_CONTINUES } else { 0 };
+        self.positions.push_str(&alloc::format!(
+            "{}\t{}\n",
+            self.length + HEADER,
+            self.block_path
+        ));
+        if self.positions.len() >= FLUSH_SMALL {
+            self.write_positions();
+        }
+        let indent = self.indent.unwrap_or(NO_INDENT);
+        let space = if self.continues {
+            NO_SPACE
+        } else {
+            let (margin, padding) = (self.margin.take(), self.padding.take());
+            css::sum(margin, padding).unwrap_or(NO_SPACE)
+        };
         self.index
             .extend_from_slice(&(self.length + HEADER).to_le_bytes());
+        self.index.extend_from_slice(&indent.to_le_bytes());
+        self.index.extend_from_slice(&space.to_le_bytes());
         if self.index.len() >= FLUSH_SMALL {
             self.write_index();
         }
@@ -496,6 +589,26 @@ impl Converter<'_> {
         let failed = self.append(&self.paths.index, &self.index);
         self.failed = self.failed.take().or(failed);
         self.index.clear();
+    }
+
+    /// The path of the innermost open element below `<body>`, e.g.
+    /// `div[2]/p[22]` (indexes count siblings of the same name).
+    fn element_path(&self) -> String {
+        let body = self.stack.iter().position(|f| f.tag == "body");
+        let mut path = String::new();
+        for frame in body.map_or(&[][..], |b| &self.stack[b + 1..]) {
+            if !path.is_empty() {
+                path.push('/');
+            }
+            path.push_str(&alloc::format!("{}[{}]", frame.tag, frame.index));
+        }
+        path
+    }
+
+    fn write_positions(&mut self) {
+        let failed = self.append(&self.paths.positions, self.positions.as_bytes());
+        self.failed = self.failed.take().or(failed);
+        self.positions.clear();
     }
 
     fn write_anchors(&mut self) {
@@ -556,7 +669,7 @@ pub(crate) fn convert(
 ) -> Result<u32, DocumentError> {
     let base = String::from(entry.name.rfind('/').map_or("", |i| &entry.name[..=i]));
     let _ = storage.remove(&paths.end);
-    for path in [&paths.text, &paths.index, &paths.anchors] {
+    for path in [&paths.text, &paths.index, &paths.anchors, &paths.positions] {
         storage.write(path, &[])?;
     }
     let mut converter = Converter {
@@ -566,10 +679,15 @@ pub(crate) fn convert(
         out: Vec::with_capacity(FLUSH + HEADER as usize),
         index: Vec::with_capacity(FLUSH_SMALL + 4),
         anchors: String::new(),
+        positions: String::new(),
+        block_path: String::new(),
         // Blocks are split before they outgrow this, so it never grows.
         text: String::with_capacity(LIMIT + 4),
         runs: Vec::new(),
         align: None,
+        indent: None,
+        margin: None,
+        padding: None,
         stack: Vec::new(),
         rules,
         styles,
@@ -611,6 +729,7 @@ pub(crate) fn convert(
     converter.write_out();
     converter.write_index();
     converter.write_anchors();
+    converter.write_positions();
     if let Some(e) = converter.failed {
         return Err(e);
     }

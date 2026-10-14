@@ -318,8 +318,9 @@ impl ApplicationHandler for App {
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         let before = self.device.wake_at;
+        let in_flight = self.device.http.in_flight;
         self.device.tick_if_due();
-        if self.device.wake_at != before {
+        if self.device.wake_at != before || self.device.http.in_flight != in_flight {
             self.after_input();
         }
 
@@ -335,6 +336,11 @@ impl ApplicationHandler for App {
         self.animating = animating;
         if animating {
             deadline = Some(StdInstant::now() + ANIMATION_FRAME);
+        }
+        // Answers to HTTP requests are looked for regularly.
+        if self.device.http.in_flight > 0 {
+            let at = StdInstant::now() + Duration::from_millis(100);
+            deadline = Some(deadline.map_or(at, |d| d.min(at)));
         }
         if let Some(wake) = self.device.wake_at {
             let wait = Duration::from_millis(wake.since(self.device.now()));

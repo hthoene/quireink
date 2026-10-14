@@ -3,9 +3,11 @@
 //! Selectors: `tag`, `.class`, `tag.class` and lists of them; anything
 //! more complex (descendants, pseudo-classes, attributes) is skipped, as
 //! are `@` rules except `@font-face`. Properties: `text-align`,
-//! `font-weight`, `font-style`, `font-family` and `display: none`. That
-//! covers how books mark centred title pages, bold and italic classes,
-//! hidden elements and their embedded fonts.
+//! `font-weight`, `font-style`, `font-family`, `display: none`,
+//! `text-indent` and the vertical `margin` and `padding`. That covers how
+//! books mark centred title pages, bold and italic classes, hidden
+//! elements, their embedded fonts, paragraphs without indent and the
+//! space around blocks.
 //!
 //! The parser is fed text in chunks and keeps only the rule being read.
 
@@ -26,6 +28,14 @@ pub(crate) struct Props {
     /// A font family: its number in [`Rules::families`] plus one; 0 for
     /// the reader's font (a generic family such as `serif`).
     pub family: Option<u8>,
+    /// `text-indent`, in hundredths of an em.
+    pub indent: Option<i16>,
+    /// `margin-top`, `margin-bottom`, `padding-top` and `padding-bottom`,
+    /// in hundredths of an em.
+    pub margin_top: Option<u16>,
+    pub margin_bottom: Option<u16>,
+    pub padding_top: Option<u16>,
+    pub padding_bottom: Option<u16>,
 }
 
 impl Props {
@@ -40,6 +50,11 @@ impl Props {
         self.italic = other.italic.or(self.italic);
         self.hidden = other.hidden.or(self.hidden);
         self.family = other.family.or(self.family);
+        self.indent = other.indent.or(self.indent);
+        self.margin_top = other.margin_top.or(self.margin_top);
+        self.margin_bottom = other.margin_bottom.or(self.margin_bottom);
+        self.padding_top = other.padding_top.or(self.padding_top);
+        self.padding_bottom = other.padding_bottom.or(self.padding_bottom);
     }
 
     /// Reads declarations such as `text-align: center; font-weight: bold`;
@@ -75,6 +90,32 @@ impl Props {
                     props.hidden = Some(value == "none");
                 }
                 "font-family" => props.family = Some(family_number(&value, families)),
+                "text-indent" => {
+                    // Negative indents hang out of a margin, which is not
+                    // supported: no indent instead.
+                    let indent = length(&value).map(|l| l.clamp(0, MAX_INDENT) as i16);
+                    props.indent = indent.or(props.indent);
+                }
+                "margin-top" => props.margin_top = space(&value).or(props.margin_top),
+                "margin-bottom" => props.margin_bottom = space(&value).or(props.margin_bottom),
+                "padding-top" => props.padding_top = space(&value).or(props.padding_top),
+                "padding-bottom" => {
+                    props.padding_bottom = space(&value).or(props.padding_bottom);
+                }
+                "margin" | "padding" => {
+                    // One to four values: the first is the top, the third
+                    // (or else the first) the bottom.
+                    let values: Vec<&str> = value.split_whitespace().collect();
+                    let top = values.first().and_then(|v| space(v));
+                    let bottom = values.get(2).or(values.first()).and_then(|v| space(v));
+                    if property.trim().eq_ignore_ascii_case("margin") {
+                        props.margin_top = top.or(props.margin_top);
+                        props.margin_bottom = bottom.or(props.margin_bottom);
+                    } else {
+                        props.padding_top = top.or(props.padding_top);
+                        props.padding_bottom = bottom.or(props.padding_bottom);
+                    }
+                }
                 _ => {}
             }
         }
@@ -88,6 +129,19 @@ impl Props {
         }
         if let Some(family) = self.family {
             out.push_str(&alloc::format!(" f{family}"));
+        }
+        if let Some(indent) = self.indent {
+            out.push_str(&alloc::format!(" t{indent}"));
+        }
+        for (key, value) in [
+            ('m', self.margin_top),
+            ('n', self.margin_bottom),
+            ('p', self.padding_top),
+            ('q', self.padding_bottom),
+        ] {
+            if let Some(value) = value {
+                out.push_str(&alloc::format!(" {key}{value}"));
+            }
         }
         for (key, value) in [('b', self.bold), ('i', self.italic), ('h', self.hidden)] {
             if let Some(value) = value {
@@ -112,10 +166,56 @@ impl Props {
                 'i' => props.italic = Some(flag),
                 'h' => props.hidden = Some(flag),
                 'f' => props.family = item[1..].parse().ok(),
+                't' => props.indent = item[1..].parse().ok(),
+                'm' => props.margin_top = item[1..].parse().ok(),
+                'n' => props.margin_bottom = item[1..].parse().ok(),
+                'p' => props.padding_top = item[1..].parse().ok(),
+                'q' => props.padding_bottom = item[1..].parse().ok(),
                 _ => {}
             }
         }
         props
+    }
+}
+
+/// The largest indent and space taken from a book, in hundredths of an
+/// em, so a stray value cannot push text off the page.
+const MAX_INDENT: i32 = 500;
+const MAX_SPACE: i32 = 800;
+
+/// A CSS length in hundredths of an em: `em` and `rem` as they are, `pt`
+/// and `px` at the usual 12 pt and 16 px to the em, `0` without a unit.
+/// `None` for other units (e.g. `%`) and keywords such as `auto`.
+pub(crate) fn length(value: &str) -> Option<i32> {
+    let value = value.trim();
+    let split = value
+        .find(|c: char| !(c.is_ascii_digit() || matches!(c, '.' | '-' | '+')))
+        .unwrap_or(value.len());
+    let (number, unit) = value.split_at(split);
+    let number: f32 = number.parse().ok()?;
+    let em = match unit.trim() {
+        "em" | "rem" => number,
+        "ex" => number / 2.0,
+        "pt" => number / 12.0,
+        "px" => number / 16.0,
+        "" if number == 0.0 => 0.0,
+        _ => return None,
+    };
+    // Rounded (no_std has no `f32::round`).
+    let half = if em < 0.0 { -0.5 } else { 0.5 };
+    Some((em * 100.0 + half) as i32)
+}
+
+/// A vertical margin or padding: not negative, limited.
+fn space(value: &str) -> Option<u16> {
+    length(value).map(|l| l.clamp(0, MAX_SPACE) as u16)
+}
+
+/// The sum of two spaces, `None` if neither is set.
+pub(crate) fn sum(a: Option<u16>, b: Option<u16>) -> Option<u16> {
+    match (a, b) {
+        (None, None) => None,
+        (a, b) => Some(a.unwrap_or(0).saturating_add(b.unwrap_or(0))),
     }
 }
 
@@ -496,6 +596,32 @@ mod tests {
         // Descendant selectors and @media blocks are skipped.
         assert_eq!(r.props("p", "").italic, None);
         assert_eq!(r.props("p", "").hidden, None);
+    }
+
+    #[test]
+    fn reads_indents_and_spaces() {
+        assert_eq!(length("1.2em"), Some(120));
+        assert_eq!(length("0"), Some(0));
+        assert_eq!(length("12pt"), Some(100));
+        assert_eq!(length("8px"), Some(50));
+        assert_eq!(length("5%"), None);
+        assert_eq!(length("auto"), None);
+        let r = rules(
+            ".noindent { text-indent:0em; margin-top:1.2em }              .head { padding-top: 6em; padding-bottom: 1.0em }              .hang { text-indent: -1.5em; margin: 0.5em 0 1em 2em } p { margin: 0 }",
+        );
+        let p = r.props("p", "noindent");
+        assert_eq!(
+            (p.indent, p.margin_top, p.margin_bottom),
+            (Some(0), Some(120), Some(0))
+        );
+        let h = r.props("p", "head");
+        assert_eq!((h.padding_top, h.padding_bottom), (Some(600), Some(100)));
+        // Hanging indents need a margin we do not support: none instead.
+        let hang = r.props("div", "hang");
+        assert_eq!(hang.indent, Some(0));
+        assert_eq!((hang.margin_top, hang.margin_bottom), (Some(50), Some(100)));
+        let copy = Rules::decode(&r.encode());
+        assert_eq!(copy.rules, r.rules);
     }
 
     #[test]

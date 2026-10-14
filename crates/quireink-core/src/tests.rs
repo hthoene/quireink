@@ -845,6 +845,54 @@ ui-size = 12
 }
 
 #[test]
+fn http_requests_go_to_the_shell_and_answers_come_back() {
+    let request = |id: &str| quireink_sdk::HttpRequest {
+        method: String::from("GET"),
+        url: String::from("https://example.org/x"),
+        headers: alloc::vec![(String::from("accept"), String::from("text/plain"))],
+        body: None,
+        reply: Id::new_static("ov.reply"),
+        params: quireink_sdk::Params::new().with("id", String::from(id)),
+    };
+    // With network: the shell gets it and answers.
+    let log = log();
+    let mut kernel = Kernel::builder(DEVICE)
+        .plugin(OverlayPlugin { log: log.clone() })
+        .network(true)
+        .build()
+        .unwrap();
+    kernel.start(Instant(0));
+    kernel.request(request("a"));
+    let calls = kernel.take_requests();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(
+        (calls[0].method.as_str(), calls[0].url.as_str()),
+        ("GET", "https://example.org/x")
+    );
+    assert!(kernel.take_requests().is_empty());
+    kernel.http_response(
+        Instant(5),
+        crate::HttpResponse {
+            id: calls[0].id,
+            status: 200,
+            body: b"ok".to_vec(),
+        },
+    );
+    assert!(log.borrow().contains(&String::from("event ov.reply a")));
+    // Without: it fails at once.
+    let log = self::log();
+    let mut kernel = Kernel::builder(DEVICE)
+        .plugin(OverlayPlugin { log: log.clone() })
+        .build()
+        .unwrap();
+    kernel.start(Instant(0));
+    kernel.request(request("b"));
+    kernel.run_commands();
+    assert!(kernel.take_requests().is_empty());
+    assert!(log.borrow().contains(&String::from("event ov.reply b")));
+}
+
+#[test]
 fn changed_settings_are_saved_and_announced() {
     let log = log();
     let storage = quireink_sdk::MemoryStorage::new()

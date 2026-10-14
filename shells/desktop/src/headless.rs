@@ -27,6 +27,8 @@ const LONG_MS: u64 = 1200;
 pub fn run_script(device: &mut Device, script: &str) -> Result<(), String> {
     for step in script.split(',').map(str::trim).filter(|s| !s.is_empty()) {
         run_step(device, step).map_err(|e| format!("step `{step}`: {e}"))?;
+        // Network answers take real time; wait for them, so runs repeat.
+        device.poll_http(Some(std::time::Duration::from_secs(25)));
         device.advance(STEP_MS);
         device.tick_if_due();
     }

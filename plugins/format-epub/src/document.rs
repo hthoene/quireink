@@ -12,7 +12,7 @@ use quireink_sdk::zip::ZipArchive;
 use quireink_sdk::{Env, Storage, StorageError};
 
 use crate::PLUGIN;
-use crate::convert::{self, CachePaths, HEADER};
+use crate::convert::{self, CachePaths, HEADER, INDEX};
 use crate::obfuscation;
 use crate::package::{self, Chapter};
 
@@ -56,8 +56,38 @@ fn paths(cache: &str, section: u32) -> CachePaths {
         text: alloc::format!("{cache}/{section}.txt"),
         index: alloc::format!("{cache}/{section}.idx"),
         anchors: alloc::format!("{cache}/{section}.anc"),
+        positions: alloc::format!("{cache}/{section}.pos"),
         end: alloc::format!("{cache}/{section}.end"),
     }
+}
+
+/// The section and the element path below `<body>` of an XPointer such
+/// as `/body/DocFragment[3]/body/div/p[5]/text().12`: indexes are filled in
+/// (`div` is `div[1]`), text positions dropped.
+fn parse_xpointer(xpointer: &str) -> Option<(u32, String)> {
+    let rest = xpointer.trim().strip_prefix("/body/DocFragment")?;
+    let (index, rest) = match rest.strip_prefix('[') {
+        Some(r) => {
+            let (n, r) = r.split_once(']')?;
+            (n.parse::<u32>().ok()?, r)
+        }
+        None => (1, rest),
+    };
+    let rest = rest.strip_prefix("/body").unwrap_or(rest);
+    let mut segments: Vec<String> = Vec::new();
+    for segment in rest.split('/').filter(|s| !s.is_empty()) {
+        if segment.starts_with("text()") {
+            break;
+        }
+        // A position inside an element (`p[3].5`) counts as the element.
+        let segment = segment.split('.').next().unwrap_or(segment);
+        if segment.contains('[') {
+            segments.push(String::from(segment));
+        } else {
+            segments.push(alloc::format!("{segment}[1]"));
+        }
+    }
+    Some((index.checked_sub(1)?, segments.join("/")))
 }
 
 /// Where chapters converted without the book's styles are kept.
@@ -127,6 +157,22 @@ impl EpubDocument {
         paths(&self.chapters, section)
     }
 
+    /// The element path of each block of a chapter (converted if needed),
+    /// by offset.
+    fn positions(&self, storage: &dyn Storage, section: u32) -> Option<Vec<(u32, String)>> {
+        let (paths, ..) = self.chapter(storage, section).ok()?;
+        let data = quireink_sdk::read_file(storage, &paths.positions, 1 << 20).ok()?;
+        let text = String::from_utf8_lossy(&data);
+        Some(
+            text.lines()
+                .filter_map(|line| {
+                    let (offset, path) = line.split_once('\t')?;
+                    Some((offset.parse().ok()?, String::from(path)))
+                })
+                .collect(),
+        )
+    }
+
     fn length(&self, section: u32) -> Option<u32> {
         let length = self.lengths.get(section as usize)?.get();
         (length != UNKNOWN).then_some(length)
@@ -158,7 +204,7 @@ impl EpubDocument {
         if let Some(slot) = self.lengths.get(section as usize) {
             slot.set(length);
         }
-        let blocks = (storage.size(&paths.index)? / 4) as u32;
+        let blocks = (storage.size(&paths.index)? / u64::from(INDEX)) as u32;
         Ok((paths, length, blocks))
     }
 
@@ -171,14 +217,19 @@ impl EpubDocument {
         blocks: u32,
         i: u32,
     ) -> Result<Block, DocumentError> {
-        let start = u32_at(storage, &paths.index, u64::from(i) * 4)?;
+        let mut entry = [0u8; INDEX as usize];
+        storage.read_at(&paths.index, u64::from(i * INDEX), &mut entry)?;
+        let start = u32::from_le_bytes([entry[0], entry[1], entry[2], entry[3]]);
         let end = if i + 1 < blocks {
-            u32_at(storage, &paths.index, u64::from(i + 1) * 4)?
+            u32_at(storage, &paths.index, u64::from((i + 1) * INDEX))?
         } else {
             length
         };
         let mut header = [0u8; HEADER as usize];
-        storage.read_at(&paths.text, u64::from(start - HEADER), &mut header)?;
+        let at = start.checked_sub(HEADER).ok_or(DocumentError::Malformed(
+            alloc::borrow::Cow::Borrowed("cache index"),
+        ))?;
+        storage.read_at(&paths.text, u64::from(at), &mut header)?;
         let len = usize::from(u16::from_le_bytes([header[4], header[5]]));
         let run_count = usize::from(u16::from_le_bytes([header[6], header[7]]));
         let mut text = alloc::vec![0u8; len];
@@ -235,6 +286,10 @@ impl EpubDocument {
             map: OffsetMap::IDENTITY,
             runs,
             align: Align::from_bits(header[3]),
+            indent: Some(i16::from_le_bytes([entry[4], entry[5]]))
+                .filter(|&i| i != convert::NO_INDENT),
+            space: Some(u16::from_le_bytes([entry[6], entry[7]]))
+                .filter(|&s| s != convert::NO_SPACE),
             image,
         })
     }
@@ -309,6 +364,47 @@ impl Document for EpubDocument {
 
     /// Estimated from the chapters' sizes in the archive, so it needs no
     /// conversion of unread chapters.
+    fn xpointer(&self, storage: &dyn Storage, at: Locator) -> Option<String> {
+        let positions = self.positions(storage, at.section)?;
+        let path = positions
+            .iter()
+            .take_while(|(offset, _)| *offset <= at.offset)
+            .last()
+            .map_or("", |(_, path)| path.as_str());
+        let path = if path.is_empty() {
+            String::new()
+        } else {
+            alloc::format!("/{path}")
+        };
+        Some(alloc::format!(
+            "/body/DocFragment[{}]/body{path}",
+            at.section + 1
+        ))
+    }
+
+    fn locate_xpointer(&self, storage: &dyn Storage, xpointer: &str) -> Option<Locator> {
+        let (section, target) = parse_xpointer(xpointer)?;
+        if section >= self.sections() {
+            return None;
+        }
+        let positions = self.positions(storage, section)?;
+        let inside = |path: &str, of: &str| {
+            of.is_empty() || path == of || path.strip_prefix(of).is_some_and(|r| r.starts_with('/'))
+        };
+        // The element's first block, else the block it is part of.
+        let offset = positions
+            .iter()
+            .find(|(_, path)| inside(path, &target))
+            .or_else(|| {
+                positions
+                    .iter()
+                    .rev()
+                    .find(|(_, path)| inside(&target, path))
+            })
+            .map_or(0, |(offset, _)| *offset);
+        Some(Locator::new(section, offset))
+    }
+
     fn fonts(&self, storage: &dyn Storage) -> Vec<EmbeddedFont> {
         if !self.styles {
             return Vec::new();
@@ -379,7 +475,7 @@ impl Document for EpubDocument {
         let (mut low, mut high) = (0u32, blocks);
         while low < high {
             let mid = low + (high - low) / 2;
-            if u32_at(storage, &paths.index, u64::from(mid) * 4)? <= at.offset {
+            if u32_at(storage, &paths.index, u64::from(mid * INDEX))? <= at.offset {
                 low = mid + 1;
             } else {
                 high = mid;

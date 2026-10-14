@@ -39,6 +39,10 @@ pub struct Face {
     pub heading: u8,
 }
 
+/// Changes whenever the same input is laid out differently, so readers
+/// rebuild page indexes they cached.
+pub const VERSION: u32 = 2;
+
 /// Measures text for the layout engine; readers implement it with their
 /// fonts.
 pub trait Typesetter {
@@ -57,6 +61,8 @@ pub struct Style {
     pub paragraph_spacing: f32,
     /// Indent of the first line of a paragraph.
     pub indent: f32,
+    /// The body text size, for a book's indents and spaces given in ems.
+    pub em: f32,
     /// Stretch spaces so lines fill the width (except a paragraph's last).
     /// The reader's choice wins over a book's justified text; centred and
     /// right-aligned blocks keep their alignment.
@@ -274,8 +280,17 @@ pub fn layout_page(
         let lines_before = page.lines.len();
         let had_content = !page.is_past_end();
         let at_block_start = from == 0 && !block.continues;
+        // The book's space where it sets one; at the top of a page only
+        // where a chapter starts (e.g. a title set lower).
+        let book_space = block.space.map(|s| f32::from(s) / 100.0 * style.em);
+        if page.is_past_end() && at_block_start && book_space.is_some() {
+            let first = document.block_at(storage, Locator::new(at.section, 0))?;
+            if first.is_some_and(|f| f.start == block.start) {
+                y += book_space.unwrap_or(0.0).min(height / 3.0);
+            }
+        }
         if !page.is_past_end() && at_block_start {
-            y += style.paragraph_spacing;
+            y += book_space.unwrap_or(style.paragraph_spacing);
             if heading > 0 {
                 y += body_line * HEADING_SPACE;
             }
@@ -290,7 +305,9 @@ pub fn layout_page(
             && block.kind == BlockKind::Paragraph
             && matches!(align, Align::Start | Align::Justify)
         {
-            style.indent
+            block
+                .indent
+                .map_or(style.indent, |i| f32::from(i) / 100.0 * style.em)
         } else {
             0.0
         };
@@ -431,6 +448,10 @@ mod tests {
                 } else {
                     Align::Auto
                 },
+                // "~" marks a block the book sets without indent and with
+                // a space of 2 em above.
+                indent: line.starts_with('~').then_some(0),
+                space: line.starts_with('~').then_some(200),
                 image: None,
             }))
         }
@@ -461,6 +482,7 @@ mod tests {
     const STYLE: Style = Style {
         paragraph_spacing: 0.0,
         indent: 0.0,
+        em: 10.0,
         justify: false,
     };
 
@@ -503,6 +525,7 @@ mod tests {
         let doc = Text::new("aa bb cc dd ee\n");
         let style = Style {
             indent: 3.0,
+            em: 10.0,
             justify: true,
             ..STYLE
         };
@@ -515,6 +538,36 @@ mod tests {
             page.lines[1].word_spacing, 0.0,
             "last line is not justified"
         );
+    }
+
+    #[test]
+    fn the_books_indents_and_spaces_win() {
+        let doc = Text::new(
+            "aa
+~bb
+cc
+",
+        );
+        let style = Style {
+            indent: 3.0,
+            em: 10.0,
+            ..STYLE
+        };
+        let page = layout(&doc, 0, 100.0, &style);
+        assert_eq!(texts(&page), vec!["aa", "~bb", "cc"]);
+        assert_eq!(page.lines[0].x, 3.0);
+        assert_eq!(page.lines[1].x, 0.0, "the book's indent");
+        assert_eq!(page.lines[2].x, 3.0);
+        // 2 em of 10 px above "~bb", the reader's spacing elsewhere.
+        assert_eq!(page.lines[1].baseline - page.lines[0].baseline, 30.0);
+        assert_eq!(page.lines[2].baseline - page.lines[1].baseline, 10.0);
+        // At the top of a chapter's first page the space stays.
+        let doc = Text::new(
+            "~aa
+",
+        );
+        let page = layout(&doc, 0, 100.0, &style);
+        assert_eq!(page.lines[0].baseline, 28.0);
     }
 
     #[test]
@@ -588,6 +641,7 @@ aa bb cc dd
         let doc = Text::new("#ab\n>xy\n");
         let style = Style {
             indent: 3.0,
+            em: 10.0,
             justify: true,
             ..STYLE
         };

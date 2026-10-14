@@ -35,6 +35,9 @@ pub struct Env<'a> {
     pub status: &'a SystemStatus,
     /// Items for status lines, from every plugin.
     pub status_items: &'a StatusItems,
+    /// Whether the device can make HTTP requests
+    /// ([`Command::Http`](crate::Command::Http)).
+    pub network: bool,
     /// The device's storage. Plugins keep their own files below
     /// [`Env::plugin_dir`].
     pub storage: &'a dyn Storage,

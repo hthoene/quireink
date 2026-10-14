@@ -7,6 +7,7 @@ mod budget;
 mod device;
 mod gui;
 mod headless;
+mod http;
 mod panel;
 mod profiles;
 

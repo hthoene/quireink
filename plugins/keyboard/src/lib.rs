@@ -139,6 +139,8 @@ struct KeyboardScreen {
     title: String,
     text: String,
     layer: Layer,
+    /// Shown as dots (mode `password`).
+    password: bool,
     /// The next letter is a capital.
     shift: bool,
     rows: Vec<Vec<Slot>>,
@@ -178,6 +180,7 @@ impl KeyboardScreen {
             title: params.get(params::TITLE).unwrap_or_default().to_string(),
             text: params.get(params::TEXT).unwrap_or_default().to_string(),
             params: params.clone(),
+            password: params.get(params::MODE) == Some("password"),
             layer,
             shift: false,
             rows,
@@ -381,14 +384,19 @@ impl KeyboardScreen {
             style.line.max(2),
             Color::BLACK,
         );
-        // The end of the text, with a cursor after it.
+        // The end of the text, with a cursor after it; a password as dots.
+        let text = if self.password {
+            "•".repeat(self.text.chars().count())
+        } else {
+            self.text.clone()
+        };
         let room = f32::from(box_area.width) - margin * 1.5;
         let mut start = 0;
-        while font.measure(style.text, &self.text[start..]) > room {
-            start += self.text[start..].chars().next().map_or(1, char::len_utf8);
+        while font.measure(style.text, &text[start..]) > room {
+            start += text[start..].chars().next().map_or(1, char::len_utf8);
         }
         let x = f32::from(box_area.x) + margin / 2.0;
-        let shown = &self.text[start..];
+        let shown = &text[start..];
         ui::draw_label(canvas, &font, style.text, x, box_area, shown, Color::BLACK);
         let end = x + font.measure(style.text, shown);
         let cursor = style.text as u32;

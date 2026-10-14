@@ -41,6 +41,7 @@ mod core_plugin;
 mod data_plugin;
 mod input;
 mod keymap;
+mod net;
 mod refresh;
 mod registry;
 #[cfg(test)]
@@ -73,6 +74,7 @@ use quireink_sdk::{
 use crate::core_plugin::{CORE, CorePlugin};
 use crate::input::{Recognized, Recognizer, Thresholds};
 use crate::keymap::{InputKey, Keymap, Origin, Zone};
+pub use crate::net::{HttpCall, HttpResponse, MAX_RESPONSE};
 use crate::refresh::RefreshPolicy;
 use crate::registry::{PluginRegistrar, Registry, Staging};
 
@@ -191,6 +193,7 @@ pub struct KernelBuilder {
     device_keymap: Option<Cow<'static, str>>,
     user_config: Option<String>,
     glyph_cache: usize,
+    network: bool,
     frame_rows: Option<u16>,
     storage: Option<Box<dyn Storage>>,
     setting_defaults: Vec<(String, String)>,
@@ -258,6 +261,13 @@ impl KernelBuilder {
         self
     }
 
+    /// The shell makes HTTP requests (see [`Kernel::take_requests`]);
+    /// without, plugins' requests fail at once.
+    pub fn network(mut self, available: bool) -> Self {
+        self.network = available;
+        self
+    }
+
     /// Memory for glyphs rasterized at runtime (default 32 KiB). Bitmap font
     /// packs do not use it.
     pub fn glyph_cache(mut self, bytes: usize) -> Self {
@@ -292,6 +302,7 @@ impl KernelBuilder {
                 plugins: Plugins::new(),
                 status: SystemStatus::default(),
                 status_items: StatusItems::new(),
+                network: self.network,
                 storage: self.storage.unwrap_or_else(|| Box::new(NoStorage)),
             },
             pending: None,
@@ -311,6 +322,9 @@ impl KernelBuilder {
             warnings: Vec::new(),
             restart: false,
             scope: None,
+            requests: Vec::new(),
+            awaiting: Vec::new(),
+            next_request: 0,
             plugin_defaults: Vec::new(),
             now: Instant::default(),
         };
@@ -471,6 +485,11 @@ pub struct Kernel {
     restart: bool,
     /// The active settings scope: its file and the screen that set it.
     scope: Option<(String, Option<usize>)>,
+    /// HTTP requests for the shell to make.
+    requests: Vec<HttpCall>,
+    /// Requests made and not answered yet: id, reply event, parameters.
+    awaiting: Vec<(u32, Id, Params)>,
+    next_request: u32,
     /// Setting defaults from plugins, applied once all are registered:
     /// `(plugin, setting, value)`.
     plugin_defaults: Vec<(Id, Id, Cow<'static, str>)>,
@@ -498,6 +517,7 @@ impl Kernel {
             device_keymap: None,
             user_config: None,
             glyph_cache: DEFAULT_GLYPH_CACHE,
+            network: false,
             frame_rows: None,
             storage: None,
             setting_defaults: Vec::new(),
@@ -656,6 +676,52 @@ impl Kernel {
     /// Returns and clears the collected warnings.
     pub fn take_warnings(&mut self) -> Vec<Warning> {
         mem::take(&mut self.warnings)
+    }
+
+    /// Returns the HTTP requests to make; answer each with
+    /// [`Kernel::http_response`]. Check after every kernel call.
+    pub fn take_requests(&mut self) -> Vec<HttpCall> {
+        mem::take(&mut self.requests)
+    }
+
+    /// Delivers the answer to a request from [`Kernel::take_requests`].
+    pub fn http_response(&mut self, now: Instant, response: HttpResponse) -> Effects {
+        self.now = now;
+        if let Some(at) = self
+            .awaiting
+            .iter()
+            .position(|(id, _, _)| *id == response.id)
+        {
+            let (_, reply, params) = self.awaiting.remove(at);
+            let body = String::from_utf8_lossy(&response.body).into_owned();
+            let params = params
+                .with(
+                    quireink_sdk::http_params::STATUS,
+                    format!("{}", response.status),
+                )
+                .with(quireink_sdk::http_params::BODY, body);
+            self.output.commands.push(Command::Emit(reply, params));
+        }
+        self.finish()
+    }
+
+    /// The device goes to sleep or the app to the background; plugins hear
+    /// [`events::SUSPEND`].
+    pub fn suspend(&mut self, now: Instant) -> Effects {
+        self.now = now;
+        self.output
+            .commands
+            .push(Command::Emit(events::SUSPEND, Params::new()));
+        self.finish()
+    }
+
+    /// Back from [`Kernel::suspend`].
+    pub fn resume(&mut self, now: Instant) -> Effects {
+        self.now = now;
+        self.output
+            .commands
+            .push(Command::Emit(events::RESUME, Params::new()));
+        self.finish()
     }
 
     // ---- Registration -------------------------------------------------
@@ -1235,6 +1301,7 @@ impl Kernel {
                 self.set_in_scope(&id, value);
             }
             Command::SetScope(path) => self.set_scope(path),
+            Command::Http(request) => self.request(request),
             Command::SetSetting(id, value) => match self.shared.settings.set(id.as_str(), value) {
                 Ok(()) => {
                     self.persist_setting(&id);
@@ -1424,6 +1491,30 @@ impl Kernel {
                 ));
             }
         }
+    }
+
+    /// Queues an HTTP request for the shell, or fails it without network.
+    fn request(&mut self, request: quireink_sdk::HttpRequest) {
+        if !self.shared.network {
+            let params = request
+                .params
+                .with(quireink_sdk::http_params::STATUS, "0")
+                .with(quireink_sdk::http_params::BODY, "no network");
+            self.output
+                .commands
+                .push(Command::Emit(request.reply, params));
+            return;
+        }
+        self.next_request = self.next_request.wrapping_add(1);
+        let id = self.next_request;
+        self.requests.push(HttpCall {
+            id,
+            method: request.method,
+            url: request.url,
+            headers: request.headers,
+            body: request.body.map(String::into_bytes),
+        });
+        self.awaiting.push((id, request.reply, request.params));
     }
 
     /// Activates the scope stored at `path` for the top screen, or ends
@@ -1709,6 +1800,7 @@ struct Shared {
     plugins: Plugins,
     status: SystemStatus,
     status_items: StatusItems,
+    network: bool,
     storage: Box<dyn Storage>,
 }
 
@@ -1728,6 +1820,7 @@ impl Shared {
             plugins: &self.plugins,
             status: &self.status,
             status_items: &self.status_items,
+            network: self.network,
             storage: self.storage.as_ref(),
         }
     }

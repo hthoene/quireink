@@ -50,6 +50,8 @@ struct Running {
     refresh: Option<RefreshMode>,
     /// When the battery and time zone were read last.
     status_read: Instant,
+    /// HTTP requests in flight.
+    net: crate::net::Net,
 }
 
 /// How often the battery and time zone are read again.
@@ -104,6 +106,8 @@ fn android_main(app: AndroidApp) {
                     // The time zone or the battery may have changed.
                     if let Some(running) = running.as_mut() {
                         running.status_read = Instant(0);
+                        let effects = running.kernel.resume(now());
+                        apply(running, effects);
                     }
                     // Back from the settings page that grants storage
                     // access: restart with the shared storage.
@@ -118,6 +122,11 @@ fn android_main(app: AndroidApp) {
                     // Other apps get the device's own refresh setting.
                     if let Some(epd) = epd.as_mut() {
                         epd.reset();
+                    }
+                    // Plugins save or send what is pending (e.g. progress).
+                    if let Some(running) = running.as_mut() {
+                        let effects = running.kernel.suspend(now());
+                        apply(running, effects);
                     }
                 }
                 MainEvent::TerminateWindow { .. } => window = None,
@@ -152,6 +161,10 @@ fn android_main(app: AndroidApp) {
             let at = now();
             state.status_read = at;
             let effects = state.kernel.set_status(at, status::read(&app, at));
+            changed |= apply(state, effects);
+        }
+        while let Some(response) = state.net.next() {
+            let effects = state.kernel.http_response(now(), response);
             changed |= apply(state, effects);
         }
         if state.wake_at.is_some_and(|at| at <= now()) {
@@ -248,7 +261,7 @@ fn start_kernel(
         .filter(|dir| shared.is_some() && dir.join(KOREADER_DICTIONARIES).is_dir())
         .map_or(DICTIONARIES, |_| KOREADER_DICTIONARIES);
     let shared_storage = shared.is_some();
-    let mut builder = Kernel::builder(device).plugin_dir("plugins");
+    let mut builder = Kernel::builder(device).plugin_dir("plugins").network(true);
     builder = match shared {
         Some(shared) => builder
             .storage(Mounted::new(storage, SHARED, shared))
@@ -297,6 +310,7 @@ fn start_kernel(
         shared_storage,
         refresh: None,
         status_read: now,
+        net: crate::net::Net::new(app),
     };
     apply(&mut running, effects);
     Some(running)
@@ -340,6 +354,9 @@ fn install_samples(app: &AndroidApp, root: &Path) {
 /// Executes the effects of a kernel call; `true` if the screen changed.
 fn apply(state: &mut Running, effects: Effects) -> bool {
     state.wake_at = effects.wake_at();
+    for call in state.kernel.take_requests() {
+        state.net.start(call);
+    }
     state.restart |= effects.restart();
     if let Some((_, mode)) = effects.refresh() {
         state.refresh = Some(state.refresh.map_or(mode, |m| m.max(mode)));

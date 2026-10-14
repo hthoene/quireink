@@ -97,11 +97,15 @@ pub mod params {
     pub const TITLE: &str = "title";
     /// Text, e.g. entered on the keyboard.
     pub const TEXT: &str = "text";
-    /// What kind of text a keyboard asks for: `text` (the default) or
-    /// `number`.
+    /// What kind of text a keyboard asks for: `text` (the default),
+    /// `number` or `password` (shown as dots).
     pub const MODE: &str = "mode";
     /// The event a screen emits with its result, e.g. the keyboard's text.
     pub const REPLY: &str = "reply";
+    /// A position in a document: section and offset (see
+    /// `document::Locator`).
+    pub const SECTION: &str = "section";
+    pub const OFFSET: &str = "offset";
     /// Reading progress in percent, e.g. `12.5`.
     pub const PROGRESS: &str = "progress";
     /// A word, e.g. to look up.
@@ -122,13 +126,20 @@ pub mod events {
     /// A book was opened for reading. Every reader plugin emits it, so home
     /// screens, statistics or sync plugins work with any reader. Parameters
     /// [`PATH`](super::params::PATH), [`TITLE`](super::params::TITLE),
-    /// [`PROGRESS`](super::params::PROGRESS).
+    /// [`PROGRESS`](super::params::PROGRESS) and the position,
+    /// [`SECTION`](super::params::SECTION) and
+    /// [`OFFSET`](super::params::OFFSET).
     pub const BOOK_OPENED: Id = Id::new_static("core.book-opened");
     /// The reader moved to another page; same parameters as
     /// [`BOOK_OPENED`].
     pub const PAGE_TURNED: Id = Id::new_static("core.page-turned");
     /// A menu was redefined or reset; parameter [`ID`](super::params::ID).
     pub const MENU_CHANGED: Id = Id::new_static("core.menu-changed");
+    /// The device goes to sleep or the app to the background: a moment to
+    /// save or send what is pending.
+    pub const SUSPEND: Id = Id::new_static("core.suspend");
+    /// Back from [`SUSPEND`].
+    pub const RESUME: Id = Id::new_static("core.resume");
     /// The battery or the time zone changed; status lines redraw.
     pub const STATUS_CHANGED: Id = Id::new_static("core.status-changed");
 }

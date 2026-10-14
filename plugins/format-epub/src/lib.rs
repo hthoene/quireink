@@ -149,6 +149,46 @@ mod tests {
     }
 
     #[test]
+    fn positions_as_koreader_writes_them() {
+        let ch2 = String::from(
+            "<html><body><div><p>Eins</p><p>Zwei <b>fett</b></p></div>\
+             <div><h2>Titel</h2><p>Drei</p></div></body></html>",
+        );
+        let storage = epub(ch2);
+        let doc = EpubDocument::open(&storage, "books/test.epub").unwrap();
+        let blocks: Vec<u32> = {
+            let mut at = Locator::new(1, 0);
+            let mut starts = Vec::new();
+            while let Some(block) = doc.block_at(&storage, at).unwrap() {
+                starts.push(block.start);
+                at = Locator::new(1, block.end);
+            }
+            starts
+        };
+        let xp = |offset| doc.xpointer(&storage, Locator::new(1, offset)).unwrap();
+        assert_eq!(xp(blocks[0]), "/body/DocFragment[2]/body/div[1]/p[1]");
+        assert_eq!(xp(blocks[1] + 2), "/body/DocFragment[2]/body/div[1]/p[2]");
+        assert_eq!(xp(blocks[3]), "/body/DocFragment[2]/body/div[2]/p[1]");
+        let at = |x: &str| {
+            doc.locate_xpointer(&storage, x)
+                .map(|l| (l.section, l.offset))
+        };
+        // KOReader leaves out [1] and points into text.
+        assert_eq!(
+            at("/body/DocFragment[2]/body/div/p[2]/text().3"),
+            Some((1, blocks[1]))
+        );
+        assert_eq!(at("/body/DocFragment[2]/body/div[2]"), Some((1, blocks[2])));
+        // Deeper than blocks: the block containing it.
+        assert_eq!(
+            at("/body/DocFragment[2]/body/div[1]/p[2]/b/text().1"),
+            Some((1, blocks[1]))
+        );
+        assert_eq!(at("/body/DocFragment[9]/body/p"), None);
+        assert_eq!(at("nonsense"), None);
+    }
+
+    #[test]
     fn embedded_fonts_are_listed_used_and_revealed() {
         let opf = OPF
             .replace(
@@ -364,6 +404,40 @@ mod tests {
                 (String::from("Normal"), Align::Auto, TextStyle::REGULAR),
             ]
         );
+    }
+
+    #[test]
+    fn keeps_the_books_indents_and_spaces() {
+        let ch2 = String::from(
+            "<html><head><style>.head { padding-bottom: 1em }              .first { text-indent: 0; margin-top: 1.2em } p { margin: 0 }              div.box { text-indent: 2em; margin-bottom: 3em }</style></head><body>             <p class=\"head\">Title</p><p class=\"first\">One</p><p>Two</p>             <div class=\"box\"><p>Three</p></div><p>Four</p></body></html>",
+        );
+        let storage = epub(ch2);
+        let doc = EpubDocument::open(&storage, "books/test.epub").unwrap();
+        let mut at = Locator::new(1, 0);
+        let mut found = Vec::new();
+        while let Some(block) = doc.block_at(&storage, at).unwrap() {
+            at = Locator::new(1, block.end);
+            found.push((block.text.clone(), block.indent, block.space));
+        }
+        let row = |t: &str, i, s| (String::from(t), i, s);
+        assert_eq!(
+            found,
+            [
+                row("Title", None, Some(0)),
+                // The heading's padding plus the larger of the margins.
+                row("One", Some(0), Some(220)),
+                row("Two", None, Some(0)),
+                // Indents are inherited.
+                row("Three", Some(200), Some(0)),
+                row("Four", None, Some(300)),
+            ]
+        );
+        let plain = EpubDocument::open_with(&storage, "books/test.epub", false).unwrap();
+        let block = plain
+            .block_at(&storage, Locator::new(1, 0))
+            .unwrap()
+            .unwrap();
+        assert_eq!((block.indent, block.space), (None, None));
     }
 
     #[test]

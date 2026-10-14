@@ -1251,6 +1251,7 @@ dependencies = [
  "quireink-plugin-home",
  "quireink-plugin-hyphenation",
  "quireink-plugin-keyboard",
+ "quireink-plugin-kosync",
  "quireink-plugin-menu",
  "quireink-plugin-menu-editor",
  "quireink-plugin-plugin-manager",
@@ -1418,6 +1419,14 @@ dependencies = [
 
 [[package]]
 name = "quireink-plugin-keyboard"
+version = "0.1.0"
+dependencies = [
+ "quireink-i18n",
+ "quireink-sdk",
+]
+
+[[package]]
+name = "quireink-plugin-kosync"
 version = "0.1.0"
 dependencies = [
  "quireink-i18n",

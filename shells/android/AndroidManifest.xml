@@ -7,17 +7,22 @@
          storage permission before. Asked for only when the user chooses
          "Use the Books folder" on the home screen. -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+    <!-- Plugins that sync (e.g. reading progress with KOReader). -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
 
+    <!-- usesCleartextTraffic: self-hosted sync servers often answer over
+         plain http in the home network. -->
     <application
         android:label="QuireInk"
         android:icon="@mipmap/ic_launcher"
         android:hasCode="false"
         android:extractNativeLibs="true"
         android:allowBackup="true"
-        android:requestLegacyExternalStorage="true">
+        android:requestLegacyExternalStorage="true"
+        android:usesCleartextTraffic="true">
 
         <activity
             android:name="android.app.NativeActivity"

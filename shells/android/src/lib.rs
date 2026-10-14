@@ -25,6 +25,8 @@ mod epd;
 #[cfg(target_os = "android")]
 mod lights;
 #[cfg(target_os = "android")]
+mod net;
+#[cfg(target_os = "android")]
 mod plugin;
 #[cfg(target_os = "android")]
 mod status;
