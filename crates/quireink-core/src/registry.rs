@@ -7,8 +7,9 @@ use alloc::vec::Vec;
 use quireink_i18n::Catalog;
 use quireink_sdk::collections::VecMap;
 use quireink_sdk::{
-    ActionSpec, EventHandler, FontSpec, FormatSpec, HyphenationSpec, Id, MenuEntry, Priority,
-    RegisterError, Registrar, ScreenSpec, SettingGroupSpec, SettingSpec, SlotSpec, StatusItemSpec,
+    ActionSpec, Actions, EventHandler, FontSpec, FormatSpec, HyphenationSpec, Id, MenuEntry,
+    Priority, RegisterError, Registrar, ScreenSpec, SettingGroupSpec, SettingSpec, SlotSpec,
+    StatusItemSpec,
 };
 
 /// A candidate screen for a slot, proposed by a plugin.
@@ -23,7 +24,6 @@ struct SlotCandidate {
 /// which live in their own stores.
 #[derive(Debug, Default)]
 pub(crate) struct Registry {
-    pub(crate) actions: VecMap<Id, ActionSpec>,
     pub(crate) screens: VecMap<Id, ScreenSpec>,
     pub(crate) slots: VecMap<Id, SlotSpec>,
     candidates: Vec<SlotCandidate>,
@@ -34,7 +34,6 @@ pub(crate) struct Registry {
 impl Registry {
     /// Releases unused capacity once registration is complete.
     pub(crate) fn shrink_to_fit(&mut self) {
-        self.actions.shrink_to_fit();
         self.screens.shrink_to_fit();
         self.slots.shrink_to_fit();
         self.candidates.shrink_to_fit();
@@ -100,12 +99,16 @@ pub(crate) struct Staging {
 impl Staging {
     /// Moves actions, screens, slots and bindings into `registry`.
     /// Settings, key maps and catalogs are left for the caller.
-    pub(crate) fn merge_into(&mut self, registry: &mut Registry) -> Result<(), RegisterError> {
+    pub(crate) fn merge_into(
+        &mut self,
+        registry: &mut Registry,
+        actions: &mut Actions,
+    ) -> Result<(), RegisterError> {
         let duplicate = self
             .actions
             .iter()
             .map(|a| &a.id)
-            .find(|id| registry.actions.contains_key(*id))
+            .find(|id| actions.contains(id.as_str()))
             .or_else(|| {
                 self.screens
                     .iter()
@@ -122,7 +125,7 @@ impl Staging {
             return Err(RegisterError::Duplicate { id: id.clone() });
         }
         for action in self.actions.drain(..) {
-            registry.actions.insert(action.id.clone(), action);
+            actions.insert(action);
         }
         for screen in self.screens.drain(..) {
             registry.screens.insert(screen.id.clone(), screen);

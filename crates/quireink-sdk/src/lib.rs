@@ -51,7 +51,7 @@ pub mod time;
 pub mod ui;
 mod version;
 
-pub use action::{ActionHandler, ActionSpec};
+pub use action::{ActionHandler, ActionSpec, Actions};
 pub use command::Command;
 pub use env::{Env, Metrics};
 pub use event::EventHandler;

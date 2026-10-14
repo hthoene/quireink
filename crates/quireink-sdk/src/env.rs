@@ -3,6 +3,7 @@ use core::fmt;
 use quireink_i18n::Translator;
 use quireink_platform::{DeviceInfo, Instant, Storage, SystemStatus};
 
+use crate::action::Actions;
 use crate::fonts::Fonts;
 use crate::formats::Formats;
 use crate::hyphenation::Hyphenation;
@@ -25,6 +26,8 @@ pub struct Env<'a> {
     /// Hyphenation patterns by language.
     pub hyphenation: &'a Hyphenation,
     pub menus: &'a Menus,
+    /// Every action, e.g. to offer them in a menu editor.
+    pub actions: &'a Actions,
     /// Every plugin with its state, for plugin managers.
     pub plugins: &'a Plugins,
     /// The time of day and the battery, as far as the device knows them

@@ -62,6 +62,50 @@ impl Menus {
         self.custom.insert(menu, actions);
     }
 
+    /// Returns a menu to the entries plugins contribute.
+    pub fn reset(&mut self, menu: &str) {
+        self.custom.remove(menu);
+    }
+
+    /// Whether the user redefined `menu`.
+    pub fn is_customized(&self, menu: &str) -> bool {
+        self.custom.contains_key(menu)
+    }
+
+    /// Every menu: those plugins contribute to and those the user defined.
+    pub fn menu_ids(&self) -> Vec<&Id> {
+        let mut ids: Vec<&Id> = self
+            .entries
+            .iter()
+            .map(|e| &e.menu)
+            .chain(self.custom.keys())
+            .collect();
+        ids.sort();
+        ids.dedup();
+        ids
+    }
+
+    /// The ids of `menu`'s entries as plugins contribute them, ignoring
+    /// the user's definition.
+    pub fn default_ids(&self, menu: &str) -> Vec<&Id> {
+        let mut entries: Vec<&MenuEntry> = self
+            .entries
+            .iter()
+            .filter(|e| e.menu.as_str() == menu)
+            .collect();
+        entries.sort_by_key(|e| e.order);
+        entries.into_iter().map(|e| &e.item).collect()
+    }
+
+    /// The ids of `menu`'s entries as shown, including entries without a
+    /// label.
+    pub fn ids(&self, menu: &str) -> Vec<&Id> {
+        match self.custom.get(menu) {
+            Some(ids) => ids.iter().collect(),
+            None => self.default_ids(menu),
+        }
+    }
+
     /// Registers the label of an action or setting.
     pub fn set_title(&mut self, item: Id, title: Cow<'static, str>) {
         self.titles.insert(item, title);

@@ -65,7 +65,7 @@ use quireink_sdk::builtin::{
     settings as core_settings, slots,
 };
 use quireink_sdk::{
-    Command, Cx, Env, EventHandler, Fonts, Formats, GestureKind, Handled, Hyphenation, Id,
+    Actions, Command, Cx, Env, EventHandler, Fonts, Formats, GestureKind, Handled, Hyphenation, Id,
     Manifest, Menus, Metrics, Output, Params, Plugin, PluginInfo, PluginState, Plugins,
     RegisterError, RequiredFor, SDK_VERSION, Screen, Settings, StatusItems,
 };
@@ -279,6 +279,7 @@ impl KernelBuilder {
                 formats: Formats::new(),
                 hyphenation: Hyphenation::new(),
                 menus: Menus::new(),
+                actions: Actions::new(),
                 plugins: Plugins::new(),
                 status: SystemStatus::default(),
                 status_items: StatusItems::new(),
@@ -549,6 +550,7 @@ impl Kernel {
         let shared = &mut self.shared;
         shared.settings.shrink_to_fit();
         shared.menus.shrink_to_fit();
+        shared.actions.shrink_to_fit();
         shared.fonts.shrink_to_fit();
         shared.formats.shrink_to_fit();
         shared.hyphenation.shrink_to_fit();
@@ -705,7 +707,7 @@ impl Kernel {
     fn set_menu_titles(&mut self) {
         let referenced: Vec<Id> = self.shared.menus.referenced_items().cloned().collect();
         for id in referenced {
-            let title = match self.registry.actions.get(&id) {
+            let title = match self.shared.actions.get(id.as_str()) {
                 Some(action) => Some(action.title.clone()),
                 None => self
                     .shared
@@ -799,7 +801,7 @@ impl Kernel {
                 id: spec.id.clone(),
             });
         }
-        staging.merge_into(&mut self.registry)?;
+        staging.merge_into(&mut self.registry, &mut self.shared.actions)?;
         for setting in staging.settings.drain(..) {
             // Cannot fail: checked above.
             let _ = self.shared.settings.define(setting);
@@ -943,7 +945,7 @@ impl Kernel {
             .chain(self.shared.menus.referenced_items())
             .chain(preset_actions.iter())
             .filter(|id| {
-                !self.registry.actions.contains_key(*id)
+                !self.shared.actions.contains(id.as_str())
                     && self.shared.settings.get(id.as_str()).is_none()
             })
             .collect();
@@ -1056,7 +1058,7 @@ impl Kernel {
         if self.with_top(|screen, cx| screen.on_action(&action, cx)) == Handled::Yes {
             return;
         }
-        match self.registry.actions.get(&action) {
+        match self.shared.actions.get(action.as_str()) {
             Some(spec) => {
                 if let Some(handler) = &spec.handler {
                     let env = self.shared.env(self.now);
@@ -1206,6 +1208,7 @@ impl Kernel {
                 self.output.redraw = true;
                 self.output.request_refresh(mode);
             }
+            Command::SetMenu(menu, entries) => self.set_menu(menu, entries),
             _ => {}
         }
     }
@@ -1355,6 +1358,36 @@ impl Kernel {
         self.save_config(section, key, &value);
     }
 
+    /// Redefines or resets a menu (see [`Command::SetMenu`]) and saves it.
+    fn set_menu(&mut self, menu: Id, entries: Option<Vec<Id>>) {
+        let value = entries
+            .as_ref()
+            .map(|ids| ids.iter().map(Id::as_str).collect::<Vec<_>>().join(", "));
+        match entries {
+            Some(ids) => self.shared.menus.customize(menu.clone(), ids),
+            None => self.shared.menus.reset(menu.as_str()),
+        }
+        // New entries need their labels.
+        self.set_menu_titles();
+        let storage = self.shared.storage.as_ref();
+        let source = read_config(storage).unwrap_or_default();
+        let updated = match &value {
+            Some(value) => quireink_config::set(&source, "menus", menu.as_str(), value),
+            None => quireink_config::remove(&source, "menus", menu.as_str()),
+        };
+        if storage.write(CONFIG_FILE, updated.as_bytes()).is_err() {
+            self.warn(
+                WarningSource::Runtime,
+                None,
+                format!("could not save menu `{menu}` to {CONFIG_FILE}"),
+            );
+        }
+        self.output.commands.push(Command::Emit(
+            events::MENU_CHANGED,
+            Params::new().with(builtin_params::ID, menu.as_str().to_string()),
+        ));
+    }
+
     /// Sets `key` in `section` of the configuration file on the device.
     fn save_config(&mut self, section: &str, key: &str, value: &str) {
         let storage = self.shared.storage.as_ref();
@@ -1464,6 +1497,7 @@ struct Shared {
     formats: Formats,
     hyphenation: Hyphenation,
     menus: Menus,
+    actions: Actions,
     plugins: Plugins,
     status: SystemStatus,
     status_items: StatusItems,
@@ -1482,6 +1516,7 @@ impl Shared {
             formats: &self.formats,
             hyphenation: &self.hyphenation,
             menus: &self.menus,
+            actions: &self.actions,
             plugins: &self.plugins,
             status: &self.status,
             status_items: &self.status_items,

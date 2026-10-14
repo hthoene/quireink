@@ -123,6 +123,8 @@ pub mod events {
     /// The reader moved to another page; same parameters as
     /// [`BOOK_OPENED`].
     pub const PAGE_TURNED: Id = Id::new_static("core.page-turned");
+    /// A menu was redefined or reset; parameter [`ID`](super::params::ID).
+    pub const MENU_CHANGED: Id = Id::new_static("core.menu-changed");
     /// The battery or the time zone changed; status lines redraw.
     pub const STATUS_CHANGED: Id = Id::new_static("core.status-changed");
 }

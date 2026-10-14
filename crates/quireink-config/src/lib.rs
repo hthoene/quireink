@@ -322,6 +322,30 @@ pub fn set(source: &str, section: &str, key: &str, value: &str) -> String {
     out
 }
 
+/// Returns `source` without `key` in `section`; the rest stays as it is.
+pub fn remove(source: &str, section: &str, key: &str) -> String {
+    let mut current = "";
+    let mut out: alloc::vec::Vec<&str> = alloc::vec::Vec::new();
+    let mut removed = false;
+    for raw in source.lines() {
+        let text = raw.trim();
+        if let Some(name) = text.strip_prefix('[').and_then(|t| t.strip_suffix(']')) {
+            current = name.trim();
+        } else if current == section
+            && !text.starts_with(['#', ';'])
+            && text.split_once('=').is_some_and(|(k, _)| k.trim() == key)
+        {
+            removed = true;
+            continue;
+        }
+        out.push(raw);
+    }
+    if !removed {
+        return String::from(source);
+    }
+    join(&out)
+}
+
 fn join(lines: &[&str]) -> String {
     let mut out = lines.join("\n");
     out.push('\n');
@@ -412,6 +436,29 @@ mod tests {
     fn handles_crlf_line_endings() {
         let parsed = entries("[s]\r\nkey = value\r\n");
         assert_eq!(parsed[0].value.as_str(), "value");
+    }
+
+    #[test]
+    fn remove_keeps_everything_else() {
+        let source = "# top
+[menus]
+a = x, y
+# note
+b = z
+[other]
+a = 1
+";
+        assert_eq!(
+            remove(source, "menus", "a"),
+            "# top
+[menus]
+# note
+b = z
+[other]
+a = 1
+"
+        );
+        assert_eq!(remove(source, "menus", "missing"), source);
     }
 
     #[test]

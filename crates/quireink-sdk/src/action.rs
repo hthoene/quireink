@@ -3,6 +3,7 @@ use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::fmt;
 
+use crate::collections::VecMap;
 use crate::command::Command;
 use crate::env::Env;
 use crate::id::Id;
@@ -29,5 +30,38 @@ impl fmt::Debug for ActionSpec {
             .field("title", &self.title)
             .field("handler", &self.handler.is_some())
             .finish()
+    }
+}
+
+/// Every registered action, e.g. for menu and key map editors.
+#[derive(Debug, Default)]
+pub struct Actions {
+    map: VecMap<Id, ActionSpec>,
+}
+
+impl Actions {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn insert(&mut self, action: ActionSpec) {
+        self.map.insert(action.id.clone(), action);
+    }
+
+    pub fn get(&self, id: &str) -> Option<&ActionSpec> {
+        self.map.get(id)
+    }
+
+    pub fn contains(&self, id: &str) -> bool {
+        self.map.contains_key(id)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &ActionSpec> {
+        self.map.values()
+    }
+
+    /// Releases unused capacity once registration is complete.
+    pub fn shrink_to_fit(&mut self) {
+        self.map.shrink_to_fit();
     }
 }

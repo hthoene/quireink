@@ -29,6 +29,10 @@ pub enum Command {
     /// restart. The kernel refuses plugins that cannot be switched off
     /// (see [`PluginInfo::can_switch_off`](crate::PluginInfo)).
     SetPluginEnabled(Id, bool),
+    /// Redefines a menu with exactly these entries (actions, settings or
+    /// submenus), saved in `[menus]` of `quireink.ini`; `None` returns to
+    /// the entries plugins contribute.
+    SetMenu(Id, Option<alloc::vec::Vec<Id>>),
     /// Restarts QuireInk, e.g. to apply switched plugins. The shell builds
     /// a new kernel; the reading position is already saved.
     Restart,

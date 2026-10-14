@@ -785,6 +785,69 @@ fn menus_follow_order_and_user_definitions() {
 }
 
 #[test]
+fn menus_are_redefined_saved_and_reset() {
+    let log = log();
+    let storage = quireink_sdk::MemoryStorage::new().with(
+        "quireink.ini",
+        "[core]
+ui-size = 12
+",
+    );
+    let mut kernel = Kernel::builder(DEVICE)
+        .storage(storage)
+        .plugin(OverlayPlugin { log })
+        .build()
+        .unwrap();
+    let items = |kernel: &Kernel| -> Vec<String> {
+        kernel
+            .shared
+            .menus
+            .items("core.main")
+            .iter()
+            .map(|i| i.id.to_string())
+            .collect()
+    };
+    let file = |kernel: &Kernel| -> String {
+        let mut buf = [0u8; 256];
+        let n = kernel
+            .shared
+            .storage
+            .read_at("quireink.ini", 0, &mut buf)
+            .unwrap();
+        String::from(core::str::from_utf8(&buf[..n]).unwrap())
+    };
+    let defaults = items(&kernel);
+    kernel.set_menu(
+        Id::new_static("core.main"),
+        Some(alloc::vec![
+            Id::new_static("core.settings"),
+            Id::new_static("core.home")
+        ]),
+    );
+    assert_eq!(items(&kernel), ["core.settings", "core.home"]);
+    assert!(kernel.shared.menus.is_customized("core.main"));
+    assert_eq!(
+        file(&kernel),
+        "[core]
+ui-size = 12
+
+[menus]
+core.main = core.settings, core.home
+"
+    );
+    kernel.set_menu(Id::new_static("core.main"), None);
+    assert_eq!(items(&kernel), defaults);
+    assert_eq!(
+        file(&kernel),
+        "[core]
+ui-size = 12
+
+[menus]
+"
+    );
+}
+
+#[test]
 fn changed_settings_are_saved_and_announced() {
     let log = log();
     let storage = quireink_sdk::MemoryStorage::new()
