@@ -23,4 +23,6 @@ mod app;
 #[cfg(target_os = "android")]
 mod epd;
 #[cfg(target_os = "android")]
+mod lights;
+#[cfg(target_os = "android")]
 mod plugin;

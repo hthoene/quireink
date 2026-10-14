@@ -18,7 +18,8 @@ use quireink_platform::{
 };
 
 use crate::epd::Epd;
-use crate::plugin::AndroidPlugin;
+use crate::lights::Lights;
+use crate::plugin::{AndroidPlugin, Frontlight};
 use crate::{access, keys, pixels};
 
 /// Where the device's shared storage appears in QuireInk's storage.
@@ -50,6 +51,7 @@ fn android_main(app: AndroidApp) {
     let start = StdInstant::now();
     let now = move || Instant(start.elapsed().as_millis() as u64);
     let mut epd = Epd::detect(&app);
+    let lights = Lights::detect(&app);
     let mut running: Option<Running> = None;
     let mut window: Option<NativeWindow> = None;
     let mut quit = false;
@@ -68,7 +70,7 @@ fn android_main(app: AndroidApp) {
                     window = app.native_window();
                     if let Some(window) = &window {
                         if running.is_none() {
-                            running = start_kernel(&app, window, now());
+                            running = start_kernel(&app, window, lights, now());
                         }
                         if let Some(running) = &running {
                             // A new or returning window: start clean.
@@ -148,7 +150,7 @@ fn android_main(app: AndroidApp) {
             // The old kernel goes first: its files are closed and its
             // memory is free before the new one starts.
             drop(running.take());
-            running = start_kernel(&app, window, now());
+            running = start_kernel(&app, window, lights, now());
             if let Some(running) = &running {
                 if let Some(epd) = epd.as_mut() {
                     epd.set(RefreshMode::Full);
@@ -160,7 +162,12 @@ fn android_main(app: AndroidApp) {
 }
 
 /// Builds the kernel for the window's size.
-fn start_kernel(app: &AndroidApp, window: &NativeWindow, now: Instant) -> Option<Running> {
+fn start_kernel(
+    app: &AndroidApp,
+    window: &NativeWindow,
+    lights: Option<Lights>,
+    now: Instant,
+) -> Option<Running> {
     let (width, height) = (window.width(), window.height());
     let dpi = app.config().density().unwrap_or(160);
     let device = DeviceInfo {
@@ -227,6 +234,11 @@ fn start_kernel(app: &AndroidApp, window: &NativeWindow, now: Instant) -> Option
         quireink_app::install(builder, quireink_app::Fonts::Outline).plugin(AndroidPlugin {
             app: app.clone(),
             shared_storage,
+            frontlight: lights.map(|lights| Frontlight {
+                lights,
+                brightness: lights.brightness(app),
+                warmth: lights.warmth(app),
+            }),
         });
     let mut kernel = match builder.build() {
         Ok(kernel) => kernel,

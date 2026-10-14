@@ -46,6 +46,10 @@ USB debugging*.
   menu, or swipe. Long-press for more options.
 - **Buttons:** page keys and volume keys turn pages; Back goes back.
 - **Language:** the system language, unless one is chosen in the settings.
+- **Frontlight (Onyx Boox):** brightness and, where the device has warm
+  and cold light, its warmth, in the reader's menu and under
+  *Settings → Display*. They follow the device, so changes made with the
+  system's own controls show up too.
 - **E-ink (Onyx Boox):** QuireInk chooses the waveform for every frame:
   a flashing full refresh every few pages (*Settings → Display*) and on
   new screens, clean partial refreshes for page turns and fast ones for
@@ -57,4 +61,3 @@ USB debugging*.
 These are planned:
 
 - Rendering is grayscale, also on colour panels.
-- There is no frontlight control yet.

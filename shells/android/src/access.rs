@@ -21,7 +21,7 @@ const READ_STORAGE: &str = "android.permission.READ_EXTERNAL_STORAGE";
 
 /// Runs `f` with the JNI environment and the activity, clearing any Java
 /// exception it leaves; `None` on failure.
-fn with_activity<T>(
+pub(crate) fn with_activity<T>(
     app: &AndroidApp,
     f: impl FnOnce(&mut JNIEnv<'_>, &JObject<'_>) -> jni::errors::Result<T>,
 ) -> Option<T> {
