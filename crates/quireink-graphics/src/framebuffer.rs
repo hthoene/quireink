@@ -225,6 +225,25 @@ impl Framebuffer {
         self.store(x, y, encoded);
     }
 
+    /// Sets the pixel at `(x, y)` (inside the band) to `gray`, ordered
+    /// dithered for formats with few gray levels, so photos and
+    /// illustrations keep their tones.
+    pub(crate) fn put_gray(&mut self, x: u16, y: u16, gray: u8) {
+        /// 4×4 Bayer matrix.
+        const BAYER: [[u8; 4]; 4] = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
+        let gray = match self.format.gray_levels() {
+            Some(levels @ 2..=16) => {
+                let step = 255.0 / f32::from(levels - 1);
+                let threshold = f32::from(BAYER[usize::from(y % 4)][usize::from(x % 4)]);
+                let offset = ((threshold + 0.5) / 16.0 - 0.5) * step;
+                (f32::from(gray) + offset).clamp(0.0, 255.0) as u8
+            }
+            _ => gray,
+        };
+        let value = self.encode(Color::gray(gray));
+        self.store(x, y, value);
+    }
+
     /// Writes an encoded pixel value.
     fn store(&mut self, x: u16, y: u16, value: u32) {
         let row = usize::from(y - self.top) * self.stride;

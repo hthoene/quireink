@@ -289,6 +289,26 @@ impl ZipArchive {
         })
     }
 
+    /// Where a stored (uncompressed) entry's bytes are in the archive file,
+    /// as `(offset, length)`, to read them in place; `None` for compressed
+    /// entries.
+    pub fn stored_range(
+        &self,
+        storage: &dyn Storage,
+        entry: &Entry,
+    ) -> Result<Option<(u64, u64)>, ZipError> {
+        if entry.method != Method::Stored {
+            return Ok(None);
+        }
+        let offset = self.data_offset(storage, entry)?;
+        Ok(Some((offset, u64::from(entry.size))))
+    }
+
+    /// The path of the archive file.
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+
     /// Offset of an entry's data, after its local header.
     fn data_offset(&self, storage: &dyn Storage, entry: &Entry) -> Result<u64, ZipError> {
         let header = read_exact(storage, &self.path, u64::from(entry.header_offset), 30)?;

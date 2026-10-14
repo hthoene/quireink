@@ -41,16 +41,23 @@ const FLAG_CONTINUES: u8 = 1;
 /// Paths of a chapter's cache files.
 #[derive(Debug, Clone)]
 pub(crate) struct CachePaths {
+    /// The book's cache directory.
+    pub dir: String,
     pub text: String,
     pub index: String,
     pub anchors: String,
     pub end: String,
 }
 
+/// Images are decoded at most this large (longer side, in pixels); readers
+/// scale them to the page.
+const IMAGE_SIDE: u32 = 1600;
+
 pub(crate) fn encode_kind(kind: BlockKind) -> (u8, u8) {
     match kind {
         BlockKind::Heading(level) => (1, level),
         BlockKind::Preformatted => (2, 0),
+        BlockKind::Image => (3, 0),
         _ => (0, 0),
     }
 }
@@ -59,8 +66,17 @@ pub(crate) fn decode_kind(kind: u8, level: u8) -> BlockKind {
     match kind {
         1 => BlockKind::Heading(level.clamp(1, 6)),
         2 => BlockKind::Preformatted,
+        3 => BlockKind::Image,
         _ => BlockKind::Paragraph,
     }
+}
+
+/// The cache file of the image at `archive_path`.
+pub(crate) fn image_path(dir: &str, archive_path: &str) -> String {
+    let hash = archive_path.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| {
+        (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
+    });
+    alloc::format!("{dir}/img-{hash:016x}.gray")
 }
 
 pub(crate) fn continues(flags: u8) -> bool {
@@ -131,6 +147,10 @@ struct Converter<'a> {
     /// The book's stylesheet rules, plus those of `<style>` elements.
     rules: Rules,
     css: css::Parser,
+    /// Directory of the chapter in the archive, for relative links.
+    base: String,
+    /// Images to decode after the chapter: (archive path, cache path).
+    images: Vec<(String, String)>,
     kind: BlockKind,
     continues: bool,
     /// Depth inside elements whose content is not shown.
@@ -177,6 +197,33 @@ impl Converter<'_> {
     fn push_str(&mut self, text: &str) {
         for c in text.chars() {
             self.push(c);
+        }
+    }
+
+    /// Whether only `<svg>` elements hide the current content.
+    fn only_svg_hides(&self) -> bool {
+        self.stack
+            .iter()
+            .filter(|f| f.hides)
+            .all(|f| f.tag == "svg")
+    }
+
+    /// An image block for `href` (relative to the chapter).
+    fn image(&mut self, href: &str, alt: &str) {
+        let (path, _) = crate::package::resolve(&self.base, href);
+        let cache = image_path(&self.paths.dir, &path);
+        self.flush();
+        self.kind = BlockKind::Image;
+        self.text.push_str(&cache);
+        self.text.push('\t');
+        self.text.push_str(&clean_alt(alt));
+        let len = self.text.len().min(LIMIT);
+        self.write_record(BlockKind::Image, len);
+        self.text.clear();
+        self.runs.clear();
+        self.kind = BlockKind::Paragraph;
+        if !self.images.iter().any(|(p, _)| *p == path) {
+            self.images.push((path, cache));
         }
     }
 
@@ -236,6 +283,18 @@ impl Converter<'_> {
         });
         if hides {
             self.hidden += 1;
+        }
+        // Images, also inside <svg> (a common way to show covers).
+        if matches!(tag.as_str(), "img" | "image") && self.only_svg_hides() {
+            let href = attrs
+                .iter()
+                .find(|(name, _)| matches!(local_name(name), "src" | "href"))
+                .map(|(_, value)| decode(value).into_owned());
+            if let Some(href) = href.filter(|h| !h.is_empty() && !h.starts_with("data:")) {
+                let alt = attrs.get("alt").unwrap_or_default();
+                self.image(&href, &alt);
+            }
+            return;
         }
         if self.hidden > 0 {
             return;
@@ -478,6 +537,7 @@ pub(crate) fn convert(
     paths: &CachePaths,
     rules: Rules,
 ) -> Result<u32, DocumentError> {
+    let base = String::from(entry.name.rfind('/').map_or("", |i| &entry.name[..=i]));
     let _ = storage.remove(&paths.end);
     for path in [&paths.text, &paths.index, &paths.anchors] {
         storage.write(path, &[])?;
@@ -496,6 +556,8 @@ pub(crate) fn convert(
         stack: Vec::new(),
         rules,
         css: css::Parser::default(),
+        base,
+        images: Vec::new(),
         kind: BlockKind::Paragraph,
         continues: false,
         hidden: 0,
@@ -534,7 +596,112 @@ pub(crate) fn convert(
     if let Some(e) = converter.failed {
         return Err(e);
     }
+    // Images after the text, so only one archive entry is inflated at a
+    // time. One that cannot be decoded is shown as its alternative text.
+    let images = core::mem::take(&mut converter.images);
+    let length = converter.length;
+    drop(converter);
+    for (path, cache) in &images {
+        if quireink_sdk::image::GrayFile::open(storage, cache).is_none() {
+            let _ = decode_image(storage, archive, path, cache, &paths.dir);
+        }
+    }
     // Last: its presence marks a complete conversion.
-    storage.write(&paths.end, &converter.length.to_le_bytes())?;
-    Ok(converter.length)
+    storage.write(&paths.end, &length.to_le_bytes())?;
+    Ok(length)
+}
+
+/// Collapses whitespace in alternative text.
+fn clean_alt(alt: &str) -> String {
+    let mut out = String::new();
+    for word in alt.split_whitespace() {
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(word);
+    }
+    out
+}
+
+/// Reads part of a file in storage.
+struct StorageSource<'a> {
+    storage: &'a dyn Storage,
+    path: &'a str,
+    offset: u64,
+    end: u64,
+}
+
+impl quireink_sdk::image::Source for StorageSource<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize, quireink_sdk::image::ImageError> {
+        let left = (self.end - self.offset).min(buf.len() as u64) as usize;
+        if left == 0 {
+            return Ok(0);
+        }
+        let n = self
+            .storage
+            .read_at(self.path, self.offset, &mut buf[..left])
+            .map_err(|_| quireink_sdk::image::ImageError::Io)?;
+        self.offset += n as u64;
+        Ok(n)
+    }
+}
+
+/// Decodes the image at `path` in the archive into the cache file `cache`.
+/// Stored entries are read in place; compressed ones are inflated to a
+/// temporary file first.
+fn decode_image(
+    storage: &dyn Storage,
+    archive: &ZipArchive,
+    path: &str,
+    cache: &str,
+    dir: &str,
+) -> Result<(), DocumentError> {
+    use quireink_sdk::image::{Format, GrayWriter, decode};
+
+    let entry = archive
+        .entry(storage, path)
+        .map_err(error)?
+        .ok_or(DocumentError::Malformed(alloc::borrow::Cow::Borrowed(
+            "missing image",
+        )))?;
+    let temp = alloc::format!("{dir}/image.tmp");
+    let (file, offset, end) = match archive.stored_range(storage, &entry).map_err(error)? {
+        Some((offset, len)) => (archive.path(), offset, offset + len),
+        None => {
+            storage.write(&temp, &[])?;
+            let mut failed = None;
+            archive
+                .stream(storage, &entry, &mut |chunk| {
+                    failed = storage.append(&temp, chunk).err();
+                    failed.is_none()
+                })
+                .map_err(error)?;
+            if let Some(e) = failed {
+                return Err(DocumentError::Storage(e));
+            }
+            (temp.as_str(), 0, u64::from(entry.size))
+        }
+    };
+    let mut head = [0u8; 8];
+    let n = storage.read_at(file, offset, &mut head)?;
+    let result = match Format::detect(&head[..n]) {
+        Some(format) => {
+            let mut source = StorageSource {
+                storage,
+                path: file,
+                offset,
+                end,
+            };
+            let mut writer = GrayWriter::new(storage, cache);
+            decode(format, &mut source, IMAGE_SIDE, &mut writer).and_then(|()| writer.finish())
+        }
+        None => Err(quireink_sdk::image::ImageError::Unsupported("image format")),
+    };
+    if file == temp {
+        let _ = storage.remove(&temp);
+    }
+    if result.is_err() {
+        let _ = storage.remove(cache);
+    }
+    result.map_err(|e| DocumentError::Malformed(alloc::borrow::Cow::Owned(alloc::format!("{e}"))))
 }

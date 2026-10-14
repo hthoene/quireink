@@ -11,6 +11,7 @@ members = [
     "crates/quireink-document",
     "crates/quireink-layout",
     "crates/quireink-hyphen",
+    "crates/quireink-image",
     "crates/quireink-zip",
     "crates/quireink-xml",
     "crates/quireink-sdk",
@@ -54,6 +55,7 @@ quireink-layout = { path = "crates/quireink-layout", version = "0.1.0" }
 quireink-sdk = { path = "crates/quireink-sdk", version = "0.1.0" }
 quireink-core = { path = "crates/quireink-core", version = "0.1.0" }
 quireink-hyphen = { path = "crates/quireink-hyphen", version = "0.1.0" }
+quireink-image = { path = "crates/quireink-image", version = "0.1.0" }
 quireink-app = { path = "crates/quireink-app", version = "0.1.0" }
 quireink-fs = { path = "crates/quireink-fs", version = "0.1.0" }
 quireink-plugin-diagnostics = { path = "plugins/diagnostics", version = "0.1.0" }

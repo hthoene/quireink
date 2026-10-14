@@ -3,8 +3,10 @@ use alloc::vec::Vec;
 use core::cell::Cell;
 
 use quireink_sdk::document::{
-    Align, Block, Document, DocumentError, Locator, Metadata, OffsetMap, Run, TextStyle, TocEntry,
+    Align, Block, BlockKind, Document, DocumentError, ImageRef, Locator, Metadata, OffsetMap, Run,
+    TextStyle, TocEntry,
 };
+use quireink_sdk::image::GrayFile;
 use quireink_sdk::zip::ZipArchive;
 use quireink_sdk::{Env, Storage, StorageError};
 
@@ -38,6 +40,7 @@ fn fnv(text: &str) -> u64 {
 
 fn paths(cache: &str, section: u32) -> CachePaths {
     CachePaths {
+        dir: String::from(cache),
         text: alloc::format!("{cache}/{section}.txt"),
         index: alloc::format!("{cache}/{section}.idx"),
         anchors: alloc::format!("{cache}/{section}.anc"),
@@ -162,15 +165,34 @@ impl EpubDocument {
                 })
                 .collect();
         }
+        let mut kind = convert::decode_kind(header[0], header[1]);
+        let mut text = String::from_utf8_lossy(&text).into_owned();
+        let mut image = None;
+        if kind == BlockKind::Image {
+            // `cache path<TAB>alternative text`
+            let (path, alt) = text.split_once('\t').unwrap_or((&text, ""));
+            image = GrayFile::open(storage, path).map(|file| ImageRef {
+                path: file.path,
+                width: file.width,
+                height: file.height,
+            });
+            let alt = String::from(alt);
+            if image.is_none() {
+                // Not decodable: its alternative text instead.
+                kind = BlockKind::Paragraph;
+            }
+            text = alt;
+        }
         Ok(Block {
-            kind: convert::decode_kind(header[0], header[1]),
+            kind,
             continues: convert::continues(header[2]),
             start,
             end,
-            text: String::from_utf8_lossy(&text).into_owned(),
+            text,
             map: OffsetMap::IDENTITY,
             runs,
             align: Align::from_bits(header[3]),
+            image,
         })
     }
 

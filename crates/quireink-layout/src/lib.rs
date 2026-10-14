@@ -18,6 +18,7 @@ extern crate alloc;
 use alloc::string::String;
 use alloc::vec::Vec;
 
+pub use quireink_document::ImageRef;
 pub use quireink_document::TextStyle;
 use quireink_document::{Align, Block, BlockKind, Document, DocumentError, Locator, Storage};
 pub use quireink_text::Hyphenate;
@@ -83,6 +84,17 @@ pub struct PageLine {
     pub runs: Vec<LineRun>,
 }
 
+/// An image at its position and size on the page.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PageImage {
+    /// Left and top edges relative to the content box.
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub image: ImageRef,
+}
+
 /// One laid-out page.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Page {
@@ -91,12 +103,13 @@ pub struct Page {
     /// Position where the next page starts; equal to `start` past the end.
     pub end: Locator,
     pub lines: Vec<PageLine>,
+    pub images: Vec<PageImage>,
 }
 
 impl Page {
     /// Whether this page is past the end of the document.
     pub fn is_past_end(&self) -> bool {
-        self.lines.is_empty()
+        self.lines.is_empty() && self.images.is_empty()
     }
 }
 
@@ -164,6 +177,7 @@ pub fn layout_page(
         start,
         end: start,
         lines: Vec::new(),
+        images: Vec::new(),
     };
     let mut at = start;
     let mut y = 0.0f32;
@@ -172,7 +186,7 @@ pub fn layout_page(
     loop {
         let Some(block) = document.block_at(storage, at)? else {
             // End of the section: chapters start on a new page.
-            if at.section + 1 < document.sections() && page.lines.is_empty() {
+            if at.section + 1 < document.sections() && page.is_past_end() {
                 at = Locator::new(at.section + 1, 0);
                 page.start = at;
                 continue;
@@ -187,8 +201,38 @@ pub fn layout_page(
         } else {
             0
         };
-        if page.lines.is_empty() && from == 0 && at.offset < block.start {
+        if page.is_past_end() && from == 0 && at.offset < block.start {
             page.start = Locator::new(at.section, block.start);
+        }
+        if block.kind == BlockKind::Image
+            && let Some(image) = &block.image
+        {
+            // Scaled to fit the content box, keeping its proportions.
+            let scale = (width / image.width as f32).min(height / image.height as f32);
+            let (w, h) = (image.width as f32 * scale, image.height as f32 * scale);
+            let spacing = if page.is_past_end() {
+                0.0
+            } else {
+                style.paragraph_spacing.max(body_line * 0.5)
+            };
+            if !page.is_past_end() && y + spacing + h > height {
+                page.end = Locator::new(at.section, block.start);
+                return Ok(page);
+            }
+            if page.is_past_end() {
+                page.start = Locator::new(at.section, block.start);
+            }
+            y += spacing;
+            page.images.push(PageImage {
+                x: (width - w) / 2.0,
+                y,
+                width: w,
+                height: h,
+                image: image.clone(),
+            });
+            y += h + spacing;
+            at = Locator::new(at.section, block.end);
+            continue;
         }
         let heading = match block.kind {
             BlockKind::Heading(level) => level.clamp(1, 6),
@@ -204,8 +248,9 @@ pub fn layout_page(
         };
         let (ascent, line_height) = typesetter.line(base);
         let lines_before = page.lines.len();
+        let had_content = !page.is_past_end();
         let at_block_start = from == 0 && !block.continues;
-        if !page.lines.is_empty() && at_block_start {
+        if !page.is_past_end() && at_block_start {
             y += style.paragraph_spacing;
             if heading > 0 {
                 y += body_line * HEADING_SPACE;
@@ -235,7 +280,7 @@ pub fn layout_page(
 
         for (n, line) in lines.iter().enumerate() {
             let fits = y + line_height <= height;
-            if !fits && !page.lines.is_empty() {
+            if !fits && !page.is_past_end() {
                 page.end = Locator::new(at.section, block.source_offset(from + line.range.start));
                 return Ok(page);
             }
@@ -273,7 +318,7 @@ pub fn layout_page(
             y += line_height;
         }
         // A heading needs at least one line of what follows on its page.
-        if heading > 0 && lines_before > 0 && y + body_line > height {
+        if heading > 0 && had_content && y + body_line > height {
             page.lines.truncate(lines_before);
             page.end = Locator::new(at.section, block.source_offset(from));
             return Ok(page);
@@ -357,6 +402,7 @@ mod tests {
                 } else {
                     Align::Auto
                 },
+                image: None,
             }))
         }
     }

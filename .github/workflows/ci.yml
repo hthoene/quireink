@@ -45,6 +45,7 @@ jobs:
           cargo build --release --target ${{ matrix.target }}
           -p quireink-core -p quireink-plugin-diagnostics
           -p quireink-plugin-format-txt -p quireink-plugin-format-epub -p quireink-plugin-hyphenation
+          -p quireink-image -p quireink-plugin-settings
           -p quireink-plugin-reader -p quireink-plugin-files
           -p quireink-plugin-fonts-default --no-default-features
 
@@ -151,7 +152,9 @@ jobs:
           mkdir -p fuzz/corpus/epub fuzz/corpus/txt
           cp samples/library/books/*.epub fuzz/corpus/epub/
           cp samples/library/books/*.txt fuzz/corpus/txt/
-          for target in epub txt xml hyphen; do
+          mkdir -p fuzz/corpus/image
+          cp crates/quireink-image/tests/data/*.jpg crates/quireink-image/tests/data/*.png fuzz/corpus/image/
+          for target in epub txt xml hyphen image; do
             cargo fuzz run "$target" -- -max_total_time=60 -rss_limit_mb=1024
           done
       - uses: actions/upload-artifact@v4

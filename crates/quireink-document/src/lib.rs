@@ -64,6 +64,16 @@ pub enum BlockKind {
     Heading(u8),
     /// Text whose line breaks and spacing must be kept.
     Preformatted,
+    /// An image ([`Block::image`]); `text` is its alternative text.
+    Image,
+}
+
+/// A decoded image in storage, in the `quireink-image` gray format.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImageRef {
+    pub path: String,
+    pub width: u32,
+    pub height: u32,
 }
 
 /// The character style of a run of text.
@@ -163,6 +173,8 @@ pub struct Block {
     /// run is regular.
     pub runs: Vec<Run>,
     pub align: Align,
+    /// The image of an [`BlockKind::Image`] block.
+    pub image: Option<ImageRef>,
 }
 
 impl Block {
@@ -365,6 +377,7 @@ mod tests {
             map,
             runs: Vec::new(),
             align: Align::Auto,
+            image: None,
         }
     }
 

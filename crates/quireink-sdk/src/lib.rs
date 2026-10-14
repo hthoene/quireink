@@ -96,6 +96,11 @@ pub mod xml {
     pub use quireink_xml::*;
 }
 
+/// Streaming JPEG and PNG decoding to gray (see `quireink-image`).
+pub mod image {
+    pub use quireink_image::*;
+}
+
 /// Hyphenation with compiled patterns (see `quireink-hyphen`).
 pub mod hyphen {
     pub use quireink_hyphen::*;

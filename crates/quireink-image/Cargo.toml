@@ -1,0 +1,19 @@
+[package]
+name = "quireink-image"
+description = "Streaming JPEG and PNG decoding to grayscale for QuireInk, with bounded memory (no_std)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+categories = ["no-std", "multimedia::images"]
+keywords = ["jpeg", "png", "e-ink", "no-std"]
+
+[dependencies]
+quireink-platform.workspace = true
+miniz_oxide = { version = "0.8", default-features = false, features = ["with-alloc"] }
+
+[lints]
+workspace = true

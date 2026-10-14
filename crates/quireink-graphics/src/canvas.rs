@@ -66,6 +66,19 @@ impl<'a> Canvas<'a> {
         self.fill_rect(point.x, point.y, 1, 1, color);
     }
 
+    /// Draws a row of 8-bit gray pixels (an image row) starting at
+    /// `(x, y)`; dithered on panels with few gray levels.
+    pub fn draw_gray_row(&mut self, x: i32, y: i32, gray: &[u8]) {
+        let Some(rect) = self.clip_signed(x, y, gray.len() as u32, 1) else {
+            return;
+        };
+        for px in rect.x..rect.right() as u16 {
+            let value = gray[(i32::from(px) - x) as usize];
+            self.framebuffer.put_gray(px, rect.y, value);
+        }
+        self.framebuffer.mark_dirty(rect);
+    }
+
     /// Blends `color` over a `width`×`height` area at `(x, y)` using
     /// `coverage(dx, dy)` (0 = transparent, 255 = opaque) — used for
     /// anti-aliased glyphs and icons.

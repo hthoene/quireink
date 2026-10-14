@@ -101,6 +101,7 @@ version = "0.0.0"
 dependencies = [
  "libfuzzer-sys",
  "quireink-hyphen",
+ "quireink-image",
  "quireink-plugin-format-epub",
  "quireink-plugin-format-txt",
  "quireink-sdk",
@@ -122,6 +123,14 @@ name = "quireink-i18n"
 version = "0.1.0"
 dependencies = [
  "quireink-config",
+]
+
+[[package]]
+name = "quireink-image"
+version = "0.1.0"
+dependencies = [
+ "miniz_oxide",
+ "quireink-platform",
 ]
 
 [[package]]
@@ -159,6 +168,7 @@ dependencies = [
  "quireink-graphics",
  "quireink-hyphen",
  "quireink-i18n",
+ "quireink-image",
  "quireink-layout",
  "quireink-platform",
  "quireink-text",

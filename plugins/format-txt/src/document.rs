@@ -358,6 +358,7 @@ impl Document for TxtDocument {
                 map,
                 runs: Vec::new(),
                 align: Align::Auto,
+                image: None,
             }));
         }
         Ok(None)

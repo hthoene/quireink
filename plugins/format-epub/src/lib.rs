@@ -131,6 +131,10 @@ mod tests {
             .deflated("OEBPS/nav.xhtml", NAV)
             .deflated("OEBPS/text/ch1.xhtml", CH1)
             .deflated("OEBPS/text/ch 2.xhtml", ch2)
+            .stored(
+                "OEBPS/images/dot.png",
+                &include_bytes!("../../../crates/quireink-image/tests/data/gray.png")[..],
+            )
             .deflated(
                 "OEBPS/style.css",
                 "/* book styles */ .c { text-align: center } .hide { display: none }",
@@ -246,6 +250,32 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!((third.text.as_str(), third.align), ("Rechts", Align::End));
+    }
+
+    #[test]
+    fn decodes_images_into_the_cache() {
+        let ch2 = String::from(
+            "<html><body><p>Vorher</p><svg><image xlink:href=\"../images/dot.png\"/></svg>             <img src=\"../images/missing.png\" alt=\"Ein  Bild\"/><p>Nachher</p></body></html>",
+        );
+        let storage = epub(ch2);
+        let doc = EpubDocument::open(&storage, "books/test.epub").unwrap();
+        let mut at = Locator::new(1, 0);
+        let mut found = Vec::new();
+        while let Some(block) = doc.block_at(&storage, at).unwrap() {
+            at = Locator::new(1, block.end);
+            let size = block.image.as_ref().map(|i| (i.width, i.height));
+            found.push((block.kind, block.text.clone(), size));
+        }
+        assert_eq!(
+            found,
+            [
+                (BlockKind::Paragraph, String::from("Vorher"), None),
+                (BlockKind::Image, String::new(), Some((37, 23))),
+                // A missing image becomes its alternative text.
+                (BlockKind::Paragraph, String::from("Ein Bild"), None),
+                (BlockKind::Paragraph, String::from("Nachher"), None),
+            ]
+        );
     }
 
     #[test]

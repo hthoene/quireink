@@ -1241,6 +1241,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "quireink-image"
+version = "0.1.0"
+dependencies = [
+ "miniz_oxide 0.8.9",
+ "quireink-platform",
+]
+
+[[package]]
 name = "quireink-layout"
 version = "0.1.0"
 dependencies = [
@@ -1344,6 +1352,7 @@ dependencies = [
  "quireink-graphics",
  "quireink-hyphen",
  "quireink-i18n",
+ "quireink-image",
  "quireink-layout",
  "quireink-platform",
  "quireink-text",

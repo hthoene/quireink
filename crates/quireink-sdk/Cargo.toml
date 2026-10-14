@@ -22,6 +22,7 @@ quireink-layout.workspace = true
 quireink-xml.workspace = true
 quireink-zip.workspace = true
 quireink-hyphen.workspace = true
+quireink-image.workspace = true
 
 [features]
 default = []
