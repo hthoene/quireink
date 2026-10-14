@@ -20,6 +20,8 @@ quireink-core = { workspace = true, features = ["color", "outline"] }
 quireink-fs.workspace = true
 quireink-graphics = { workspace = true, features = ["color"] }
 quireink-platform.workspace = true
+# The computer's time zone for the emulated clock.
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 png = "0.17"
 softbuffer = "0.4"
 # Without client-side decorations on Wayland: they pull in the unmaintained

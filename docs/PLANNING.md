@@ -569,6 +569,7 @@ architecture (G1–G12 below).
 | Highlights, notes, annotation export (Markdown, Readwise, Obsidian) | selection + locators; `annotations` service; display-list overlay filter; network/storage. ✅ bookmarks and highlights at source positions (`PageLine::words`), selection by touch or buttons, the selection bar as menu `reader.selection` (plugins add actions and get `reader.text-chosen`; what does not fit goes into a *More* list) · ⬜ notes (needs the on-screen keyboard), export | G5 |
 | Footnote popups, internal links | link hit test; overlay | G1, G5 |
 | Reading statistics, streaks, goals, time-left estimates | `page.turned` events with timestamps; plugin storage; home widgets | G4 |
+| Status lines with time, battery, chapter, page | ✅ status items as contributions (`Registrar::add_status_item`), lines above and below the text with left/centre/right parts chosen in the settings, redrawn only when what they show changes | G2 |
 | Custom fonts, margins, spacing, hyphenation, justification | font/hyphenation contributions; reader settings | — |
 | Per-book / per-publisher style tweaks | content filters; **per-book settings** | G3 |
 | Scroll mode, RSVP speed reading, two-page spreads | alternative reader screen in `core.reader` reusing the layout engine | G8 |
@@ -599,7 +600,7 @@ architecture (G1–G12 below).
 | # | Gap | Architecture change | When |
 |---|-----|--------------------|------|
 | G1 | Only full screens existed | **Layers**: popups, dialogs, menus, toasts and keyboards are partial-screen surfaces stacked above screens (also slot-bound). Without a compositing buffer, the screen below redraws only the uncovered region. | M2 ✅ (ADR 0010) |
-| G2 | Hardware features had no plugin API | **Platform services**: shells register services (frontlight, battery, network, HTTP server, audio/TTS, Bluetooth, USB) through the same service registry plugins use. | Storage ✅ M1 (ADR 0009) / rest M2–M6 |
+| G2 | Hardware features had no plugin API | **Platform services**: shells register services (frontlight, battery, network, HTTP server, audio/TTS, Bluetooth, USB) through the same service registry plugins use. | Storage ✅ M1 (ADR 0009), clock and battery ✅ (`Kernel::set_status`, `Env::status`, time zones as POSIX rules in `sdk::time`) / rest M2–M6 |
 | G3 | One global settings level | **Settings scopes**: global → device → user profile → collection → book; the most specific value wins. | M3 |
 | G4 | No time, no background work | **Time + jobs**: every kernel call carries a timestamp, `WakeAt` effects drive timers (M0); screens run background steps with `Cx::wake_at` and `on_timer`, events via `Command::Emit` + `Registrar::subscribe` (M1); job progress and cancellation; network requests as effects. | M0 ✅ / M1 ✅ / M5 |
 | G5 | Rendered pages were opaque | **Content access**: display lists keep a mapping to content locators, so plugins can hit-test words and links, select text and decorate ranges. | M3 |

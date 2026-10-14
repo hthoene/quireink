@@ -58,7 +58,7 @@ use quireink_graphics::{Framebuffer, GraphicsError};
 use quireink_i18n::Translator;
 use quireink_platform::{
     Color, DeviceInfo, FrameView, InputEvent, Instant, NoStorage, PointerEvent, PointerPhase, Rect,
-    RefreshMode, Storage,
+    RefreshMode, Storage, SystemStatus,
 };
 use quireink_sdk::builtin::{
     CONFIG_FILE, GLOBAL_KEYMAP_LAYER, events, keymap_presets, params as builtin_params,
@@ -67,7 +67,7 @@ use quireink_sdk::builtin::{
 use quireink_sdk::{
     Command, Cx, Env, EventHandler, Fonts, Formats, GestureKind, Handled, Hyphenation, Id,
     Manifest, Menus, Metrics, Output, Params, Plugin, PluginInfo, PluginState, Plugins,
-    RegisterError, RequiredFor, SDK_VERSION, Screen, Settings,
+    RegisterError, RequiredFor, SDK_VERSION, Screen, Settings, StatusItems,
 };
 
 use crate::core_plugin::{CORE, CorePlugin};
@@ -280,6 +280,8 @@ impl KernelBuilder {
                 hyphenation: Hyphenation::new(),
                 menus: Menus::new(),
                 plugins: Plugins::new(),
+                status: SystemStatus::default(),
+                status_items: StatusItems::new(),
                 storage: self.storage.unwrap_or_else(|| Box::new(NoStorage)),
             },
             pending: None,
@@ -495,6 +497,29 @@ impl Kernel {
         self.finish()
     }
 
+    /// Tells the kernel the time of day and the battery's charge. Shells
+    /// call it at start, when the clock is set or its time zone changes,
+    /// and when the battery changes (checking about once a minute is
+    /// plenty). Status lines redraw when what they show changed
+    /// ([`events::STATUS_CHANGED`]).
+    pub fn set_status(&mut self, now: Instant, status: SystemStatus) -> Effects {
+        self.now = now;
+        let old = self.shared.status;
+        self.shared.status = status;
+        let offset = |s: &SystemStatus| s.clock.map(|c| c.utc_offset_minutes);
+        // A new wall clock reading alone changes nothing visible.
+        let jumped = match (old.clock, status.clock) {
+            (Some(a), Some(b)) => (a.unix_millis_at(now) - b.unix_millis_at(now)).abs() > 30_000,
+            (a, b) => a.is_some() != b.is_some(),
+        };
+        if old.battery != status.battery || offset(&old) != offset(&status) || jumped {
+            self.output
+                .commands
+                .push(Command::Emit(events::STATUS_CHANGED, Params::new()));
+        }
+        self.finish()
+    }
+
     /// Advances time, e.g. when a requested [`Effect::WakeAt`] is due.
     pub fn tick(&mut self, now: Instant) -> Effects {
         self.now = now;
@@ -527,6 +552,7 @@ impl Kernel {
         shared.fonts.shrink_to_fit();
         shared.formats.shrink_to_fit();
         shared.hyphenation.shrink_to_fit();
+        shared.status_items.shrink_to_fit();
         shared.translator.shrink_to_fit();
     }
 
@@ -816,6 +842,9 @@ impl Kernel {
         );
         for entry in staging.menu_entries.drain(..) {
             self.shared.menus.add(entry);
+        }
+        for item in staging.status_items.drain(..) {
+            self.shared.status_items.add(item);
         }
         Ok(())
     }
@@ -1436,6 +1465,8 @@ struct Shared {
     hyphenation: Hyphenation,
     menus: Menus,
     plugins: Plugins,
+    status: SystemStatus,
+    status_items: StatusItems,
     storage: Box<dyn Storage>,
 }
 
@@ -1452,6 +1483,8 @@ impl Shared {
             hyphenation: &self.hyphenation,
             menus: &self.menus,
             plugins: &self.plugins,
+            status: &self.status,
+            status_items: &self.status_items,
             storage: self.storage.as_ref(),
         }
     }

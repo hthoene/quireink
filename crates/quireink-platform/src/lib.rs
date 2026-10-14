@@ -15,6 +15,7 @@ pub mod display;
 pub mod geometry;
 pub mod input;
 pub mod pixel;
+pub mod status;
 pub mod storage;
 
 pub use display::{ColorPanel, Display, DisplayInfo, FrameView, RefreshMode, Rotation};
@@ -23,6 +24,7 @@ pub use input::{
     ButtonState, InputCaps, InputEvent, Instant, PointerEvent, PointerPhase, PointerTool, buttons,
 };
 pub use pixel::{Color, PixelFormat};
+pub use status::{Battery, SystemStatus, WallClock};
 pub use storage::{DirEntry, Mounted, NoStorage, Storage, StorageError};
 
 /// Static description of a device, provided by its shell.

@@ -819,6 +819,16 @@ pub fn option_name(env: &Env<'_>, spec: &SettingSpec, value: &str) -> String {
             .map_or(value.to_string(), |(_, name)| name.to_string()),
         // Choices are ids; their translation is their display name.
         SettingKind::Choice(_) => env.i18n.tr(value).to_string(),
+        SettingKind::List => {
+            let names: Vec<&str> = crate::status::item_ids(value)
+                .map(|id| env.i18n.tr(env.status_items.title(id).unwrap_or(id)))
+                .collect();
+            if names.is_empty() {
+                env.i18n.tr("core.list.none").to_string()
+            } else {
+                names.join(", ")
+            }
+        }
         _ => value.to_string(),
     }
 }

@@ -21,6 +21,7 @@ mod index;
 mod screen;
 mod search;
 mod selection;
+mod status;
 mod toc;
 
 use alloc::borrow::Cow;
@@ -170,6 +171,7 @@ impl Plugin for Reader {
                 Box::new(annotations::AnnotationsScreen::open(env, params))
             }),
         })?;
+        status::register(r)?;
         r.add_screen(ScreenSpec {
             id: SEARCH_SCREEN,
             title: Cow::Borrowed("reader.search"),

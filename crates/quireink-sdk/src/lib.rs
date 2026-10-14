@@ -46,6 +46,8 @@ mod plugin;
 mod plugins;
 mod screen;
 mod settings;
+pub mod status;
+pub mod time;
 pub mod ui;
 mod version;
 
@@ -71,11 +73,13 @@ pub use version::{SDK_VERSION, Version};
 
 pub use quireink_graphics::Canvas;
 pub use quireink_i18n::{Arg, Translator};
+pub use quireink_platform::{Battery, SystemStatus, WallClock};
 pub use quireink_platform::{
     Color, DeviceInfo, DisplayInfo, InputCaps, Instant, PixelFormat, Point, PointerEvent,
     PointerPhase, PointerTool, Rect, RefreshMode,
 };
 pub use quireink_platform::{DirEntry, NoStorage, Storage, StorageError};
+pub use status::{StatusFn, StatusItemSpec, StatusItems, StatusValue};
 
 /// The human-editable config format (see `quireink-config`), for plugins
 /// that store their own data as text files.

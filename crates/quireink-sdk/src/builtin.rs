@@ -123,6 +123,18 @@ pub mod events {
     /// The reader moved to another page; same parameters as
     /// [`BOOK_OPENED`].
     pub const PAGE_TURNED: Id = Id::new_static("core.page-turned");
+    /// The battery or the time zone changed; status lines redraw.
+    pub const STATUS_CHANGED: Id = Id::new_static("core.status-changed");
+}
+
+/// Status items of the kernel (see [`status`](crate::status)).
+pub mod status_items {
+    use crate::Id;
+
+    /// The time, as set in `core.clock-format`.
+    pub const CLOCK: Id = Id::new_static("core.status.clock");
+    /// The battery's charge.
+    pub const BATTERY: Id = Id::new_static("core.status.battery");
 }
 
 /// Standard screens.
@@ -150,6 +162,13 @@ pub mod settings {
     pub const UI_SIZE: Id = Id::new_static("core.ui-size");
     /// The active key map preset (see [`keymap_presets`](super::keymap_presets)).
     pub const KEYMAP_PRESET: Id = Id::new_static("core.keymap-preset");
+    /// `core.clock.24h` or `core.clock.12h`.
+    pub const CLOCK_FORMAT: Id = Id::new_static("core.clock-format");
+    /// The time zone: `core.tz.auto` (the system's) or one of
+    /// [`time::TIME_ZONES`](crate::time::TIME_ZONES).
+    pub const TIME_ZONE: Id = Id::new_static("core.time-zone");
+    /// A POSIX `TZ` rule that overrides [`TIME_ZONE`] when not empty.
+    pub const TIME_ZONE_RULE: Id = Id::new_static("core.time-zone-rule");
 }
 
 /// Key map presets: named sets of bindings users switch between, e.g. for

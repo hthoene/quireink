@@ -10,6 +10,7 @@ use crate::id::Id;
 use crate::menus::MenuEntry;
 use crate::screen::ScreenSpec;
 use crate::settings::{SettingGroupSpec, SettingSpec};
+use crate::status::StatusItemSpec;
 use crate::version::Version;
 
 /// Static information about a plugin.
@@ -122,6 +123,10 @@ pub trait Registrar {
     /// [`builtin::events::STARTED`](crate::builtin::events::STARTED) or one
     /// defined by another plugin.
     fn subscribe(&mut self, event: Id, handler: EventHandler) -> Result<(), RegisterError>;
+
+    /// Adds an item that status lines can show, e.g. a clock or the
+    /// reading time left.
+    fn add_status_item(&mut self, item: StatusItemSpec) -> Result<(), RegisterError>;
 
     /// Adds a translation catalog (see `quireink-i18n`).
     fn add_translations(&mut self, source: Cow<'static, str>) -> Result<(), RegisterError>;

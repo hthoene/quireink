@@ -8,7 +8,7 @@ use quireink_i18n::Catalog;
 use quireink_sdk::collections::VecMap;
 use quireink_sdk::{
     ActionSpec, EventHandler, FontSpec, FormatSpec, HyphenationSpec, Id, MenuEntry, Priority,
-    RegisterError, Registrar, ScreenSpec, SettingGroupSpec, SettingSpec, SlotSpec,
+    RegisterError, Registrar, ScreenSpec, SettingGroupSpec, SettingSpec, SlotSpec, StatusItemSpec,
 };
 
 /// A candidate screen for a slot, proposed by a plugin.
@@ -94,6 +94,7 @@ pub(crate) struct Staging {
     pub(crate) menu_entries: Vec<MenuEntry>,
     pub(crate) keymap_presets: Vec<(Id, Cow<'static, str>)>,
     pub(crate) setting_defaults: Vec<(Id, Cow<'static, str>)>,
+    pub(crate) status_items: Vec<StatusItemSpec>,
 }
 
 impl Staging {
@@ -240,6 +241,13 @@ impl Registrar for PluginRegistrar<'_> {
             message: Cow::Owned(alloc::format!("{}: {e}", spec.id)),
         })?;
         self.staging.hyphenation.push(spec);
+        Ok(())
+    }
+
+    fn add_status_item(&mut self, item: StatusItemSpec) -> Result<(), RegisterError> {
+        self.check_namespace(&item.id)?;
+        Self::check_unique(self.staging.status_items.iter().map(|i| &i.id), &item.id)?;
+        self.staging.status_items.push(item);
         Ok(())
     }
 

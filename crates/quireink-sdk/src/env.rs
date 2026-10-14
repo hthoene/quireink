@@ -1,7 +1,7 @@
 use core::fmt;
 
 use quireink_i18n::Translator;
-use quireink_platform::{DeviceInfo, Instant, Storage};
+use quireink_platform::{DeviceInfo, Instant, Storage, SystemStatus};
 
 use crate::fonts::Fonts;
 use crate::formats::Formats;
@@ -9,6 +9,7 @@ use crate::hyphenation::Hyphenation;
 use crate::menus::Menus;
 use crate::plugins::Plugins;
 use crate::settings::Settings;
+use crate::status::StatusItems;
 
 /// Read-only view of the environment a plugin runs in.
 #[derive(Clone, Copy)]
@@ -26,6 +27,11 @@ pub struct Env<'a> {
     pub menus: &'a Menus,
     /// Every plugin with its state, for plugin managers.
     pub plugins: &'a Plugins,
+    /// The time of day and the battery, as far as the device knows them
+    /// (see [`time`](crate::time) for the local time).
+    pub status: &'a SystemStatus,
+    /// Items for status lines, from every plugin.
+    pub status_items: &'a StatusItems,
     /// The device's storage. Plugins keep their own files below
     /// [`Env::plugin_dir`].
     pub storage: &'a dyn Storage,

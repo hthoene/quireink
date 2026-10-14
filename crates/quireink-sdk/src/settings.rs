@@ -29,6 +29,9 @@ pub enum SettingKind {
     Text,
     /// A UI language tag; settings UIs offer the installed translations.
     Language,
+    /// Ids separated by commas, e.g. the status items of a status line;
+    /// shown by their names, chosen on the setting's editor screen.
+    List,
 }
 
 impl SettingKind {
@@ -41,9 +44,10 @@ impl SettingKind {
                 _ => return None,
             }),
             SettingKind::Int { .. } => SettingValue::Int(text.parse().ok()?),
-            SettingKind::Choice(_) | SettingKind::Text | SettingKind::Language => {
-                SettingValue::Text(Cow::Owned(String::from(text)))
-            }
+            SettingKind::Choice(_)
+            | SettingKind::Text
+            | SettingKind::Language
+            | SettingKind::List => SettingValue::Text(Cow::Owned(String::from(text))),
         };
         self.accepts(&value).then_some(value)
     }
@@ -53,7 +57,7 @@ impl SettingKind {
             (SettingKind::Bool, SettingValue::Bool(_)) => true,
             (SettingKind::Int { min, max }, SettingValue::Int(v)) => (min..=max).contains(&v),
             (SettingKind::Choice(options), SettingValue::Text(v)) => options.contains(v),
-            (SettingKind::Text, SettingValue::Text(_)) => true,
+            (SettingKind::Text | SettingKind::List, SettingValue::Text(_)) => true,
             (SettingKind::Language, SettingValue::Text(v)) => {
                 !v.is_empty() && v.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
             }

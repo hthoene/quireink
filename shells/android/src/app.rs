@@ -20,7 +20,7 @@ use quireink_platform::{
 use crate::epd::Epd;
 use crate::lights::Lights;
 use crate::plugin::{AndroidPlugin, Frontlight};
-use crate::{access, keys, pixels};
+use crate::{access, keys, pixels, status};
 
 /// Where the device's shared storage appears in QuireInk's storage.
 const SHARED: &str = "storage";
@@ -43,7 +43,12 @@ struct Running {
     shared_storage: bool,
     /// The strongest refresh requested since the last frame was shown.
     refresh: Option<RefreshMode>,
+    /// When the battery and time zone were read last.
+    status_read: Instant,
 }
+
+/// How often the battery and time zone are read again.
+const STATUS_EVERY_MS: u64 = 60_000;
 
 #[unsafe(no_mangle)]
 fn android_main(app: AndroidApp) {
@@ -91,6 +96,10 @@ fn android_main(app: AndroidApp) {
                     }
                 }
                 MainEvent::Resume { .. } => {
+                    // The time zone or the battery may have changed.
+                    if let Some(running) = running.as_mut() {
+                        running.status_read = Instant(0);
+                    }
                     // Back from the settings page that grants storage
                     // access: restart with the shared storage.
                     if let Some(running) = running.as_mut()
@@ -133,6 +142,12 @@ fn android_main(app: AndroidApp) {
                     InputStatus::Unhandled
                 }
             }) {}
+        }
+        if now().since(state.status_read) >= STATUS_EVERY_MS || state.status_read == Instant(0) {
+            let at = now();
+            state.status_read = at;
+            let effects = state.kernel.set_status(at, status::read(&app, at));
+            changed |= apply(state, effects);
         }
         if state.wake_at.is_some_and(|at| at <= now()) {
             let effects = state.kernel.tick(now());
@@ -264,6 +279,7 @@ fn start_kernel(
         PixelFormat::Gray8,
     )
     .ok()?;
+    let _ = kernel.set_status(now, status::read(app, now));
     let effects = kernel.start(now);
     let mut running = Running {
         kernel,
@@ -272,6 +288,7 @@ fn start_kernel(
         restart: false,
         shared_storage,
         refresh: None,
+        status_read: now,
     };
     apply(&mut running, effects);
     Some(running)

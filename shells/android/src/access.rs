@@ -20,7 +20,9 @@ const ANDROID_11: i32 = 30;
 const READ_STORAGE: &str = "android.permission.READ_EXTERNAL_STORAGE";
 
 /// Runs `f` with the JNI environment and the activity, clearing any Java
-/// exception it leaves; `None` on failure.
+/// exception it leaves; `None` on failure. Local references `f` creates
+/// are freed afterwards: the thread never returns to Java, so they would
+/// pile up otherwise (e.g. reading the battery every minute).
 pub(crate) fn with_activity<T>(
     app: &AndroidApp,
     f: impl FnOnce(&mut JNIEnv<'_>, &JObject<'_>) -> jni::errors::Result<T>,
@@ -31,7 +33,7 @@ pub(crate) fn with_activity<T>(
     let vm = unsafe { JavaVM::from_raw(app.vm_as_ptr().cast()) }.ok()?;
     let mut env = vm.attach_current_thread_permanently().ok()?;
     let activity = unsafe { JObject::from_raw(app.activity_as_ptr().cast()) };
-    let result = f(&mut env, &activity);
+    let result = env.with_local_frame(32, |env| f(env, &activity));
     if env.exception_check().unwrap_or(false) {
         let _ = env.exception_describe();
         let _ = env.exception_clear();

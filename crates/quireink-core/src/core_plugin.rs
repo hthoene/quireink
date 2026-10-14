@@ -7,12 +7,14 @@ use alloc::boxed::Box;
 use alloc::vec::Vec;
 
 use quireink_sdk::builtin::{
-    actions, fonts, groups, keymap_presets, menus, params, screens, settings, slots,
+    actions, fonts, groups, keymap_presets, menus, params, screens, settings, slots, status_items,
 };
+use quireink_sdk::time::{self, AUTO, CLOCK_12H, CLOCK_24H, TIME_ZONES};
 use quireink_sdk::{
     ActionHandler, ActionSpec, Canvas, Color, Command, Cx, Env, Handled, Id, Manifest, MenuEntry,
     Params, Plugin, Priority, RegisterError, Registrar, SDK_VERSION, Screen, ScreenSpec,
-    SettingGroupSpec, SettingKind, SettingSpec, SettingValue, SlotSpec,
+    SettingGroupSpec, SettingKind, SettingSpec, SettingValue, SlotSpec, StatusItemSpec,
+    StatusValue,
 };
 
 pub(crate) const CORE: Id = Id::new_static("core");
@@ -240,6 +242,58 @@ impl Plugin for CorePlugin {
             .unit("core.unit.ms")
             .description("core.setting.long-press-ms.help"),
         )?;
+
+        // The time of day and the battery, for status lines.
+        r.add_setting(
+            SettingSpec::new(
+                settings::CLOCK_FORMAT,
+                "core.setting.clock-format",
+                SettingKind::Choice(alloc::vec![
+                    Cow::Borrowed(CLOCK_24H),
+                    Cow::Borrowed(CLOCK_12H)
+                ]),
+                SettingValue::Text(Cow::Borrowed(CLOCK_24H)),
+            )
+            .group(groups::SYSTEM),
+        )?;
+        let mut zones = alloc::vec![Cow::Borrowed(AUTO)];
+        zones.extend(TIME_ZONES.iter().map(|(id, _)| Cow::Borrowed(*id)));
+        r.add_setting(
+            SettingSpec::new(
+                settings::TIME_ZONE,
+                "core.setting.time-zone",
+                SettingKind::Choice(zones),
+                SettingValue::Text(Cow::Borrowed(AUTO)),
+            )
+            .group(groups::SYSTEM)
+            .description("core.setting.time-zone.help"),
+        )?;
+        r.add_setting(
+            SettingSpec::new(
+                settings::TIME_ZONE_RULE,
+                "core.setting.time-zone-rule",
+                SettingKind::Text,
+                SettingValue::Text(Cow::Borrowed("")),
+            )
+            .group(groups::SYSTEM)
+            .advanced()
+            .description("core.setting.time-zone-rule.help"),
+        )?;
+        r.add_status_item(StatusItemSpec {
+            id: status_items::CLOCK,
+            title: Cow::Borrowed("core.status.clock"),
+            value: Box::new(|env, _| time::clock_text(env).map(StatusValue::Text)),
+        })?;
+        r.add_status_item(StatusItemSpec {
+            id: status_items::BATTERY,
+            title: Cow::Borrowed("core.status.battery"),
+            value: Box::new(|env, _| {
+                env.status.battery.map(|b| StatusValue::Level {
+                    percent: b.percent,
+                    charging: b.charging,
+                })
+            }),
+        })?;
 
         r.add_keymap(Cow::Borrowed(include_str!("../keymaps/default.ini")))?;
         r.add_keymap_preset(

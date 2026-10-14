@@ -15,7 +15,9 @@ use crate::annotations::{self, Annotation, Kind, Mark};
 use crate::index::PageIndex;
 use crate::selection::{self, Item, Mode, Selection};
 use crate::settings::{FONT_SIZE, HYPHENATE, INDENT, JUSTIFY, LINE_SPACING, MARGIN};
+use crate::status;
 use crate::{PLUGIN, state_path};
+use quireink_sdk::status::context as status_context;
 
 /// Pages laid out per background step; small enough to keep input snappy.
 const PAGES_PER_STEP: usize = 8;
@@ -104,8 +106,9 @@ struct Typography {
     y: f32,
     width: f32,
     height: f32,
-    /// Status line below the content.
-    status: Rect,
+    /// Status lines above and below the content, if they show anything.
+    top_status: Option<Rect>,
+    status: Option<Rect>,
     /// Language whose hyphenation patterns are used, if hyphenating.
     hyphenation: Option<String>,
     /// Identifies this layout; part of the page index file name.
@@ -133,14 +136,14 @@ impl Typography {
         let display = env.device.display;
         let margin = m.mm(settings.int(MARGIN.as_str()).max(0) as u32) as f32;
         let status_height = m.mm(6) as f32;
+        let (top, bottom) = (status::shown(env, true), status::shown(env, false));
+        let lines = f32::from(u8::from(top) + u8::from(bottom));
         let width = (f32::from(display.width) - 2.0 * margin).max(1.0);
-        let height = (f32::from(display.height) - 2.0 * margin - status_height).max(1.0);
-        let status = Rect::new(
-            margin as u16,
-            (margin + height) as u16,
-            width as u16,
-            status_height as u16,
-        );
+        let height = (f32::from(display.height) - 2.0 * margin - lines * status_height).max(1.0);
+        let y = margin + if top { status_height } else { 0.0 };
+        let line = |y: f32| Rect::new(margin as u16, y as u16, width as u16, status_height as u16);
+        let top_status = top.then(|| line(margin));
+        let status = bottom.then(|| line(y + height));
         let hyphenation = (settings.bool(HYPHENATE.as_str())
             && env.hyphenation.get(language).is_some())
         .then(|| language.to_string());
@@ -163,9 +166,10 @@ impl Typography {
             line_height,
             style,
             x: margin,
-            y: margin,
+            y,
             width,
             height,
+            top_status,
             status,
             hyphenation,
             key,
@@ -192,6 +196,9 @@ struct Book {
     marks: Vec<Mark>,
     /// Text to point out on this page, e.g. a search hit.
     found: Option<(Locator, Locator)>,
+    /// The chapter of the page, for status lines: where it starts, where
+    /// the next one starts and its title (empty before the first).
+    chapter: Option<(Locator, Option<Locator>, String)>,
 }
 
 /// A word on the page, with its box on the screen and its place in the
@@ -227,6 +234,8 @@ pub(crate) struct ReaderScreen {
     selection: Option<Selection>,
     /// The last search, offered again.
     last_search: String,
+    /// What the status lines showed when last drawn.
+    status_shown: String,
 }
 
 impl ReaderScreen {
@@ -235,6 +244,7 @@ impl ReaderScreen {
             book: Book::open(env, params),
             selection: None,
             last_search: String::new(),
+            status_shown: String::new(),
         }
     }
 
@@ -449,6 +459,28 @@ impl ReaderScreen {
         Handled::Yes
     }
 
+    /// Redraws the status lines if what they show changed, and checks again
+    /// when the minute changes.
+    fn update_status(&mut self, cx: &mut Cx<'_, '_>) {
+        let env = *cx.env();
+        let Ok(book) = &self.book else {
+            return;
+        };
+        if book.status_areas().next().is_none() {
+            return;
+        }
+        let signature = status::signature(&env, &book.status_context(&env));
+        if signature != self.status_shown {
+            self.status_shown = signature;
+            for (area, _) in book.status_areas() {
+                cx.request_redraw_area(area);
+            }
+            cx.request_refresh(RefreshMode::Fast);
+        }
+        let next = quireink_sdk::time::next_minute(&env).unwrap_or(env.now.add_millis(60_000));
+        cx.wake_at(next);
+    }
+
     /// Asks on the keyboard what to search for, or which page to go to.
     fn ask(&mut self, action: &Id, cx: &mut Cx<'_, '_>) {
         let env = *cx.env();
@@ -555,6 +587,7 @@ impl Book {
             typography,
             marks,
             found: None,
+            chapter: None,
         };
         let start = book.saved_position(env).unwrap_or(Locator::START);
         book.page = match book.layout(env, start).map_err(error)? {
@@ -564,6 +597,7 @@ impl Book {
             page => page,
         };
         book.index = Some(book.open_index(env));
+        book.update_chapter(env);
         let state = format!("[reader]\nlast = \"{}\"\n", escape(&book.path));
         let _ = env.storage.write(&state_path(), state.as_bytes());
         Ok(book)
@@ -692,6 +726,7 @@ impl Book {
             self.history.push(self.page.start);
         }
         self.page = page;
+        self.update_chapter(&env);
         self.save_position(&env);
         cx.command(Command::Emit(events::PAGE_TURNED, self.event_params()));
         cx.request_redraw();
@@ -949,31 +984,79 @@ impl Book {
         }
     }
 
+    /// What status items get to know about the book.
+    fn status_context(&self, env: &Env<'_>) -> Params {
+        let mut context = self
+            .event_params()
+            .with(status_context::PAGE, self.position_label(env));
+        if let Some((_, _, chapter)) = &self.chapter
+            && !chapter.is_empty()
+        {
+            context.set(status_context::CHAPTER, chapter.clone());
+        }
+        context
+    }
+
+    /// The status lines' areas.
+    fn status_areas(&self) -> impl Iterator<Item = (Rect, bool)> {
+        let t = &self.typography;
+        t.top_status
+            .map(|r| (r, true))
+            .into_iter()
+            .chain(t.status.map(|r| (r, false)))
+    }
+
     fn draw_status(&self, canvas: &mut Canvas<'_>, env: &Env<'_>) {
-        let r = self.typography.status;
-        canvas.fill_rect(
-            i32::from(r.x),
-            i32::from(r.y),
-            u32::from(r.width),
-            u32::from(r.height),
-            Color::WHITE,
-        );
         let Some(font) = env.fonts.role(fonts::UI.as_str()) else {
             return;
         };
-        let size = env.metrics.pt(8.0);
-        let metrics = font.line_metrics(size);
-        let baseline = i32::from(r.y)
-            + ((f32::from(r.height) + metrics.ascent - metrics.descent) / 2.0) as i32;
-        let gray = Color::gray(80);
-        let label = self.position_label(env);
-        let label_width = font.measure(size, &label);
-        let right = f32::from(r.x) + f32::from(r.width) - label_width;
-        font.draw(canvas, size, right, baseline, &label, gray);
+        let context = self.status_context(env);
+        for (area, top) in self.status_areas() {
+            canvas.fill_rect(
+                i32::from(area.x),
+                i32::from(area.y),
+                u32::from(area.width),
+                u32::from(area.height),
+                Color::WHITE,
+            );
+            status::line(env, area, top).draw(canvas, env, &font, &context);
+        }
+    }
 
-        let available = (right - f32::from(r.x) - env.metrics.mm(4) as f32).max(0.0);
-        let title = fit(&font, size, &self.title, available);
-        font.draw(canvas, size, f32::from(r.x), baseline, &title, gray);
+    /// Finds the chapter of the page when a status line shows it; the
+    /// table of contents is read only when the page leaves the chapter.
+    fn update_chapter(&mut self, env: &Env<'_>) {
+        let at = self.page.start;
+        if let Some((from, to, _)) = &self.chapter
+            && *from <= at
+            && to.is_none_or(|to| at < to)
+        {
+            return;
+        }
+        self.chapter = None;
+        if !status::uses(env, &status::items::CHAPTER) {
+            return;
+        }
+        let (document, storage) = (&self.document, env.storage);
+        let mut chapter = (Locator::START, None, String::new());
+        for index in 0..document.toc_len(storage) {
+            let Some(entry) = document.toc_entry(storage, index) else {
+                continue;
+            };
+            // Entries in the page's section need their exact position.
+            let start = if entry.at.section == at.section {
+                document.toc_target(storage, index).unwrap_or(entry.at)
+            } else {
+                entry.at
+            };
+            if start <= at {
+                chapter = (start, None, entry.title);
+            } else {
+                chapter.1 = Some(start);
+                break;
+            }
+        }
+        self.chapter = Some(chapter);
     }
 }
 
@@ -1037,6 +1120,8 @@ impl Screen for ReaderScreen {
             let now = cx.env().now;
             cx.wake_at(now);
         }
+        // Time passed while another screen was open.
+        self.update_status(cx);
     }
 
     fn on_timer(&mut self, cx: &mut Cx<'_, '_>) {
@@ -1046,11 +1131,9 @@ impl Screen for ReaderScreen {
         };
         if book.index_step(&env) {
             cx.wake_at(env.now.add_millis(STEP_DELAY_MS));
-        } else if book.index.as_ref().is_some_and(PageIndex::is_complete) {
-            // Page numbers are known now: update just the status line.
-            cx.request_redraw_area(book.typography.status);
-            cx.request_refresh(RefreshMode::Fast);
         }
+        // Page numbers once counted, the time, the battery, …
+        self.update_status(cx);
     }
 
     fn on_action(&mut self, action: &Id, cx: &mut Cx<'_, '_>) -> Handled {
@@ -1218,6 +1301,20 @@ impl Screen for ReaderScreen {
             }
             return;
         }
+        if *event == events::STATUS_CHANGED
+            || *event == events::SETTING_CHANGED
+                && params
+                    .get(params::ID)
+                    .is_some_and(|id| id.starts_with("core."))
+        {
+            // The battery, the clock format, the time zone, …
+            self.status_shown.clear();
+            self.update_status(cx);
+            return;
+        }
+        let Ok(book) = &mut self.book else {
+            return;
+        };
         let id = params.get(params::ID).unwrap_or_default();
         let affects_layout = id.starts_with("reader.") && id != crate::settings::OPEN_LAST.as_str();
         if *event == events::SETTING_CHANGED && affects_layout {
@@ -1270,26 +1367,6 @@ fn draw_message(canvas: &mut Canvas<'_>, env: &Env<'_>, message: &str) {
         font.draw(canvas, size, x, baseline as i32, text, Color::BLACK);
         baseline += line_height;
     }
-}
-
-/// `text` shortened with an ellipsis to fit `width`.
-fn fit(font: &FontHandle<'_>, size: f32, text: &str, width: f32) -> String {
-    if font.measure(size, text) <= width {
-        return text.to_string();
-    }
-    let mut result = String::new();
-    let ellipsis = font.measure(size, "…");
-    let mut used = 0.0;
-    for c in text.chars() {
-        let w = font.advance(size, c);
-        if used + w + ellipsis > width {
-            break;
-        }
-        used += w;
-        result.push(c);
-    }
-    result.push('…');
-    result
 }
 
 fn escape(text: &str) -> String {

@@ -4,7 +4,7 @@ use std::time::Instant as StdInstant;
 
 use quireink_core::{Effects, Kernel, KernelError};
 use quireink_graphics::Framebuffer;
-use quireink_platform::{InputEvent, Instant};
+use quireink_platform::{Battery, InputEvent, Instant, SystemStatus, WallClock};
 
 use crate::budget;
 use crate::panel::Panel;
@@ -84,8 +84,40 @@ impl Device {
 
     pub fn start(&mut self) {
         let now = self.now();
+        let status = self.status(now);
+        let effects = budget::track(|| self.kernel.set_status(now, status));
+        self.execute(effects);
         let effects = budget::track(|| self.kernel.start(now));
         self.execute(effects);
+    }
+
+    /// The emulated clock and battery: the computer's time and time zone
+    /// (with simulated time a fixed one, so screenshots repeat) and a
+    /// battery at 80 %.
+    fn status(&self, now: Instant) -> SystemStatus {
+        let clock = match self.clock {
+            Clock::Real(_) => {
+                let local = chrono::Local::now();
+                WallClock {
+                    at: now,
+                    unix_millis: local.timestamp_millis(),
+                    utc_offset_minutes: Some(local.offset().local_minus_utc() / 60),
+                }
+            }
+            // 14 October 2026, 10:41 in Berlin.
+            Clock::Simulated(_) => WallClock {
+                at: now,
+                unix_millis: 1_791_967_260_000,
+                utc_offset_minutes: Some(120),
+            },
+        };
+        SystemStatus {
+            clock: Some(clock),
+            battery: Some(Battery {
+                percent: 80,
+                charging: false,
+            }),
+        }
     }
 
     pub fn input(&mut self, event: InputEvent) {
