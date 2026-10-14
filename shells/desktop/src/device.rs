@@ -203,9 +203,13 @@ fn build_kernel(
         } else {
             quireink_app::Fonts::Outline
         };
-        let builder = Kernel::builder(profile.device)
+        let mut builder = Kernel::builder(profile.device)
             .storage(storage)
             .glyph_cache(profile.glyph_cache);
+        // Scalable fonts only where the emulated device renders them.
+        if !profile.font_packs {
+            builder = builder.font_dir("fonts");
+        }
         let mut builder = quireink_app::install(builder, fonts);
         if let Some(rows) = profile.frame_rows {
             builder = builder.frame_rows(rows);

@@ -570,6 +570,7 @@ architecture (G1–G12 below).
 | Footnote popups, internal links | link hit test; overlay | G1, G5 |
 | Reading statistics, streaks, goals, time-left estimates | `page.turned` events with timestamps; plugin storage; home widgets | G4 |
 | Status lines with time, battery, chapter, page | ✅ status items as contributions (`Registrar::add_status_item`), lines above and below the text with left/centre/right parts chosen in the settings, redrawn only when what they show changes | G2 |
+| Font choice, own fonts, publisher's formatting | ✅ reading font by family (`core.reading-font`; bold and italic faces follow), font files from a folder (`KernelBuilder::font_dir`; Android: `QuireInk/fonts` and KOReader's `koreader/fonts`) or a data plugin's `fonts/`, read from their header at start and loaded only when chosen; `reader.publisher-styles` shows books without their CSS · ⬜ embedded fonts (devices with scalable fonts) | G2 |
 | Custom fonts, margins, spacing, hyphenation, justification | font/hyphenation contributions; reader settings | — |
 | Per-book / per-publisher style tweaks | content filters; **per-book settings** | G3 |
 | Scroll mode, RSVP speed reading, two-page spreads | alternative reader screen in `core.reader` reusing the layout engine | G8 |

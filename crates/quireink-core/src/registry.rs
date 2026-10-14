@@ -85,6 +85,7 @@ pub(crate) struct Staging {
     pub(crate) keymaps: Vec<Cow<'static, str>>,
     pub(crate) catalogs: Vec<Catalog>,
     pub(crate) fonts: Vec<FontSpec>,
+    pub(crate) font_files: Vec<(Id, alloc::string::String)>,
     pub(crate) font_roles: Vec<(Id, Id, Priority)>,
     pub(crate) formats: Vec<FormatSpec>,
     pub(crate) hyphenation: Vec<HyphenationSpec>,
@@ -215,6 +216,20 @@ impl Registrar for PluginRegistrar<'_> {
         self.check_namespace(&font.id)?;
         Self::check_unique(self.staging.fonts.iter().map(|f| &f.id), &font.id)?;
         self.staging.fonts.push(font);
+        Ok(())
+    }
+
+    fn add_font_file(&mut self, id: Id, path: alloc::string::String) -> Result<(), RegisterError> {
+        self.check_namespace(&id)?;
+        Self::check_unique(
+            self.staging
+                .fonts
+                .iter()
+                .map(|f| &f.id)
+                .chain(self.staging.font_files.iter().map(|(id, _)| id)),
+            &id,
+        )?;
+        self.staging.font_files.push((id, path));
         Ok(())
     }
 

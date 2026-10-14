@@ -133,10 +133,13 @@ fn register(r: &mut dyn Registrar, faces: Faces) -> Result<(), RegisterError> {
             Font::from_data(data, &[("wght", weight)]).map_err(|e| RegisterError::Invalid {
                 message: Cow::Owned(alloc::format!("{id}: {e}")),
             })?;
-        r.add_font(FontSpec {
-            id: id.clone(),
-            font,
-        })?;
+        let family = if role == fonts::UI {
+            "Atkinson Hyperlegible"
+        } else {
+            "Literata"
+        };
+        let italic = role == fonts::READING_ITALIC || role == fonts::READING_BOLD_ITALIC;
+        r.add_font(FontSpec::new(id.clone(), font).family(family, weight >= 600.0, italic))?;
         r.bind_font(role, id, Priority::DEFAULT)?;
     }
     Ok(())

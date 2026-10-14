@@ -102,6 +102,11 @@ pub trait Registrar {
     /// `outline` feature.
     fn add_font(&mut self, font: FontSpec) -> Result<(), RegisterError>;
 
+    /// Adds a font file on the storage (OpenType/TrueType): its family and
+    /// style are read from its header, and it is loaded only when its
+    /// family is chosen for reading. Needs scalable font support.
+    fn add_font_file(&mut self, id: Id, path: alloc::string::String) -> Result<(), RegisterError>;
+
     /// Proposes a font for a role such as
     /// [`builtin::fonts::UI`](crate::builtin::fonts::UI).
     fn bind_font(&mut self, role: Id, font: Id, priority: Priority) -> Result<(), RegisterError>;

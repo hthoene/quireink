@@ -1309,8 +1309,12 @@ impl Screen for ReaderScreen {
             }
             return;
         }
+        let font_changed = *event == events::SETTING_CHANGED
+            && params.get(params::ID)
+                == Some(quireink_sdk::builtin::settings::READING_FONT.as_str());
         if *event == events::STATUS_CHANGED
             || *event == events::SETTING_CHANGED
+                && !font_changed
                 && params
                     .get(params::ID)
                     .is_some_and(|id| id.starts_with("core."))
@@ -1334,7 +1338,8 @@ impl Screen for ReaderScreen {
             cx.wake_at(env.now);
             return;
         }
-        let affects_layout = id.starts_with("reader.") && id != crate::settings::OPEN_LAST.as_str();
+        let affects_layout =
+            font_changed || id.starts_with("reader.") && id != crate::settings::OPEN_LAST.as_str();
         if *event == events::SETTING_CHANGED && affects_layout {
             self.selection = None;
             let env = *cx.env();

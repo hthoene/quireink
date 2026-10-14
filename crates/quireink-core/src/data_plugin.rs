@@ -8,6 +8,7 @@
 //!   i18n/*.ini     translation catalogs (also whole new languages)
 //!   keymap.ini     key bindings
 //!   settings.ini   new defaults for any plugin's settings ([reader] font-size = 14)
+//!   fonts/*.ttf    fonts to read with (also .otf, .ttc), by family
 //! ```
 //!
 //! The kernel lists them like every other plugin, so they can be switched
@@ -35,6 +36,8 @@ pub(crate) struct DataPlugin {
     translations: RefCell<Vec<String>>,
     keymap: RefCell<Option<String>>,
     settings: RefCell<Option<String>>,
+    /// Paths of font files.
+    fonts: RefCell<Vec<String>>,
 }
 
 impl Plugin for DataPlugin {
@@ -48,6 +51,22 @@ impl Plugin for DataPlugin {
         }
         if let Some(source) = self.keymap.take() {
             r.add_keymap(Cow::Owned(source))?;
+        }
+        let mut used: Vec<String> = Vec::new();
+        for path in self.fonts.take() {
+            let mut name = slug(path.rsplit('/').next().unwrap_or(&path));
+            // The same file name in two folders.
+            while used.contains(&name) {
+                name.push('-');
+                name.push('2');
+            }
+            used.push(name.clone());
+            let id = Id::parse(&format!("{}.{name}", self.manifest.id)).map_err(|_| {
+                RegisterError::Invalid {
+                    message: Cow::Owned(format!("{path}: unusable file name")),
+                }
+            })?;
+            r.add_font_file(id, path)?;
         }
         if let Some(source) = self.settings.take() {
             for entry in quireink_config::parse(&source) {
@@ -119,7 +138,65 @@ fn load(storage: &dyn Storage, path: &str, folder: &str) -> Result<DataPlugin, S
         translations: RefCell::new(translations),
         keymap: RefCell::new(read(storage, &format!("{path}/keymap.ini"), MAX_FILE)),
         settings: RefCell::new(read(storage, &format!("{path}/settings.ini"), MAX_FILE)),
+        fonts: RefCell::new(font_files(storage, &format!("{path}/fonts"))),
     })
+}
+
+/// The font files in `dir`, by name.
+fn font_files(storage: &dyn Storage, dir: &str) -> Vec<String> {
+    let mut files: Vec<String> = Vec::new();
+    let _ = storage.list(dir, &mut |entry| {
+        let name = entry.name.to_ascii_lowercase();
+        let font = [".ttf", ".otf", ".ttc"]
+            .iter()
+            .any(|ext| name.ends_with(ext));
+        if !entry.is_dir && font {
+            files.push(format!("{dir}/{}", entry.name));
+        }
+    });
+    files.sort_unstable();
+    files
+}
+
+/// The fonts of `dirs` as one plugin, `font-folder`; `None` without any.
+pub(crate) fn font_folder(storage: &dyn Storage, dirs: &[String]) -> Option<DataPlugin> {
+    let fonts: Vec<String> = dirs.iter().flat_map(|d| font_files(storage, d)).collect();
+    if fonts.is_empty() {
+        return None;
+    }
+    Some(DataPlugin {
+        manifest: Manifest {
+            id: Id::new_static("font-folder"),
+            name: Cow::Borrowed("Font folder"),
+            description: Cow::Borrowed("The fonts in the fonts folder, to read with."),
+            version: Version::new(0, 1, 0),
+            sdk: SDK_VERSION,
+        },
+        translations: RefCell::new(Vec::new()),
+        keymap: RefCell::new(None),
+        settings: RefCell::new(None),
+        fonts: RefCell::new(fonts),
+    })
+}
+
+/// An id segment from a file name: `Book Antiqua-Bold.ttf` gives
+/// `book-antiqua-bold`.
+fn slug(file: &str) -> String {
+    let stem = file.rsplit_once('.').map_or(file, |(stem, _)| stem);
+    let mut out = String::new();
+    for c in stem.chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c.to_ascii_lowercase());
+        } else if !out.ends_with('-') && !out.is_empty() {
+            out.push('-');
+        }
+    }
+    let out = String::from(out.trim_end_matches('-'));
+    if out.is_empty() {
+        String::from("font")
+    } else {
+        out
+    }
 }
 
 fn read(storage: &dyn Storage, path: &str, max: usize) -> Option<String> {
@@ -190,5 +267,30 @@ mod tests {
         assert!(large.settings.borrow().is_some());
         assert!(large.keymap.borrow().is_none());
         assert_eq!(warnings.len(), 2, "{warnings:?}");
+    }
+
+    #[test]
+    fn finds_fonts_in_plugins_and_font_folders() {
+        let storage = MemoryStorage::new()
+            .with(
+                "plugins/serif/plugin.ini",
+                "[plugin]
+",
+            )
+            .with("plugins/serif/fonts/Book Antiqua-Bold.TTF", "x")
+            .with("plugins/serif/fonts/readme.txt", "")
+            .with("fonts/a.otf", "x")
+            .with("more-fonts/b.ttc", "x");
+        let plugins = discover(&storage, "plugins", &mut |_| {});
+        assert_eq!(
+            *plugins[0].fonts.borrow(),
+            ["plugins/serif/fonts/Book Antiqua-Bold.TTF"]
+        );
+        let dirs = [String::from("fonts"), String::from("more-fonts")];
+        let folder = font_folder(&storage, &dirs).unwrap();
+        assert_eq!(*folder.fonts.borrow(), ["fonts/a.otf", "more-fonts/b.ttc"]);
+        assert!(font_folder(&storage, &[String::from("nothing")]).is_none());
+        assert_eq!(slug("Book Antiqua-Bold.TTF"), "book-antiqua-bold");
+        assert_eq!(slug("….ttf"), "font");
     }
 }

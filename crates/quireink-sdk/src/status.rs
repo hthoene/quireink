@@ -207,7 +207,8 @@ fn draw_values(
         }
         match value {
             StatusValue::Text(text) => {
-                let text = crate::ui::fit(font, size, text, end - x);
+                // A pixel of slack for rounding: the parts were measured to fit.
+                let text = crate::ui::fit(font, size, text, end - x + 1.0);
                 x += font.draw(canvas, size, x, baseline, &text, color);
             }
             StatusValue::Level { percent, charging } => {

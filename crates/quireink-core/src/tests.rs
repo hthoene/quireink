@@ -422,10 +422,7 @@ impl Plugin for FontPlugin {
                 alloc::vec![('a', quireink_text::Glyph::empty(5.0))],
             );
             let font = quireink_sdk::Font::from_data(pack.build(), &[]).unwrap();
-            r.add_font(quireink_sdk::FontSpec {
-                id: Id::parse(name).unwrap(),
-                font,
-            })?;
+            r.add_font(quireink_sdk::FontSpec::new(Id::parse(name).unwrap(), font))?;
         }
         r.bind_font(
             quireink_sdk::builtin::fonts::UI,

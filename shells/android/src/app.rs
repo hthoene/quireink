@@ -30,6 +30,9 @@ const PLUGINS: &str = "QuireInk/plugins";
 const DICTIONARIES: &str = "QuireInk/dictionaries";
 /// Where KOReader keeps dictionaries; used if it has any.
 const KOREADER_DICTIONARIES: &str = "koreader/data/dict";
+/// Fonts to read with: QuireInk's folder and KOReader's.
+const FONTS: &str = "QuireInk/fonts";
+const KOREADER_FONTS: &str = "koreader/fonts";
 
 /// The running app once the window size is known.
 struct Running {
@@ -225,7 +228,7 @@ fn start_kernel(
         .flatten()
         .and_then(|dir| {
             // Data plugins and dictionaries are copied there.
-            for folder in [PLUGINS, DICTIONARIES] {
+            for folder in [PLUGINS, DICTIONARIES, FONTS] {
                 if let Err(e) = std::fs::create_dir_all(dir.join(folder)) {
                     log::warn!("{}: {e}", dir.join(folder).display());
                 }
@@ -248,6 +251,8 @@ fn start_kernel(
         Some(shared) => builder
             .storage(Mounted::new(storage, SHARED, shared))
             .plugin_dir(format!("{SHARED}/{PLUGINS}"))
+            .font_dir(format!("{SHARED}/{FONTS}"))
+            .font_dir(format!("{SHARED}/{KOREADER_FONTS}"))
             .setting_default("files.root", &format!("{SHARED}/Books"))
             .setting_default("dictionary.folder", &format!("{SHARED}/{dictionaries}")),
         None => builder.storage(storage),

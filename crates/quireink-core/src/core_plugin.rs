@@ -243,6 +243,17 @@ impl Plugin for CorePlugin {
             .description("core.setting.long-press-ms.help"),
         )?;
 
+        r.add_setting(
+            SettingSpec::new(
+                settings::READING_FONT,
+                "core.setting.reading-font",
+                // The kernel fills in the registered families.
+                SettingKind::Choice(alloc::vec![Cow::Borrowed(settings::DEFAULT_FONT)]),
+                SettingValue::Text(Cow::Borrowed(settings::DEFAULT_FONT)),
+            )
+            .group(groups::READING)
+            .description("core.setting.reading-font.help"),
+        )?;
         // The time of day and the battery, for status lines.
         r.add_setting(
             SettingSpec::new(

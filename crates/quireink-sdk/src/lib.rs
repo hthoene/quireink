@@ -108,6 +108,12 @@ pub mod image {
 }
 
 /// Hyphenation with compiled patterns (see `quireink-hyphen`).
+/// Text and font helpers (see `quireink-text`), e.g. reading a font
+/// file's family.
+pub mod text {
+    pub use quireink_text::{OUTLINES, sfnt};
+}
+
 pub mod hyphen {
     pub use quireink_hyphen::*;
 }

@@ -1,12 +1,16 @@
+use alloc::borrow::Cow;
+use alloc::string::String;
 use alloc::vec::Vec;
 use core::cell::RefCell;
 use core::fmt;
 use core::ops::Range;
 
 use quireink_graphics::Canvas;
-use quireink_platform::Color;
+use quireink_platform::{Color, Storage};
+use quireink_text::sfnt::FontInfo;
 use quireink_text::{Font, GlyphCache, LineMetrics};
 
+use crate::builtin::fonts as roles;
 use crate::collections::VecMap;
 use crate::id::Id;
 use crate::plugin::{Priority, RegisterError};
@@ -17,18 +21,70 @@ pub struct FontSpec {
     /// `<plugin>.<name>`, e.g. `fonts-default.literata`.
     pub id: Id,
     pub font: Font,
+    /// The family it belongs to, e.g. `Literata`: families are what users
+    /// choose (with their bold and italic faces). `None` keeps a font out
+    /// of the choice.
+    pub family: Option<Cow<'static, str>>,
+    pub bold: bool,
+    pub italic: bool,
 }
+
+impl FontSpec {
+    /// A font outside any family.
+    pub fn new(id: Id, font: Font) -> Self {
+        Self {
+            id,
+            font,
+            family: None,
+            bold: false,
+            italic: false,
+        }
+    }
+
+    /// Puts the font into `family` as its regular, bold, italic or bold
+    /// italic face.
+    pub fn family(
+        mut self,
+        family: impl Into<Cow<'static, str>>,
+        bold: bool,
+        italic: bool,
+    ) -> Self {
+        self.family = Some(family.into());
+        self.bold = bold;
+        self.italic = italic;
+        self
+    }
+}
+
+/// One registered font.
+#[derive(Debug)]
+struct Entry {
+    id: Id,
+    /// `None` for a font file not loaded (yet).
+    font: Option<Font>,
+    family: Option<Cow<'static, str>>,
+    bold: bool,
+    italic: bool,
+    /// A font file on the storage, loaded only while its family is chosen.
+    file: Option<String>,
+}
+
+/// Largest font file loaded.
+const MAX_FONT_FILE: u64 = 48 * 1024 * 1024;
 
 /// All registered fonts, the role bindings and the glyph cache.
 ///
 /// Fonts are bound to *roles* such as
 /// [`builtin::fonts::UI`](crate::builtin::fonts::UI) — like screens to slots.
-/// Plugins propose fonts for roles; the user's `[fonts]` configuration
-/// overrides them.
+/// Plugins propose fonts for roles; a chosen reading family
+/// ([`Fonts::set_family`]) fills the reading roles, and the user's
+/// `[fonts]` configuration overrides everything.
 pub struct Fonts {
-    fonts: Vec<(Id, Font)>,
+    entries: Vec<Entry>,
     candidates: Vec<(Id, Id, Priority)>,
     user: VecMap<Id, Id>,
+    /// The family chosen for reading.
+    family: Option<String>,
     cache: RefCell<GlyphCache>,
 }
 
@@ -37,8 +93,9 @@ impl fmt::Debug for Fonts {
         f.debug_struct("Fonts")
             .field(
                 "fonts",
-                &self.fonts.iter().map(|(id, _)| id).collect::<Vec<_>>(),
+                &self.entries.iter().map(|e| &e.id).collect::<Vec<_>>(),
             )
+            .field("family", &self.family)
             .finish_non_exhaustive()
     }
 }
@@ -47,18 +104,47 @@ impl Fonts {
     /// `cache_bytes` bounds the memory for glyphs rasterized at runtime.
     pub fn new(cache_bytes: usize) -> Self {
         Self {
-            fonts: Vec::new(),
+            entries: Vec::new(),
             candidates: Vec::new(),
             user: VecMap::new(),
+            family: None,
             cache: RefCell::new(GlyphCache::new(cache_bytes)),
         }
     }
 
-    pub fn add(&mut self, spec: FontSpec) -> Result<(), RegisterError> {
-        if self.fonts.iter().any(|(id, _)| *id == spec.id) {
-            return Err(RegisterError::Duplicate { id: spec.id });
+    fn check_new(&self, id: &Id) -> Result<(), RegisterError> {
+        if self.entries.iter().any(|e| e.id == *id) {
+            return Err(RegisterError::Duplicate { id: id.clone() });
         }
-        self.fonts.push((spec.id, spec.font));
+        Ok(())
+    }
+
+    pub fn add(&mut self, spec: FontSpec) -> Result<(), RegisterError> {
+        self.check_new(&spec.id)?;
+        self.entries.push(Entry {
+            id: spec.id,
+            font: Some(spec.font),
+            family: spec.family,
+            bold: spec.bold,
+            italic: spec.italic,
+            file: None,
+        });
+        Ok(())
+    }
+
+    /// Adds a font file on the storage, described by its header (see
+    /// [`sfnt::read_info`](quireink_text::sfnt::read_info)); it is loaded
+    /// only when its family is chosen.
+    pub fn add_file(&mut self, id: Id, path: String, info: FontInfo) -> Result<(), RegisterError> {
+        self.check_new(&id)?;
+        self.entries.push(Entry {
+            id,
+            font: None,
+            family: Some(Cow::Owned(info.family)),
+            bold: info.bold,
+            italic: info.italic,
+            file: Some(path),
+        });
         Ok(())
     }
 
@@ -67,63 +153,132 @@ impl Fonts {
         self.candidates.push((role, font, priority));
     }
 
-    /// The user's explicit choice for a role.
     /// Releases unused capacity once registration is complete.
     pub fn shrink_to_fit(&mut self) {
-        self.fonts.shrink_to_fit();
+        self.entries.shrink_to_fit();
         self.candidates.shrink_to_fit();
         self.user.shrink_to_fit();
     }
 
+    /// The user's explicit choice for a role.
     pub fn bind_user(&mut self, role: Id, font: Id) {
         self.user.insert(role, font);
     }
 
     pub fn contains(&self, id: &str) -> bool {
-        self.index_of(id).is_some()
+        self.entries.iter().any(|e| e.id.as_str() == id)
     }
 
-    /// Ids of all fonts.
+    /// Ids of all fonts, loaded or not.
     pub fn ids(&self) -> impl Iterator<Item = &Id> {
-        self.fonts.iter().map(|(id, _)| id)
+        self.entries.iter().map(|e| &e.id)
     }
 
-    /// A font by id.
+    /// The families to choose from, in registration order.
+    pub fn families(&self) -> Vec<&str> {
+        let mut families: Vec<&str> = Vec::new();
+        for family in self.entries.iter().filter_map(|e| e.family.as_deref()) {
+            if !families.contains(&family) {
+                families.push(family);
+            }
+        }
+        families
+    }
+
+    /// The family chosen for reading, if any.
+    pub fn family(&self) -> Option<&str> {
+        self.family.as_deref()
+    }
+
+    /// Chooses the family for reading (`None`: the plugins' proposals).
+    /// Call [`Fonts::load`] afterwards for font files.
+    pub fn set_family(&mut self, family: Option<&str>) {
+        self.family = family.map(String::from);
+    }
+
+    /// Loads the files of the chosen family and frees those of other
+    /// families; returns the files that could not be loaded.
+    pub fn load(&mut self, storage: &dyn Storage) -> Vec<String> {
+        let mut failed = Vec::new();
+        let chosen = self.family.clone();
+        for entry in &mut self.entries {
+            let Some(path) = &entry.file else {
+                continue;
+            };
+            if entry.family.as_deref() != chosen.as_deref() {
+                entry.font = None;
+                continue;
+            }
+            if entry.font.is_some() {
+                continue;
+            }
+            match read_font(storage, path) {
+                Some(font) => entry.font = Some(font),
+                None => failed.push(path.clone()),
+            }
+        }
+        failed
+    }
+
+    /// A font by id, if loaded.
     pub fn get(&self, id: &str) -> Option<FontHandle<'_>> {
         self.index_of(id)
             .map(|index| FontHandle { fonts: self, index })
     }
 
-    /// The font bound to `role`: the user's choice, else the best proposal,
-    /// else the first registered font.
-    pub fn role(&self, role: &str) -> Option<FontHandle<'_>> {
-        let user = self.user.get(role).and_then(|id| self.get(id.as_str()));
-        let proposed = || {
-            self.candidates
-                .iter()
-                .filter(|(r, font, _)| r.as_str() == role && self.contains(font.as_str()))
-                .max_by_key(|(_, _, priority)| *priority)
-                .and_then(|(_, font, _)| self.get(font.as_str()))
+    /// The chosen family's face for a reading role: `None` if no family
+    /// is chosen or the role is not a reading role; `Some(None)` if the
+    /// family lacks that face.
+    fn family_face(&self, role: &str) -> Option<Option<FontHandle<'_>>> {
+        let family = self.family.as_deref()?;
+        let (bold, italic) = match role {
+            r if r == roles::READING.as_str() => (false, false),
+            r if r == roles::READING_BOLD.as_str() => (true, false),
+            r if r == roles::READING_ITALIC.as_str() => (false, true),
+            r if r == roles::READING_BOLD_ITALIC.as_str() => (true, true),
+            _ => return None,
         };
-        let first = || {
-            (!self.fonts.is_empty()).then_some(FontHandle {
-                fonts: self,
-                index: 0,
-            })
-        };
-        user.or_else(proposed).or_else(first)
+        let index = self.entries.iter().position(|e| {
+            e.font.is_some()
+                && e.family.as_deref() == Some(family)
+                && e.bold == bold
+                && e.italic == italic
+        });
+        Some(index.map(|index| FontHandle { fonts: self, index }))
     }
 
-    /// The font bound to `role` by the user or proposed by a plugin; unlike
-    /// [`Fonts::role`], no fallback, for optional roles such as bold faces.
+    fn proposed(&self, role: &str) -> Option<FontHandle<'_>> {
+        self.candidates
+            .iter()
+            .filter(|(r, font, _)| r.as_str() == role && self.get(font.as_str()).is_some())
+            .max_by_key(|(_, _, priority)| *priority)
+            .and_then(|(_, font, _)| self.get(font.as_str()))
+    }
+
+    /// The font bound to `role`: the user's choice, else the chosen
+    /// family's face, else the best proposal, else the first font.
+    pub fn role(&self, role: &str) -> Option<FontHandle<'_>> {
+        let user = self.user.get(role).and_then(|id| self.get(id.as_str()));
+        let first = || {
+            self.entries
+                .iter()
+                .position(|e| e.font.is_some())
+                .map(|index| FontHandle { fonts: self, index })
+        };
+        user.or_else(|| self.family_face(role).flatten())
+            .or_else(|| self.proposed(role))
+            .or_else(first)
+    }
+
+    /// The font bound to `role` by the user, a chosen family or a plugin;
+    /// unlike [`Fonts::role`], no fallback, for optional roles such as bold
+    /// faces (a chosen family without bold has none, so its regular face
+    /// is used rather than another family's bold).
     pub fn bound(&self, role: &str) -> Option<FontHandle<'_>> {
         let user = self.user.get(role).and_then(|id| self.get(id.as_str()));
-        user.or_else(|| {
-            self.candidates
-                .iter()
-                .filter(|(r, font, _)| r.as_str() == role && self.contains(font.as_str()))
-                .max_by_key(|(_, _, priority)| *priority)
-                .and_then(|(_, font, _)| self.get(font.as_str()))
+        user.or_else(|| match self.family_face(role) {
+            Some(face) => face,
+            None => self.proposed(role),
         })
     }
 
@@ -138,8 +293,28 @@ impl Fonts {
     }
 
     fn index_of(&self, id: &str) -> Option<usize> {
-        self.fonts.iter().position(|(font, _)| font.as_str() == id)
+        self.entries
+            .iter()
+            .position(|e| e.id.as_str() == id && e.font.is_some())
     }
+}
+
+/// Reads a font file into memory.
+fn read_font(storage: &dyn Storage, path: &str) -> Option<Font> {
+    let size = storage.size(path).ok()?;
+    if size > MAX_FONT_FILE {
+        return None;
+    }
+    let mut data = alloc::vec![0u8; size as usize];
+    let mut at = 0;
+    while at < data.len() {
+        let n = storage.read_at(path, at as u64, &mut data[at..]).ok()?;
+        if n == 0 {
+            return None;
+        }
+        at += n;
+    }
+    Font::from_data(data, &[]).ok()
 }
 
 /// A font ready to measure and draw text.
@@ -157,11 +332,15 @@ impl fmt::Debug for FontHandle<'_> {
 
 impl<'a> FontHandle<'a> {
     pub fn id(&self) -> &'a Id {
-        &self.fonts.fonts[self.index].0
+        &self.fonts.entries[self.index].id
     }
 
     fn font(&self) -> &'a Font {
-        &self.fonts.fonts[self.index].1
+        // Handles exist only for loaded fonts.
+        match &self.fonts.entries[self.index].font {
+            Some(font) => font,
+            None => unreachable!("font handle of an unloaded font"),
+        }
     }
 
     /// Ascent, descent and line height at `size` pixels.

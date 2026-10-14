@@ -164,6 +164,11 @@ pub mod settings {
     pub const UI_SIZE: Id = Id::new_static("core.ui-size");
     /// The active key map preset (see [`keymap_presets`](super::keymap_presets)).
     pub const KEYMAP_PRESET: Id = Id::new_static("core.keymap-preset");
+    /// The font family for reading: [`DEFAULT_FONT`] (the plugins'
+    /// choice) or one of the registered families.
+    pub const READING_FONT: Id = Id::new_static("core.reading-font");
+    /// The value of [`READING_FONT`] for the plugins' choice.
+    pub const DEFAULT_FONT: &str = "core.font.default";
     /// `core.clock.24h` or `core.clock.12h`.
     pub const CLOCK_FORMAT: Id = Id::new_static("core.clock-format");
     /// The time zone: `core.tz.auto` (the system's) or one of

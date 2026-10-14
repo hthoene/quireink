@@ -337,6 +337,7 @@ impl Plugin for Reader {
             (MENU, LAYOUT_MENU, 50),
             (MENU, core_settings::NIGHT_MODE, 60),
             (MENU, MORE_MENU, 70),
+            (LAYOUT_MENU, core_settings::READING_FONT, 5),
             (LAYOUT_MENU, settings::FONT_SIZE, 10),
             (LAYOUT_MENU, settings::LINE_SPACING, 20),
             (LAYOUT_MENU, settings::MARGIN, 30),

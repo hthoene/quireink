@@ -195,6 +195,7 @@ pub struct KernelBuilder {
     storage: Option<Box<dyn Storage>>,
     setting_defaults: Vec<(String, String)>,
     plugin_dirs: Vec<String>,
+    font_dirs: Vec<String>,
 }
 
 impl fmt::Debug for KernelBuilder {
@@ -239,6 +240,14 @@ impl KernelBuilder {
     pub fn setting_default(mut self, id: &str, value: &str) -> Self {
         self.setting_defaults
             .push((String::from(id), String::from(value)));
+        self
+    }
+
+    /// A folder on the storage with font files (OpenType/TrueType) to
+    /// read with; they appear as one plugin, "font folder". Only for
+    /// devices that render scalable fonts.
+    pub fn font_dir(mut self, dir: impl Into<String>) -> Self {
+        self.font_dirs.push(dir.into());
         self
     }
 
@@ -335,6 +344,12 @@ impl KernelBuilder {
                 kernel.add_plugin(&plugin, &disabled);
             }
         }
+        if !self.font_dirs.is_empty()
+            && let Some(plugin) =
+                data_plugin::font_folder(kernel.shared.storage.as_ref(), &self.font_dirs)
+        {
+            kernel.add_plugin(&plugin, &disabled);
+        }
         kernel.find_required_plugins();
 
         if let Some(source) = self.device_keymap {
@@ -359,6 +374,20 @@ impl KernelBuilder {
             .shared
             .settings
             .set_choices(core_settings::KEYMAP_PRESET.as_str(), presets);
+        let mut families: Vec<Cow<'static, str>> =
+            alloc::vec![Cow::Borrowed(core_settings::DEFAULT_FONT)];
+        families.extend(
+            kernel
+                .shared
+                .fonts
+                .families()
+                .into_iter()
+                .map(|f| Cow::Owned(f.to_string())),
+        );
+        kernel
+            .shared
+            .settings
+            .set_choices(core_settings::READING_FONT.as_str(), families);
         // Defaults from plugins (e.g. themes), then the device's.
         for (plugin, id, value) in mem::take(&mut kernel.plugin_defaults) {
             if let Err(error) = kernel
@@ -386,6 +415,7 @@ impl KernelBuilder {
             kernel.apply_user_config(source);
         }
         kernel.set_menu_titles();
+        kernel.apply_reading_font();
         kernel.validate();
         kernel.rebuild_keymap();
         let shared = &mut kernel.shared;
@@ -469,6 +499,7 @@ impl Kernel {
             storage: None,
             setting_defaults: Vec::new(),
             plugin_dirs: Vec::new(),
+            font_dirs: Vec::new(),
         }
     }
 
@@ -818,6 +849,9 @@ impl Kernel {
         for font in staging.fonts.drain(..) {
             // Cannot fail: checked above.
             let _ = self.shared.fonts.add(font);
+        }
+        for (id, path) in staging.font_files.drain(..) {
+            self.add_font_file(plugin, id, path);
         }
         for (role, font, priority) in staging.font_roles.drain(..) {
             self.shared.fonts.propose(role, font, priority);
@@ -1388,6 +1422,51 @@ impl Kernel {
         ));
     }
 
+    /// Adds a font file of `plugin`, described by its header.
+    fn add_font_file(&mut self, plugin: &Id, id: Id, path: String) {
+        let source = WarningSource::Plugin(plugin.clone());
+        if !quireink_text_outlines() {
+            return self.warn(
+                source,
+                None,
+                format!("{path}: this device only reads fonts made for it (.qifp)"),
+            );
+        }
+        let storage = self.shared.storage.as_ref();
+        let info = quireink_sdk::text::sfnt::read_info(&mut |offset, buf| {
+            storage.read_at(&path, offset, buf).unwrap_or(0)
+        });
+        match info {
+            Some(info) => {
+                if let Err(error) = self.shared.fonts.add_file(id, path, info) {
+                    self.warn(source, None, format!("{error}"));
+                }
+            }
+            None => self.warn(source, None, format!("{path}: not a font")),
+        }
+    }
+
+    /// Chooses the reading font family from `core.reading-font` and loads
+    /// its files.
+    fn apply_reading_font(&mut self) {
+        let chosen = self
+            .shared
+            .settings
+            .text(core_settings::READING_FONT.as_str())
+            .to_string();
+        let family = (chosen != core_settings::DEFAULT_FONT
+            && self.shared.fonts.families().contains(&chosen.as_str()))
+        .then_some(chosen.as_str());
+        self.shared.fonts.set_family(family);
+        for path in self.shared.fonts.load(self.shared.storage.as_ref()) {
+            self.warn(
+                WarningSource::Runtime,
+                None,
+                format!("{path}: font could not be loaded"),
+            );
+        }
+    }
+
     /// Sets `key` in `section` of the configuration file on the device.
     fn save_config(&mut self, section: &str, key: &str, value: &str) {
         let storage = self.shared.storage.as_ref();
@@ -1457,6 +1536,9 @@ impl Kernel {
         if *id == core_settings::KEYMAP_PRESET {
             self.rebuild_keymap();
         }
+        if *id == core_settings::READING_FONT {
+            self.apply_reading_font();
+        }
         if *id == core_settings::LANGUAGE || *id == core_settings::NIGHT_MODE {
             let bounds = self.framebuffer.bounds();
             self.invalidate(bounds);
@@ -1523,4 +1605,9 @@ impl Shared {
             storage: self.storage.as_ref(),
         }
     }
+}
+
+/// Whether this build renders OpenType/TrueType fonts.
+fn quireink_text_outlines() -> bool {
+    quireink_sdk::text::OUTLINES
 }
