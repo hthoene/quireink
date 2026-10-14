@@ -124,9 +124,10 @@ pub fn fit_pair(
     let room = (width - gap).max(0.0);
     let title_width = font.measure(size, title).min(room * 0.6);
     let value_room = room - title_width;
-    let value = fit(font, size, value, value_room);
+    // A pixel of slack for rounding, as in [`draw_label`].
+    let value = fit(font, size, value, value_room + 1.0);
     let value_width = font.measure(size, &value);
-    let title = fit(font, size, title, (room - value_width).max(0.0));
+    let title = fit(font, size, title, (room - value_width).max(0.0) + 1.0);
     (title, value, value_width)
 }
 

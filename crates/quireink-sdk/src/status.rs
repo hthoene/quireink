@@ -209,16 +209,14 @@ fn draw_values(
     let metrics = font.line_metrics(size);
     let baseline = i32::from(area.y)
         + ((f32::from(area.height) + metrics.ascent - metrics.descent) / 2.0) as i32;
-    // Too wide: the longest text gives way, so short ones (the page, the
-    // time) stay whole.
     let widths: Vec<f32> = values.iter().map(|v| value_width(font, size, v)).collect();
-    let total = widths.iter().sum::<f32>() + gap * values.len().saturating_sub(1) as f32;
-    let longest = (0..values.len())
-        .filter(|&i| matches!(values[i], StatusValue::Text(_)))
-        .max_by(|&a, &b| widths[a].total_cmp(&widths[b]));
-    let room = end - x;
-    let budget = |i: usize| match longest {
-        Some(l) if l == i && total > room => (widths[i] - (total - room)).max(0.0),
+    let texts: Vec<bool> = values
+        .iter()
+        .map(|v| matches!(v, StatusValue::Text(_)))
+        .collect();
+    let shrunk = shrink(&widths, &texts, gap, end - x);
+    let budget = |i: usize| match shrunk {
+        Some((at, width)) if at == i => width,
         _ => f32::MAX,
     };
     for (i, value) in values.iter().enumerate() {
@@ -248,6 +246,21 @@ fn draw_values(
         }
         x += gap;
     }
+}
+
+/// When values of `widths` (with `gap`s between them) do not fit `room`:
+/// the longest text (`texts`) and the width it may take, so short ones
+/// (the page, the time) stay whole. A pixel of slack for rounding: parts
+/// are placed by their own width.
+fn shrink(widths: &[f32], texts: &[bool], gap: f32, room: f32) -> Option<(usize, f32)> {
+    let total = widths.iter().sum::<f32>() + gap * widths.len().saturating_sub(1) as f32;
+    if total <= room + 1.0 {
+        return None;
+    }
+    let longest = (0..widths.len())
+        .filter(|&i| texts[i])
+        .max_by(|&a, &b| widths[a].total_cmp(&widths[b]))?;
+    Some((longest, (widths[longest] - (total - room)).max(0.0)))
 }
 
 /// A battery outline filled to `percent`; a plus when charging.
@@ -290,5 +303,27 @@ fn draw_battery(
         let ink = if percent > 50 { Color::WHITE } else { color };
         canvas.fill_rect(cx - s / 2, cy - bar / 2, s as u32, bar as u32, ink);
         canvas.fill_rect(cx - bar / 2, cy - s / 2, bar as u32, s as u32, ink);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_lines_too_long_give_way() {
+        // Battery and time placed by their own width: rounding noise is
+        // no reason to cut the time.
+        let widths = [60.0, 70.1];
+        let room = 70.1 + 60.0 + 20.0 - 0.000_01;
+        assert_eq!(shrink(&widths, &[false, true], 20.0, room), None);
+        // Too long: the longest text gives way, the page stays whole.
+        let widths = [300.0, 80.0];
+        assert_eq!(
+            shrink(&widths, &[true, true], 20.0, 250.0),
+            Some((0, 150.0))
+        );
+        // Nothing to shorten without text.
+        assert_eq!(shrink(&[100.0], &[false], 0.0, 50.0), None);
     }
 }
