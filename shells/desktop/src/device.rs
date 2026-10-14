@@ -41,7 +41,6 @@ impl Device {
             let mut builder = Kernel::builder(profile.device)
                 .storage(storage)
                 .glyph_cache(profile.glyph_cache)
-                .plugin(quireink_plugin_fonts_default::DefaultFonts)
                 .plugin(quireink_plugin_format_txt::TxtFormat)
                 .plugin(quireink_plugin_format_epub::EpubFormat)
                 .plugin(quireink_plugin_reader::Reader)
@@ -50,6 +49,11 @@ impl Device {
                 .plugin(quireink_plugin_menu::Menu)
                 .plugin(quireink_plugin_settings::SettingsPlugin)
                 .plugin(quireink_plugin_diagnostics::Diagnostics);
+            builder = if profile.font_packs {
+                builder.plugin(quireink_plugin_fonts_default::DefaultFontPacks)
+            } else {
+                builder.plugin(quireink_plugin_fonts_default::DefaultFonts)
+            };
             for (id, value) in profile.settings {
                 builder = builder.setting_default(id, value);
             }

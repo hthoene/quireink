@@ -17,10 +17,11 @@ pub struct Profile {
     pub buttons: &'static [&'static str],
     /// Heap available to the kernel and plugins, if limited.
     pub heap_budget: Option<usize>,
-    /// Memory for runtime-rasterized glyphs. The emulator always renders
-    /// fonts at runtime; small devices use bitmap packs that need no cache,
-    /// so their profiles keep it small to stay comparable.
+    /// Memory for runtime-rasterized glyphs.
     pub glyph_cache: usize,
+    /// Use bitmap font packs read in place, like small devices without
+    /// runtime font rendering; otherwise scalable fonts.
+    pub font_packs: bool,
     /// Device-specific setting defaults, as `(id, value)`.
     pub settings: &'static [(&'static str, &'static str)],
     /// One-line description for `--list-profiles`.
@@ -60,7 +61,8 @@ pub const PROFILES: &[Profile] = &[
         ],
         // Unverified: ESP32-C3 SRAM left after firmware, stacks and drivers.
         heap_budget: Some(192 * KIB),
-        glyph_cache: 16 * KIB,
+        glyph_cache: 0,
+        font_packs: true,
         settings: &[],
         summary: "ESP32-C3, 4.3\" 800x480, buttons only, 192 KiB heap budget",
     },
@@ -85,6 +87,7 @@ pub const PROFILES: &[Profile] = &[
         buttons: &[buttons::PAGE_BACK, buttons::PAGE_FORWARD, buttons::POWER],
         heap_budget: None,
         glyph_cache: 256 * KIB,
+        font_packs: false,
         settings: &[],
         summary: "Android, 7\" Carta 1300 1264x1680, touch + page buttons",
     },
@@ -112,6 +115,7 @@ pub const PROFILES: &[Profile] = &[
         buttons: &[buttons::PAGE_BACK, buttons::PAGE_FORWARD, buttons::POWER],
         heap_budget: None,
         glyph_cache: 256 * KIB,
+        font_packs: false,
         settings: &[],
         summary: "Linux, 7\" Kaleido 3 colour 1264x1680, touch + page buttons",
     },
@@ -136,6 +140,7 @@ pub const PROFILES: &[Profile] = &[
         buttons: &[buttons::POWER],
         heap_budget: None,
         glyph_cache: 256 * KIB,
+        font_packs: false,
         settings: &[],
         summary: "Linux, 6.8\" 1236x1648, touch only",
     },
@@ -160,6 +165,7 @@ pub const PROFILES: &[Profile] = &[
         buttons: &[buttons::POWER],
         heap_budget: None,
         glyph_cache: 256 * KIB,
+        font_packs: false,
         settings: &[],
         summary: "Linux, 6\" 1072x1448, touch only",
     },
@@ -184,6 +190,7 @@ pub const PROFILES: &[Profile] = &[
         buttons: &[buttons::PAGE_BACK, buttons::PAGE_FORWARD, buttons::POWER],
         heap_budget: None,
         glyph_cache: 64 * KIB,
+        font_packs: false,
         // Only two buttons: everything works with forward and back.
         settings: &[("core.keymap-preset", "core.two-buttons")],
         summary: "Generic 6\" 600x800, only page buttons (also: Bluetooth page turners)",

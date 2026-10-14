@@ -1,4 +1,5 @@
-//! Generates bitmap font packs when the `outline` feature is disabled.
+//! Generates bitmap font packs when the `packs` feature is enabled or the
+//! `outline` feature is disabled.
 
 use std::path::{Path, PathBuf};
 
@@ -14,7 +15,9 @@ fn main() {
     println!("cargo::rerun-if-changed=build.rs");
     println!("cargo::rerun-if-changed=fonts");
     println!("cargo::rerun-if-env-changed=QUIREINK_FONT_SIZES");
-    if std::env::var_os("CARGO_FEATURE_OUTLINE").is_some() {
+    if std::env::var_os("CARGO_FEATURE_OUTLINE").is_some()
+        && std::env::var_os("CARGO_FEATURE_PACKS").is_none()
+    {
         return;
     }
 

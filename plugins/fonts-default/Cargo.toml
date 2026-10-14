@@ -19,6 +19,8 @@ default = ["outline"]
 # build time (for devices like the ESP32-C3); sizes can be chosen with the
 # QUIREINK_FONT_SIZES environment variable, e.g. "20,24,28,32".
 outline = ["quireink-sdk/outline"]
+# Also ship bitmap packs next to the scalable fonts (DefaultFontPacks).
+packs = []
 
 [dependencies]
 quireink-sdk.workspace = true

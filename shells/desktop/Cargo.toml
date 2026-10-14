@@ -25,7 +25,7 @@ quireink-plugin-home.workspace = true
 quireink-plugin-menu.workspace = true
 quireink-plugin-settings.workspace = true
 quireink-plugin-reader.workspace = true
-quireink-plugin-fonts-default = { workspace = true, features = ["outline"] }
+quireink-plugin-fonts-default = { workspace = true, features = ["outline", "packs"] }
 png = "0.17"
 softbuffer = "0.4"
 # Without client-side decorations on Wayland: they pull in the unmaintained
