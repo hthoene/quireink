@@ -1165,6 +1165,7 @@ dependencies = [
  "quireink-plugin-format-epub",
  "quireink-plugin-format-txt",
  "quireink-plugin-home",
+ "quireink-plugin-hyphenation",
  "quireink-plugin-menu",
  "quireink-plugin-reader",
  "quireink-plugin-settings",
@@ -1227,6 +1228,10 @@ version = "0.1.0"
 dependencies = [
  "quireink-platform",
 ]
+
+[[package]]
+name = "quireink-hyphen"
+version = "0.1.0"
 
 [[package]]
 name = "quireink-i18n"
@@ -1298,6 +1303,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "quireink-plugin-hyphenation"
+version = "0.1.0"
+dependencies = [
+ "quireink-hyphen",
+ "quireink-i18n",
+ "quireink-sdk",
+]
+
+[[package]]
 name = "quireink-plugin-menu"
 version = "0.1.0"
 dependencies = [
@@ -1328,6 +1342,7 @@ dependencies = [
  "quireink-config",
  "quireink-document",
  "quireink-graphics",
+ "quireink-hyphen",
  "quireink-i18n",
  "quireink-layout",
  "quireink-platform",

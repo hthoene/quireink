@@ -26,6 +26,9 @@ allow = [
     # Fonts only (plugins/fonts-default): the SIL Open Font License permits
     # bundling fonts with software under any license.
     "OFL-1.1",
+    # Hyphenation patterns only (plugins/hyphenation): the FSF all-permissive
+    # license of the American English patterns.
+    "FSFAP",
 ]
 confidence-threshold = 0.9
 unused-allowed-license = "allow"

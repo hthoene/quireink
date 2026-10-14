@@ -5,6 +5,7 @@ use quireink_platform::{DeviceInfo, Instant, Storage};
 
 use crate::fonts::Fonts;
 use crate::formats::Formats;
+use crate::hyphenation::Hyphenation;
 use crate::menus::Menus;
 use crate::settings::Settings;
 
@@ -19,6 +20,8 @@ pub struct Env<'a> {
     pub i18n: &'a Translator,
     pub fonts: &'a Fonts,
     pub formats: &'a Formats,
+    /// Hyphenation patterns by language.
+    pub hyphenation: &'a Hyphenation,
     pub menus: &'a Menus,
     /// The device's storage. Plugins keep their own files below
     /// [`Env::plugin_dir`].

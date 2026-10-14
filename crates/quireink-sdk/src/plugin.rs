@@ -5,6 +5,7 @@ use crate::action::ActionSpec;
 use crate::event::EventHandler;
 use crate::fonts::FontSpec;
 use crate::formats::FormatSpec;
+use crate::hyphenation::HyphenationSpec;
 use crate::id::Id;
 use crate::menus::MenuEntry;
 use crate::screen::ScreenSpec;
@@ -106,6 +107,9 @@ pub trait Registrar {
 
     /// Adds a file format.
     fn add_format(&mut self, format: FormatSpec) -> Result<(), RegisterError>;
+
+    /// Adds hyphenation patterns for a language.
+    fn add_hyphenation(&mut self, spec: HyphenationSpec) -> Result<(), RegisterError>;
 
     /// Subscribes to an event, e.g.
     /// [`builtin::events::STARTED`](crate::builtin::events::STARTED) or one

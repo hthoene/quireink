@@ -28,7 +28,7 @@ pub use bitmap::{BitmapFont, PackBuilder};
 pub use cache::GlyphCache;
 pub use font::{Font, FontError, LineMetrics};
 pub use glyph::{Glyph, GlyphRef};
-pub use layout::{Line, wrap, wrap_lines};
+pub use layout::{Hyphenate, Line, wrap, wrap_lines, wrap_lines_hyphenated};
 #[cfg(feature = "outline")]
 pub use outline::OutlineFont;
 

@@ -8,13 +8,20 @@ use core::ops::Range;
 pub struct Line {
     /// Byte range of the line's text, without the whitespace it broke at.
     pub range: Range<usize>,
-    /// Width of the text in `range`.
+    /// Width of the text in `range`, plus the hyphen if `hyphen` is set.
     pub width: f32,
     /// Number of spaces inside `range` (for justification).
     pub spaces: usize,
     /// Whether the line ends its paragraph (or a forced break).
     pub last: bool,
+    /// Whether the line ends inside a hyphenated word: draw a hyphen
+    /// after the text.
+    pub hyphen: bool,
 }
+
+/// Finds hyphenation points: calls the second argument with the byte
+/// offset of every position where the word (letters only) may be broken.
+pub type Hyphenate<'a> = &'a dyn Fn(&str, &mut dyn FnMut(usize));
 
 /// Greedy line breaking in a single pass over `text`.
 ///
@@ -27,10 +34,26 @@ pub fn wrap_lines(
     width: impl Fn(usize) -> f32,
     advance: impl Fn(char) -> f32,
 ) -> Vec<Line> {
+    wrap_lines_hyphenated(text, width, advance, None)
+}
+
+/// Like [`wrap_lines`], but a word that does not fit at the end of a line
+/// is hyphenated where `hyphenate` allows, as far as it fits.
+///
+/// Lines only depend on the text from their start, so laying out from the
+/// start of any line gives the same lines as laying out the whole text.
+pub fn wrap_lines_hyphenated(
+    text: &str,
+    width: impl Fn(usize) -> f32,
+    advance: impl Fn(char) -> f32,
+    hyphenate: Option<Hyphenate<'_>>,
+) -> Vec<Line> {
     let mut lines = Vec::new();
     let mut line_start = 0;
     let mut line_width = 0.0f32;
     let mut spaces = 0usize;
+    // Where the word being read began.
+    let mut word_start = 0;
     // Last break opportunity: (end of line text, start of next line, width, spaces).
     let mut last_break: Option<(usize, usize, f32, usize)> = None;
     let mut chars = text.char_indices().peekable();
@@ -39,32 +62,56 @@ pub fn wrap_lines(
         if c == '\n' {
             push(&mut lines, text, line_start..i, line_width, spaces, true);
             line_start = i + 1;
+            word_start = line_start;
             (line_width, spaces, last_break) = (0.0, 0, None);
             continue;
         }
         if c == ' ' && i == line_start {
             // Spaces at the start of a continuation line are dropped.
             line_start = i + 1;
+            word_start = line_start;
             continue;
         }
         let w = advance(c);
         let available = width(lines.len());
         if c != ' ' && line_width + w > available && i > line_start {
-            // Break at the last opportunity, or inside the word if none.
-            let (end, next, end_width, end_spaces) =
-                last_break.unwrap_or((i, i, line_width, spaces));
-            push(
-                &mut lines,
-                text,
-                line_start..end,
-                end_width,
-                end_spaces,
-                false,
-            );
-            line_start = next;
-            // Re-measure what moved to the new line.
-            line_width = text[next..i].chars().map(&advance).sum();
-            spaces = text[next..i].matches(' ').count();
+            let measure = |range: Range<usize>| -> f32 { text[range].chars().map(&advance).sum() };
+            let before = line_width - measure(word_start..i);
+            let hyphenated = hyphenate.and_then(|hyphenate| {
+                hyphen_break(
+                    text, word_start, line_start, before, available, &measure, &advance, hyphenate,
+                )
+            });
+            if let Some((cut, cut_width)) = hyphenated {
+                lines.push(Line {
+                    range: line_start..cut,
+                    width: cut_width,
+                    spaces,
+                    last: false,
+                    hyphen: true,
+                });
+                line_start = cut;
+                word_start = cut;
+                line_width = measure(cut..i);
+                spaces = 0;
+            } else {
+                // Break at the last opportunity, or inside the word if none.
+                let (end, next, end_width, end_spaces) =
+                    last_break.unwrap_or((i, i, line_width, spaces));
+                push(
+                    &mut lines,
+                    text,
+                    line_start..end,
+                    end_width,
+                    end_spaces,
+                    false,
+                );
+                line_start = next;
+                word_start = word_start.max(next);
+                // Re-measure what moved to the new line.
+                line_width = measure(next..i);
+                spaces = text[next..i].matches(' ').count();
+            }
             last_break = None;
         }
         line_width += w;
@@ -77,11 +124,13 @@ pub fn wrap_lines(
                 let end_spaces = spaces.saturating_sub(trailing);
                 last_break = Some((end, i + 1, end_width, end_spaces));
                 spaces += 1;
+                word_start = i + 1;
             }
             '-' | '\u{2010}' | '\u{2013}' | '\u{2014}' => {
                 let end = i + c.len_utf8();
                 if chars.peek().is_some_and(|(_, n)| *n != ' ') {
                     last_break = Some((end, end, line_width, spaces));
+                    word_start = end;
                 }
             }
             _ => {}
@@ -100,6 +149,45 @@ pub fn wrap_lines(
     lines
 }
 
+/// The last hyphenation point of the word at `word_start` that fits on the
+/// line: `(byte offset, line width with the hyphen)`. Only words made of
+/// letters are hyphenated; punctuation around them stays attached.
+#[allow(clippy::too_many_arguments)]
+fn hyphen_break(
+    text: &str,
+    word_start: usize,
+    line_start: usize,
+    before: f32,
+    available: f32,
+    measure: &dyn Fn(Range<usize>) -> f32,
+    advance: &dyn Fn(char) -> f32,
+    hyphenate: Hyphenate<'_>,
+) -> Option<(usize, f32)> {
+    let end = text[word_start..]
+        .find([' ', '\n'])
+        .map_or(text.len(), |k| word_start + k);
+    let word = &text[word_start..end];
+    let first = word.find(char::is_alphabetic)?;
+    let (last, c) = word.char_indices().rev().find(|(_, c)| c.is_alphabetic())?;
+    let core = &word[first..last + c.len_utf8()];
+    if !core.chars().all(char::is_alphabetic) {
+        return None;
+    }
+    let hyphen = advance('-');
+    let mut best = None;
+    hyphenate(core, &mut |at| {
+        let cut = word_start + first + at;
+        if cut <= line_start {
+            return;
+        }
+        let width = before + measure(word_start..cut) + hyphen;
+        if width <= available {
+            best = Some((cut, width));
+        }
+    });
+    best
+}
+
 fn push(
     lines: &mut Vec<Line>,
     text: &str,
@@ -115,6 +203,7 @@ fn push(
         width,
         spaces: spaces.saturating_sub(removed),
         last,
+        hyphen: false,
     });
 }
 
@@ -185,6 +274,54 @@ mod tests {
             .map(|l| (&text[l.range.clone()], l.width, l.spaces, l.last))
             .collect();
         assert_eq!(got, vec![("aa bb", 5.0, 1, false), ("cc dd", 5.0, 1, true)]);
+    }
+
+    #[test]
+    fn hyphenates_words_that_do_not_fit() {
+        // Every word may be broken after its third and sixth letter.
+        let hyphenate = |word: &str, out: &mut dyn FnMut(usize)| {
+            for at in [3, 6] {
+                if at < word.len() {
+                    out(at);
+                }
+            }
+        };
+        let text = "ab abcdefghi, xy";
+        let result = wrap_lines_hyphenated(text, |_| 9.0, |_| 1.0, Some(&hyphenate));
+        let got: Vec<(&str, f32, bool)> = result
+            .iter()
+            .map(|l| (&text[l.range.clone()], l.width, l.hyphen))
+            .collect();
+        // "ab abc-" fits 9 units with the hyphen, "ab abcdef-" would not.
+        assert_eq!(
+            got,
+            vec![
+                ("ab abc", 7.0, true),
+                ("defghi,", 7.0, false),
+                ("xy", 2.0, false)
+            ]
+        );
+        // Without hyphenation the word moves to the next line.
+        assert_eq!(lines(text, 9.0), vec!["ab", "abcdefghi", ", xy"]);
+    }
+
+    #[test]
+    fn hyphenation_is_stable_from_any_line_start() {
+        let hyphenate = |word: &str, out: &mut dyn FnMut(usize)| {
+            for at in (2..word.len().saturating_sub(1)).step_by(2) {
+                out(at);
+            }
+        };
+        let text = "Lorem ipsum dolor sitametconsectetur adipiscing elit sed doeiusmod";
+        let all = wrap_lines_hyphenated(text, |_| 12.0, |_| 1.0, Some(&hyphenate));
+        for line in &all[1..] {
+            let from = line.range.start;
+            let rest = wrap_lines_hyphenated(&text[from..], |_| 12.0, |_| 1.0, Some(&hyphenate));
+            assert_eq!(
+                text[from + rest[0].range.start..from + rest[0].range.end],
+                text[line.range.clone()]
+            );
+        }
     }
 
     #[test]

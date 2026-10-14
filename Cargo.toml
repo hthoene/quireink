@@ -8,6 +8,7 @@ members = [
     "crates/quireink-text",
     "crates/quireink-document",
     "crates/quireink-layout",
+    "crates/quireink-hyphen",
     "crates/quireink-zip",
     "crates/quireink-xml",
     "crates/quireink-sdk",
@@ -23,6 +24,7 @@ members = [
     "plugins/menu",
     "plugins/settings",
     "plugins/home",
+    "plugins/hyphenation",
     "shells/desktop",
     "shells/android",
     "tools/fontgen",
@@ -49,10 +51,12 @@ quireink-xml = { path = "crates/quireink-xml", version = "0.1.0" }
 quireink-layout = { path = "crates/quireink-layout", version = "0.1.0" }
 quireink-sdk = { path = "crates/quireink-sdk", version = "0.1.0" }
 quireink-core = { path = "crates/quireink-core", version = "0.1.0" }
+quireink-hyphen = { path = "crates/quireink-hyphen", version = "0.1.0" }
 quireink-app = { path = "crates/quireink-app", version = "0.1.0" }
 quireink-fs = { path = "crates/quireink-fs", version = "0.1.0" }
 quireink-plugin-diagnostics = { path = "plugins/diagnostics", version = "0.1.0" }
 quireink-plugin-menu = { path = "plugins/menu", version = "0.1.0" }
+quireink-plugin-hyphenation = { path = "plugins/hyphenation", version = "0.1.0" }
 quireink-plugin-home = { path = "plugins/home", version = "0.1.0" }
 quireink-plugin-settings = { path = "plugins/settings", version = "0.1.0" }
 quireink-plugin-files = { path = "plugins/files", version = "0.1.0" }

@@ -37,6 +37,7 @@ mod event;
 mod fonts;
 mod formats;
 mod gesture;
+mod hyphenation;
 mod id;
 mod memory_storage;
 mod menus;
@@ -54,6 +55,7 @@ pub use event::EventHandler;
 pub use fonts::{FontHandle, FontSpec, Fonts};
 pub use formats::{FormatOpener, FormatSpec, Formats};
 pub use gesture::{Direction, Gesture, GestureKind};
+pub use hyphenation::{Hyphenation, HyphenationSpec};
 pub use id::{Id, InvalidId};
 pub use memory_storage::{MemoryStorage, read_file};
 pub use menus::{MenuEntry, MenuItem, Menus};
@@ -90,6 +92,11 @@ pub mod layout {
 /// Streaming XML/XHTML tokenizer (see `quireink-xml`) for format plugins.
 pub mod xml {
     pub use quireink_xml::*;
+}
+
+/// Hyphenation with compiled patterns (see `quireink-hyphen`).
+pub mod hyphen {
+    pub use quireink_hyphen::*;
 }
 
 /// Streaming ZIP reader (see `quireink-zip`) for ZIP-based formats.

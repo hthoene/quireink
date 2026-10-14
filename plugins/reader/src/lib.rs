@@ -55,6 +55,8 @@ pub mod settings {
     pub const INDENT: Id = Id::new_static("reader.indent");
     /// Reopen the last book at start-up.
     pub const OPEN_LAST: Id = Id::new_static("reader.open-last");
+    /// Hyphenate words at line ends, in the book's language.
+    pub const HYPHENATE: Id = Id::new_static("reader.hyphenate");
 }
 
 /// The reader's menu (`core.menu` on the reader screen). Any plugin can
@@ -127,6 +129,7 @@ impl Plugin for Reader {
             ),
             int(settings::MARGIN, "reader.setting.margin", 0, 30, 4),
             flag(settings::JUSTIFY, "reader.setting.justify", true),
+            flag(settings::HYPHENATE, "reader.setting.hyphenate", true),
             flag(settings::INDENT, "reader.setting.indent", true),
             flag(settings::OPEN_LAST, "reader.setting.open-last", true),
         ] {

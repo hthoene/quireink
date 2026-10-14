@@ -44,7 +44,7 @@ jobs:
         run: >
           cargo build --release --target ${{ matrix.target }}
           -p quireink-core -p quireink-plugin-diagnostics
-          -p quireink-plugin-format-txt -p quireink-plugin-format-epub
+          -p quireink-plugin-format-txt -p quireink-plugin-format-epub -p quireink-plugin-hyphenation
           -p quireink-plugin-reader -p quireink-plugin-files
           -p quireink-plugin-fonts-default --no-default-features
 

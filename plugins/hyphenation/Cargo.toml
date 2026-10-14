@@ -1,0 +1,26 @@
+[package]
+name = "quireink-plugin-hyphenation"
+description = "QuireInk hyphenation patterns for German and English"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+# The code is Apache-2.0; the patterns are under MIT (German) and the FSF
+# all-permissive license (English), see patterns/README.md.
+license = "Apache-2.0 AND MIT AND FSFAP"
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+categories = ["no-std", "text-processing"]
+include = ["src", "patterns", "i18n", "build.rs"]
+
+[dependencies]
+quireink-sdk.workspace = true
+
+[build-dependencies]
+quireink-hyphen.workspace = true
+
+[dev-dependencies]
+quireink-i18n.workspace = true
+
+[lints]
+workspace = true

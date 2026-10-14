@@ -7,8 +7,8 @@ use alloc::vec::Vec;
 use quireink_i18n::Catalog;
 use quireink_sdk::collections::VecMap;
 use quireink_sdk::{
-    ActionSpec, EventHandler, FontSpec, FormatSpec, Id, MenuEntry, Priority, RegisterError,
-    Registrar, ScreenSpec, SettingSpec, SlotSpec,
+    ActionSpec, EventHandler, FontSpec, FormatSpec, HyphenationSpec, Id, MenuEntry, Priority,
+    RegisterError, Registrar, ScreenSpec, SettingSpec, SlotSpec,
 };
 
 /// A candidate screen for a slot, proposed by a plugin.
@@ -80,6 +80,7 @@ pub(crate) struct Staging {
     pub(crate) fonts: Vec<FontSpec>,
     pub(crate) font_roles: Vec<(Id, Id, Priority)>,
     pub(crate) formats: Vec<FormatSpec>,
+    pub(crate) hyphenation: Vec<HyphenationSpec>,
     pub(crate) subscriptions: Vec<(Id, EventHandler)>,
     pub(crate) menu_entries: Vec<MenuEntry>,
     pub(crate) keymap_presets: Vec<(Id, Cow<'static, str>)>,
@@ -212,6 +213,16 @@ impl Registrar for PluginRegistrar<'_> {
         self.check_namespace(&format.id)?;
         Self::check_unique(self.staging.formats.iter().map(|f| &f.id), &format.id)?;
         self.staging.formats.push(format);
+        Ok(())
+    }
+
+    fn add_hyphenation(&mut self, spec: HyphenationSpec) -> Result<(), RegisterError> {
+        self.check_namespace(&spec.id)?;
+        Self::check_unique(self.staging.hyphenation.iter().map(|h| &h.id), &spec.id)?;
+        quireink_sdk::hyphen::Patterns::new(spec.patterns).map_err(|e| RegisterError::Invalid {
+            message: Cow::Owned(alloc::format!("{}: {e}", spec.id)),
+        })?;
+        self.staging.hyphenation.push(spec);
         Ok(())
     }
 

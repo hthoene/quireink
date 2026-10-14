@@ -17,7 +17,8 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use quireink_document::{BlockKind, Document, DocumentError, Locator, Storage};
-use quireink_text::wrap_lines;
+pub use quireink_text::Hyphenate;
+use quireink_text::wrap_lines_hyphenated;
 
 /// Largest extra space per word gap for justification, relative to the
 /// line height.
@@ -68,7 +69,9 @@ impl Page {
 }
 
 /// Lays out the page starting at `start` into a `width`×`height` content
-/// box. `advance` returns the width of a character.
+/// box. `advance` returns the width of a character; with `hyphenate`, words
+/// that do not fit at the end of a line are hyphenated.
+#[allow(clippy::too_many_arguments)]
 pub fn layout_page(
     document: &dyn Document,
     storage: &dyn Storage,
@@ -77,6 +80,7 @@ pub fn layout_page(
     height: f32,
     style: &Style,
     advance: &dyn Fn(char) -> f32,
+    hyphenate: Option<Hyphenate<'_>>,
 ) -> Result<Page, DocumentError> {
     let mut page = Page {
         start,
@@ -117,10 +121,11 @@ pub fn layout_page(
             0.0
         };
         let text = &block.text[from..];
-        let lines = wrap_lines(
+        let lines = wrap_lines_hyphenated(
             text,
             |n| if n == 0 { width - indent } else { width },
             advance,
+            hyphenate,
         );
 
         for (n, line) in lines.iter().enumerate() {
@@ -143,10 +148,14 @@ pub fn layout_page(
             } else {
                 0.0
             };
+            let mut line_text = String::from(&text[line.range.clone()]);
+            if line.hyphen {
+                line_text.push('-');
+            }
             page.lines.push(PageLine {
                 x,
                 baseline: y + style.ascent,
-                text: String::from(&text[line.range.clone()]),
+                text: line_text,
                 word_spacing,
             });
             y += style.line_height;
@@ -233,6 +242,7 @@ mod tests {
             height,
             style,
             &|_| 1.0,
+            None,
         )
         .unwrap()
     }

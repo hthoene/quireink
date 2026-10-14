@@ -5,14 +5,14 @@ use alloc::vec::Vec;
 
 use quireink_sdk::builtin::{actions, events, fonts, params, slots};
 use quireink_sdk::document::{Document, DocumentError, Locator};
-use quireink_sdk::layout::{Page, Style, layout_page};
+use quireink_sdk::layout::{Hyphenate, Page, Style, layout_page};
 use quireink_sdk::{
     Arg, Canvas, Color, Command, Cx, Env, FontHandle, Handled, Id, Params, Rect, RefreshMode,
     Screen,
 };
 
 use crate::index::PageIndex;
-use crate::settings::{FONT_SIZE, INDENT, JUSTIFY, LINE_SPACING, MARGIN};
+use crate::settings::{FONT_SIZE, HYPHENATE, INDENT, JUSTIFY, LINE_SPACING, MARGIN};
 use crate::{PLUGIN, state_path};
 
 /// Pages laid out per background step; small enough to keep input snappy.
@@ -34,12 +34,15 @@ struct Typography {
     height: f32,
     /// Status line below the content.
     status: Rect,
+    /// Language whose hyphenation patterns are used, if hyphenating.
+    hyphenation: Option<String>,
     /// Identifies this layout; part of the page index file name.
     key: String,
 }
 
 impl Typography {
-    fn new(env: &Env<'_>, font: &FontHandle<'_>) -> Self {
+    /// Typography for a book in `language`.
+    fn new(env: &Env<'_>, font: &FontHandle<'_>, language: &str) -> Self {
         let settings = env.settings;
         let m = env.metrics;
         let size = m.pt(settings.int(FONT_SIZE.as_str()) as f32);
@@ -67,13 +70,17 @@ impl Typography {
             width as u16,
             status_height as u16,
         );
+        let hyphenation = (settings.bool(HYPHENATE.as_str())
+            && env.hyphenation.get(language).is_some())
+        .then(|| language.to_string());
         let key = format!(
             "{:016x}",
             fnv(&format!(
-                "{}|{size}|{line_height}|{}|{}|{justify}|{width}x{height}",
+                "{}|{size}|{line_height}|{}|{}|{justify}|{width}x{height}|{}",
                 font.id(),
                 style.indent,
                 style.paragraph_spacing,
+                hyphenation.as_deref().unwrap_or("-"),
             ))
         );
         Self {
@@ -84,6 +91,7 @@ impl Typography {
             width,
             height,
             status,
+            hyphenation,
             key,
         }
     }
@@ -96,6 +104,8 @@ struct Book {
     dir: String,
     title: String,
     document: Box<dyn Document>,
+    /// The book's language, or the UI language if it declares none.
+    language: String,
     typography: Typography,
     page: Page,
     history: Vec<Locator>,
@@ -130,7 +140,12 @@ impl Book {
             .fonts
             .role(fonts::READING.as_str())
             .ok_or_else(|| env.i18n.tr("reader.no-font").to_string())?;
-        let typography = Typography::new(env, &font);
+        let language = document
+            .metadata()
+            .language
+            .clone()
+            .unwrap_or_else(|| env.i18n.language().to_string());
+        let typography = Typography::new(env, &font, &language);
         let dir = format!(
             "{}/books/{:016x}",
             Env::plugin_dir(PLUGIN.as_str()),
@@ -151,6 +166,7 @@ impl Book {
             dir,
             title,
             document,
+            language,
             typography,
         };
         let start = book.saved_position(env).unwrap_or(Locator::START);
@@ -187,7 +203,7 @@ impl Book {
         let Some(font) = self.font(env) else {
             return;
         };
-        self.typography = Typography::new(env, &font);
+        self.typography = Typography::new(env, &font, &self.language);
         if let Ok(page) = self.layout(env, self.page.start) {
             self.page = page;
         }
@@ -206,6 +222,15 @@ impl Book {
         };
         let t = &self.typography;
         let advance = |c: char| font.advance(t.size, c);
+        let patterns = t
+            .hyphenation
+            .as_deref()
+            .and_then(|language| env.hyphenation.get(language));
+        let hyphenate = |word: &str, out: &mut dyn FnMut(usize)| {
+            if let Some(patterns) = patterns {
+                patterns.hyphenate(word, out);
+            }
+        };
         layout_page(
             self.document.as_ref(),
             env.storage,
@@ -214,6 +239,7 @@ impl Book {
             t.height,
             &t.style,
             &advance,
+            patterns.is_some().then_some(&hyphenate as Hyphenate<'_>),
         )
     }
 

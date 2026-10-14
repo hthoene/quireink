@@ -64,8 +64,8 @@ use quireink_sdk::builtin::{
     settings as core_settings, slots,
 };
 use quireink_sdk::{
-    Command, Cx, Env, EventHandler, Fonts, Formats, GestureKind, Handled, Id, Manifest, Menus,
-    Metrics, Output, Params, Plugin, RegisterError, SDK_VERSION, Screen, Settings,
+    Command, Cx, Env, EventHandler, Fonts, Formats, GestureKind, Handled, Hyphenation, Id,
+    Manifest, Menus, Metrics, Output, Params, Plugin, RegisterError, SDK_VERSION, Screen, Settings,
 };
 
 use crate::core_plugin::{CORE, CorePlugin};
@@ -256,6 +256,7 @@ impl KernelBuilder {
                 translator: Translator::new(),
                 fonts: Fonts::new(self.glyph_cache),
                 formats: Formats::new(),
+                hyphenation: Hyphenation::new(),
                 menus: Menus::new(),
                 storage: self.storage.unwrap_or_else(|| Box::new(NoStorage)),
             },
@@ -470,6 +471,7 @@ impl Kernel {
         shared.menus.shrink_to_fit();
         shared.fonts.shrink_to_fit();
         shared.formats.shrink_to_fit();
+        shared.hyphenation.shrink_to_fit();
         shared.translator.shrink_to_fit();
     }
 
@@ -607,6 +609,15 @@ impl Kernel {
                 id: format.id.clone(),
             });
         }
+        if let Some(spec) = staging
+            .hyphenation
+            .iter()
+            .find(|h| self.shared.hyphenation.contains(h.id.as_str()))
+        {
+            return Err(RegisterError::Duplicate {
+                id: spec.id.clone(),
+            });
+        }
         staging.merge_into(&mut self.registry)?;
         for setting in staging.settings.drain(..) {
             // Cannot fail: checked above.
@@ -631,6 +642,10 @@ impl Kernel {
         for format in staging.formats.drain(..) {
             // Cannot fail: checked above.
             let _ = self.shared.formats.add(format);
+        }
+        for spec in staging.hyphenation.drain(..) {
+            // Cannot fail: checked above and by the registrar.
+            let _ = self.shared.hyphenation.add(spec);
         }
         self.subscriptions.append(&mut staging.subscriptions);
         for entry in staging.menu_entries.drain(..) {
@@ -1186,6 +1201,7 @@ struct Shared {
     translator: Translator,
     fonts: Fonts,
     formats: Formats,
+    hyphenation: Hyphenation,
     menus: Menus,
     storage: Box<dyn Storage>,
 }
@@ -1200,6 +1216,7 @@ impl Shared {
             i18n: &self.translator,
             fonts: &self.fonts,
             formats: &self.formats,
+            hyphenation: &self.hyphenation,
             menus: &self.menus,
             storage: self.storage.as_ref(),
         }
