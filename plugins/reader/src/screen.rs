@@ -1204,6 +1204,11 @@ impl Screen for ReaderScreen {
 
     fn on_show(&mut self, cx: &mut Cx<'_, '_>) {
         if let Ok(book) = &self.book {
+            // The book's own settings ("Only this book") while it is open.
+            cx.command(Command::SetScope(Some(format!(
+                "{}/settings.ini",
+                book.dir
+            ))));
             cx.command(Command::Emit(events::BOOK_OPENED, book.event_params()));
             let now = cx.env().now;
             cx.wake_at(now);

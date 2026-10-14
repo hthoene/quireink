@@ -99,6 +99,8 @@ pub struct SettingSpec {
     /// A screen that edits the value, opened with the parameter `id` (the
     /// setting's id), e.g. a folder chooser for a path.
     pub editor: Option<Id>,
+    /// May differ per scope, e.g. per book (see [`Settings::scope`]).
+    pub scoped: bool,
 }
 
 impl SettingSpec {
@@ -120,7 +122,14 @@ impl SettingSpec {
             description: None,
             unit: None,
             editor: None,
+            scoped: false,
         }
+    }
+
+    /// May be set per scope, e.g. for one book only.
+    pub fn scoped(mut self) -> Self {
+        self.scoped = true;
+        self
     }
 
     pub fn group(mut self, group: Id) -> Self {
@@ -202,6 +211,8 @@ pub struct Settings {
     order: Vec<Id>,
     /// Groups by order.
     groups: Vec<SettingGroupSpec>,
+    /// The values of the active scope (e.g. the open book), if any.
+    scope: Option<VecMap<Id, SettingValue>>,
 }
 
 impl Settings {
@@ -293,11 +304,90 @@ impl Settings {
         Ok(())
     }
 
-    /// The current value, or the default if none was set.
+    /// The current value: the active scope's if it sets one (see
+    /// [`Settings::scope`]), else the global value, else the default.
     pub fn get(&self, id: &str) -> Option<&SettingValue> {
+        self.scoped_value(id).or_else(|| self.global(id))
+    }
+
+    /// The value outside any scope, or the default if none was set.
+    pub fn global(&self, id: &str) -> Option<&SettingValue> {
         self.values
             .get(id)
             .or_else(|| self.specs.get(id).map(|spec| &spec.default))
+    }
+
+    /// The active scope's value of `id`, if it applies: the setting is
+    /// [`scoped`](SettingSpec::scoped) and the scope is switched on
+    /// ([`SCOPE_ONLY`](crate::builtin::settings::SCOPE_ONLY)).
+    pub fn scoped_value(&self, id: &str) -> Option<&SettingValue> {
+        let scope = self.scope.as_ref()?;
+        let only = crate::builtin::settings::SCOPE_ONLY;
+        if id != only.as_str() && scope.get(only.as_str()) != Some(&SettingValue::Bool(true)) {
+            return None;
+        }
+        self.specs.get(id).filter(|spec| spec.scoped)?;
+        scope.get(id)
+    }
+
+    /// The values of the active scope, e.g. of the book being read: scoped
+    /// settings changed while it is switched on are kept there. `None`
+    /// outside any scope.
+    pub fn scope(&self) -> Option<&VecMap<Id, SettingValue>> {
+        self.scope.as_ref()
+    }
+
+    /// Activates a scope with its values (only valid scoped ones are
+    /// kept), or ends it.
+    pub fn set_scope(&mut self, values: Option<VecMap<Id, SettingValue>>) {
+        self.scope = values.map(|mut values| {
+            let ids: Vec<Id> = values.keys().cloned().collect();
+            for id in ids {
+                let valid = match (self.specs.get(id.as_str()), values.get(id.as_str())) {
+                    (Some(spec), Some(value)) => spec.scoped && spec.kind.accepts(value),
+                    _ => false,
+                };
+                if !valid {
+                    values.remove(id.as_str());
+                }
+            }
+            values
+        });
+    }
+
+    /// Sets a scoped setting in the active scope. Switching the scope off
+    /// ([`SCOPE_ONLY`](crate::builtin::settings::SCOPE_ONLY)) drops its
+    /// values.
+    pub fn set_in_scope(&mut self, id: &str, value: SettingValue) -> Result<(), SettingError> {
+        let spec = self.specs.get(id).ok_or(SettingError::Unknown)?;
+        if !spec.scoped || !spec.kind.accepts(&value) {
+            return Err(SettingError::InvalidValue);
+        }
+        let id = spec.id.clone();
+        let scope = self.scope.as_mut().ok_or(SettingError::Unknown)?;
+        if id == crate::builtin::settings::SCOPE_ONLY && value == SettingValue::Bool(false) {
+            scope.clear();
+            return Ok(());
+        }
+        scope.insert(id, value);
+        Ok(())
+    }
+
+    /// Whether `id` is set in the active scope rather than globally, e.g.
+    /// to mark it in menus.
+    pub fn is_scoped(&self, id: &str) -> bool {
+        id != crate::builtin::settings::SCOPE_ONLY.as_str() && self.scoped_value(id).is_some()
+    }
+
+    /// Whether a change of `id` goes to the active scope.
+    pub fn goes_to_scope(&self, id: &str) -> bool {
+        let Some(scope) = &self.scope else {
+            return false;
+        };
+        let only = crate::builtin::settings::SCOPE_ONLY;
+        let scoped = self.specs.get(id).is_some_and(|spec| spec.scoped);
+        scoped
+            && (id == only.as_str() || scope.get(only.as_str()) == Some(&SettingValue::Bool(true)))
     }
 
     /// The value of a boolean setting; `false` if unknown.
@@ -331,6 +421,63 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scopes_override_scoped_settings_while_switched_on() {
+        use crate::builtin::settings::SCOPE_ONLY;
+        let mut s = Settings::new();
+        let int = |id: &'static str, scoped: bool| {
+            let spec = SettingSpec::new(
+                Id::new_static(id),
+                id,
+                SettingKind::Int { min: 0, max: 99 },
+                SettingValue::Int(10),
+            );
+            if scoped { spec.scoped() } else { spec }
+        };
+        s.define(int("a.size", true)).unwrap();
+        s.define(int("a.other", false)).unwrap();
+        s.define(
+            SettingSpec::new(
+                SCOPE_ONLY,
+                "x",
+                SettingKind::Bool,
+                SettingValue::Bool(false),
+            )
+            .scoped(),
+        )
+        .unwrap();
+        s.set("a.size", SettingValue::Int(12)).unwrap();
+        assert!(!s.goes_to_scope("a.size"));
+
+        // A book with its own size, switched on.
+        let mut values = VecMap::new();
+        values.insert(Id::new_static("a.size"), SettingValue::Int(20));
+        values.insert(Id::new_static("a.other"), SettingValue::Int(30));
+        values.insert(SCOPE_ONLY, SettingValue::Bool(true));
+        s.set_scope(Some(values));
+        assert_eq!(s.int("a.size"), 20);
+        assert!(s.is_scoped("a.size"));
+        // Not scoped: the book cannot change it.
+        assert_eq!(s.int("a.other"), 10);
+        assert!(s.goes_to_scope("a.size") && !s.goes_to_scope("a.other"));
+        s.set_in_scope("a.size", SettingValue::Int(25)).unwrap();
+        assert_eq!(
+            (s.int("a.size"), s.global("a.size")),
+            (25, Some(&SettingValue::Int(12)))
+        );
+
+        // Switched off: the general value again, the book's dropped.
+        s.set_in_scope(SCOPE_ONLY.as_str(), SettingValue::Bool(false))
+            .unwrap();
+        assert_eq!(s.int("a.size"), 12);
+        assert!(s.scope().unwrap().is_empty());
+        // Only the switch goes to the scope now.
+        assert!(!s.goes_to_scope("a.size") && s.goes_to_scope(SCOPE_ONLY.as_str()));
+        s.set_scope(None);
+        assert_eq!(s.int("a.size"), 12);
+        assert!(!s.goes_to_scope(SCOPE_ONLY.as_str()));
+    }
 
     fn settings() -> Settings {
         let mut settings = Settings::new();

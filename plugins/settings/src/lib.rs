@@ -124,6 +124,11 @@ impl Plugin for SettingsPlugin {
 
 /// Whether a setting is shown with the current level.
 fn visible(env: &Env<'_>, spec: &SettingSpec) -> bool {
+    // "Only this book" and the like mean nothing outside a scope.
+    let scope_only = spec.id == quireink_sdk::builtin::settings::SCOPE_ONLY;
+    if scope_only && env.settings.scope().is_none() {
+        return false;
+    }
     spec.level == Level::Basic || env.settings.bool(ADVANCED.as_str())
 }
 

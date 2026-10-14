@@ -796,6 +796,16 @@ pub fn draw_stepper(
 
 /// The value of a setting for display, with its unit.
 pub fn setting_value(env: &Env<'_>, spec: &SettingSpec) -> String {
+    let value = plain_setting_value(env, spec);
+    // Set for the scope (e.g. this book only): marked.
+    if env.settings.is_scoped(spec.id.as_str()) {
+        format!("• {value}")
+    } else {
+        value
+    }
+}
+
+fn plain_setting_value(env: &Env<'_>, spec: &SettingSpec) -> String {
     match env.settings.get(spec.id.as_str()) {
         Some(SettingValue::Bool(true)) => env.i18n.tr("settings.on").to_string(),
         Some(SettingValue::Bool(false)) => env.i18n.tr("settings.off").to_string(),

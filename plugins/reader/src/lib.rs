@@ -220,6 +220,8 @@ impl Plugin for Reader {
             )
             .group(groups::READING)
             .unit(unit)
+            // Each book may have its own.
+            .scoped()
         };
         let flag = |id, key: &'static str, default| {
             SettingSpec::new(id, key, SettingKind::Bool, SettingValue::Bool(default))
@@ -248,17 +250,21 @@ impl Plugin for Reader {
             )
             .description("reader.setting.margin.help"),
             flag(settings::JUSTIFY, "reader.setting.justify", true)
+                .scoped()
                 .description("reader.setting.justify.help"),
             flag(settings::HYPHENATE, "reader.setting.hyphenate", true)
+                .scoped()
                 .description("reader.setting.hyphenate.help"),
             flag(
                 settings::PUBLISHER_STYLES,
                 "reader.setting.publisher-styles",
                 true,
             )
+            .scoped()
             .description("reader.setting.publisher-styles.help"),
             flag(settings::INDENT, "reader.setting.indent", true)
                 .advanced()
+                .scoped()
                 .description("reader.setting.indent.help"),
             flag(settings::OPEN_LAST, "reader.setting.open-last", true)
                 .description("reader.setting.open-last.help"),
@@ -337,6 +343,7 @@ impl Plugin for Reader {
             (MENU, LAYOUT_MENU, 50),
             (MENU, core_settings::NIGHT_MODE, 60),
             (MENU, MORE_MENU, 70),
+            (LAYOUT_MENU, core_settings::SCOPE_ONLY, 1),
             (LAYOUT_MENU, core_settings::READING_FONT, 5),
             (LAYOUT_MENU, settings::FONT_SIZE, 10),
             (LAYOUT_MENU, settings::LINE_SPACING, 20),

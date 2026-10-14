@@ -310,6 +310,7 @@ impl KernelBuilder {
             output: Output::default(),
             warnings: Vec::new(),
             restart: false,
+            scope: None,
             plugin_defaults: Vec::new(),
             now: Instant::default(),
         };
@@ -468,6 +469,8 @@ pub struct Kernel {
     warnings: Vec<Warning>,
     /// A restart was requested (see [`Command::Restart`]).
     restart: bool,
+    /// The active settings scope: its file and the screen that set it.
+    scope: Option<(String, Option<usize>)>,
     /// Setting defaults from plugins, applied once all are registered:
     /// `(plugin, setting, value)`.
     plugin_defaults: Vec<(Id, Id, Cow<'static, str>)>,
@@ -1119,6 +1122,9 @@ impl Kernel {
 
     fn finish(&mut self) -> Effects {
         self.run_commands();
+        // A screen that set a scope may have closed.
+        self.check_scope_owner();
+        self.run_commands();
         if mem::take(&mut self.output.redraw)
             && let Some(top) = self.stack.len().checked_sub(1)
         {
@@ -1225,6 +1231,10 @@ impl Kernel {
                     self.close_above(self.stack.len() - 2);
                 }
             }
+            Command::SetSetting(id, value) if self.shared.settings.goes_to_scope(id.as_str()) => {
+                self.set_in_scope(&id, value);
+            }
+            Command::SetScope(path) => self.set_scope(path),
             Command::SetSetting(id, value) => match self.shared.settings.set(id.as_str(), value) {
                 Ok(()) => {
                     self.persist_setting(&id);
@@ -1382,7 +1392,7 @@ impl Kernel {
     /// Writes a changed setting to the configuration file on the device,
     /// keeping the rest of the file as it is.
     fn persist_setting(&mut self, id: &Id) {
-        let Some(value) = self.shared.settings.get(id.as_str()) else {
+        let Some(value) = self.shared.settings.global(id.as_str()) else {
             return;
         };
         let Some((section, key)) = id.as_str().split_once('.') else {
@@ -1390,6 +1400,122 @@ impl Kernel {
         };
         let value = value.to_config_text();
         self.save_config(section, key, &value);
+    }
+
+    /// The effective values of the scoped settings, to see what a scope
+    /// change changes.
+    fn scoped_values(&self) -> Vec<(Id, Option<quireink_sdk::SettingValue>)> {
+        let settings = &self.shared.settings;
+        settings
+            .specs()
+            .filter(|spec| spec.scoped)
+            .map(|spec| (spec.id.clone(), settings.get(spec.id.as_str()).cloned()))
+            .collect()
+    }
+
+    /// Announces the scoped settings whose value differs from `before`.
+    fn announce_scope_changes(&mut self, before: Vec<(Id, Option<quireink_sdk::SettingValue>)>) {
+        for (id, old) in before {
+            if self.shared.settings.get(id.as_str()) != old.as_ref() {
+                self.setting_changed(&id);
+                self.output.commands.push(Command::Emit(
+                    events::SETTING_CHANGED,
+                    Params::new().with(builtin_params::ID, id.as_str().to_string()),
+                ));
+            }
+        }
+    }
+
+    /// Activates the scope stored at `path` for the top screen, or ends
+    /// the scope (see [`Command::SetScope`]).
+    fn set_scope(&mut self, path: Option<String>) {
+        if path == self.scope.as_ref().map(|(p, _)| p.clone()) {
+            // Same scope (e.g. the reader shown again): keep it.
+            if let Some((_, owner)) = &mut self.scope {
+                *owner = self.stack.last().map(screen_key);
+            }
+            return;
+        }
+        let before = self.scoped_values();
+        let values = path.as_deref().map(|path| {
+            let storage = self.shared.storage.as_ref();
+            let text = quireink_sdk::read_file(storage, path, 16 * 1024)
+                .ok()
+                .and_then(|data| String::from_utf8(data).ok())
+                .unwrap_or_default();
+            let mut values = quireink_sdk::collections::VecMap::new();
+            for entry in quireink_config::parse(&text).filter_map(Result::ok) {
+                let id = format!("{}.{}", entry.section, entry.key);
+                let parsed = self
+                    .shared
+                    .settings
+                    .specs()
+                    .find(|spec| spec.id.as_str() == id)
+                    .and_then(|spec| {
+                        Some((spec.id.clone(), spec.kind.parse(&entry.value.as_str())?))
+                    });
+                if let Some((id, value)) = parsed {
+                    values.insert(id, value);
+                }
+            }
+            values
+        });
+        self.shared.settings.set_scope(values);
+        self.scope = path.map(|path| (path, self.stack.last().map(screen_key)));
+        self.announce_scope_changes(before);
+    }
+
+    /// Changes a setting in the active scope and saves the scope.
+    fn set_in_scope(&mut self, id: &Id, value: quireink_sdk::SettingValue) {
+        let before = self.scoped_values();
+        if let Err(error) = self.shared.settings.set_in_scope(id.as_str(), value) {
+            return self.warn(WarningSource::Runtime, None, format!("`{id}`: {error}"));
+        }
+        self.save_scope();
+        self.announce_scope_changes(before);
+        // The switch itself is not a scoped value others see change.
+        if *id == core_settings::SCOPE_ONLY {
+            self.output.commands.push(Command::Emit(
+                events::SETTING_CHANGED,
+                Params::new().with(builtin_params::ID, id.as_str().to_string()),
+            ));
+        }
+    }
+
+    /// Writes the active scope's values to its file (removed when empty).
+    fn save_scope(&mut self) {
+        let (Some((path, _)), Some(values)) = (&self.scope, self.shared.settings.scope()) else {
+            return;
+        };
+        let storage = self.shared.storage.as_ref();
+        if values.is_empty() {
+            let _ = storage.remove(path);
+            return;
+        }
+        let mut text = String::new();
+        for (id, value) in values.iter() {
+            if let Some((section, key)) = id.as_str().split_once('.') {
+                text = quireink_config::set(&text, section, key, &value.to_config_text());
+            }
+        }
+        if storage.write(path, text.as_bytes()).is_err() {
+            self.warn(
+                WarningSource::Runtime,
+                None,
+                format!("could not save settings to {path}"),
+            );
+        }
+    }
+
+    /// Ends the scope when the screen that set it is gone.
+    fn check_scope_owner(&mut self) {
+        let Some((_, owner)) = &self.scope else {
+            return;
+        };
+        let alive = self.stack.iter().any(|s| Some(screen_key(s)) == *owner);
+        if !alive {
+            self.set_scope(None);
+        }
     }
 
     /// Redefines or resets a menu (see [`Command::SetMenu`]) and saves it.
@@ -1610,4 +1736,10 @@ impl Shared {
 /// Whether this build renders OpenType/TrueType fonts.
 fn quireink_text_outlines() -> bool {
     quireink_sdk::text::OUTLINES
+}
+
+/// Identifies an open screen instance (by its address), e.g. the owner of
+/// a settings scope.
+fn screen_key(screen: &ActiveScreen) -> usize {
+    core::ptr::from_ref::<dyn Screen>(screen.screen.as_ref()).cast::<()>() as usize
 }

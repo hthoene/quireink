@@ -164,6 +164,10 @@ pub mod settings {
     pub const UI_SIZE: Id = Id::new_static("core.ui-size");
     /// The active key map preset (see [`keymap_presets`](super::keymap_presets)).
     pub const KEYMAP_PRESET: Id = Id::new_static("core.keymap-preset");
+    /// Scoped settings changed now apply to the active scope only, e.g.
+    /// the open book ("Only this book"); switching it off returns the
+    /// scope to the global values.
+    pub const SCOPE_ONLY: Id = Id::new_static("core.scope-only");
     /// The font family for reading: [`DEFAULT_FONT`] (the plugins'
     /// choice) or one of the registered families.
     pub const READING_FONT: Id = Id::new_static("core.reading-font");

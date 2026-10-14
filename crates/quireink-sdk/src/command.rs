@@ -29,6 +29,11 @@ pub enum Command {
     /// restart. The kernel refuses plugins that cannot be switched off
     /// (see [`PluginInfo::can_switch_off`](crate::PluginInfo)).
     SetPluginEnabled(Id, bool),
+    /// Uses the settings stored in the file at this storage path for
+    /// [scoped](crate::SettingSpec::scoped) settings, e.g. those of the
+    /// book being read, while the screen that sent it stays open; `None`
+    /// ends the scope.
+    SetScope(Option<alloc::string::String>),
     /// Redefines a menu with exactly these entries (actions, settings or
     /// submenus), saved in `[menus]` of `quireink.ini`; `None` returns to
     /// the entries plugins contribute.

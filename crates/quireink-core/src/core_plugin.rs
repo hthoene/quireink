@@ -252,7 +252,19 @@ impl Plugin for CorePlugin {
                 SettingValue::Text(Cow::Borrowed(settings::DEFAULT_FONT)),
             )
             .group(groups::READING)
+            .scoped()
             .description("core.setting.reading-font.help"),
+        )?;
+        r.add_setting(
+            SettingSpec::new(
+                settings::SCOPE_ONLY,
+                "core.setting.scope-only",
+                SettingKind::Bool,
+                SettingValue::Bool(false),
+            )
+            .group(groups::READING)
+            .scoped()
+            .description("core.setting.scope-only.help"),
         )?;
         // The time of day and the battery, for status lines.
         r.add_setting(
