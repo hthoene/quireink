@@ -132,11 +132,13 @@ impl AndroidPlugin {
             Box::new(
                 move |env: &Env<'_>, params: &Params, _: &mut Vec<Command>| {
                     let id = params.get(params::ID).unwrap_or_default();
-                    let level = || env.settings.int(id) as i32;
-                    if id == FRONTLIGHT.as_str() {
-                        lights.set_brightness(&app, level());
-                    } else if id == WARMTH.as_str() {
-                        lights.set_warmth(&app, level());
+                    let level = env.settings.int(id) as i32;
+                    // Only real changes reach the device: taking over its
+                    // own levels on start never writes back.
+                    if id == FRONTLIGHT.as_str() && lights.brightness(&app) != level {
+                        lights.set_brightness(&app, level);
+                    } else if id == WARMTH.as_str() && lights.warmth(&app) != level {
+                        lights.set_warmth(&app, level);
                     }
                 },
             ),
