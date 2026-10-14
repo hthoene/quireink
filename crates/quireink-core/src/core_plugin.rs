@@ -146,11 +146,11 @@ impl Plugin for CorePlugin {
             (actions::HOME, 10),
             (actions::LIBRARY, 20),
             (actions::SETTINGS, 30),
-            (actions::TOGGLE_NIGHT_MODE, 40),
+            (settings::NIGHT_MODE, 40),
         ] {
             r.add_menu_entry(MenuEntry {
                 menu: menus::MAIN,
-                action,
+                item: action,
                 order,
             })?;
         }

@@ -332,6 +332,16 @@ impl KernelBuilder {
                 .menus
                 .set_title(id.clone(), spec.title.clone());
         }
+        // Settings can be menu entries too.
+        let titles: Vec<(Id, Cow<'static, str>)> = kernel
+            .shared
+            .settings
+            .specs()
+            .map(|spec| (spec.id.clone(), spec.title.clone()))
+            .collect();
+        for (id, title) in titles {
+            kernel.shared.menus.set_title(id, title);
+        }
         for source in &configs {
             kernel.apply_user_config(source);
         }
@@ -750,9 +760,12 @@ impl Kernel {
         let mut unknown: Vec<&Id> = self
             .keymap
             .actions()
-            .chain(self.shared.menus.referenced_actions())
+            .chain(self.shared.menus.referenced_items())
             .chain(preset_actions.iter())
-            .filter(|action| !self.registry.actions.contains_key(*action))
+            .filter(|id| {
+                !self.registry.actions.contains_key(*id)
+                    && self.shared.settings.get(id.as_str()).is_none()
+            })
             .collect();
         unknown.sort();
         unknown.dedup();
@@ -1109,12 +1122,29 @@ impl Kernel {
         index: usize,
         f: impl FnOnce(&mut dyn Screen, &mut Cx<'_, '_>) -> Handled,
     ) -> Handled {
+        let earlier = mem::take(&mut self.output.redraw);
         let Some(active) = self.stack.get_mut(index) else {
+            self.output.redraw = earlier;
             return Handled::No;
         };
         let env = self.shared.env(self.now);
         let mut cx = Cx::new(&env, &mut self.output);
-        f(active.screen.as_mut(), &mut cx)
+        let handled = f(active.screen.as_mut(), &mut cx);
+        // `request_redraw` means the caller's own region. A screen below an
+        // overlay is still partly visible (e.g. the page behind a menu that
+        // changes a reading setting); one below a full screen is redrawn
+        // when it is shown again.
+        let requested = mem::replace(&mut self.output.redraw, earlier);
+        if requested {
+            let top = self.stack.len() - 1;
+            if index == top {
+                self.output.redraw = true;
+            } else if (index + 1..=top).all(|i| self.overlay(i).is_some()) {
+                let region = self.region_of(index);
+                self.invalidate(region);
+            }
+        }
+        handled
     }
 
     /// Writes a changed setting to the configuration file on the device,

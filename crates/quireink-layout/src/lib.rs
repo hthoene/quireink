@@ -57,8 +57,9 @@ pub struct Style {
     pub paragraph_spacing: f32,
     /// Indent of the first line of a paragraph.
     pub indent: f32,
-    /// Stretch spaces so lines fill the width (except a paragraph's last),
-    /// unless a block asks for another alignment.
+    /// Stretch spaces so lines fill the width (except a paragraph's last).
+    /// The reader's choice wins over a book's justified text; centred and
+    /// right-aligned blocks keep their alignment.
     pub justify: bool,
 }
 
@@ -258,8 +259,8 @@ pub fn layout_page(
         }
         let align = match block.align {
             Align::Auto if heading > 0 => Align::Start,
-            Align::Auto if style.justify => Align::Justify,
-            Align::Auto => Align::Start,
+            Align::Auto | Align::Justify if style.justify => Align::Justify,
+            Align::Auto | Align::Justify => Align::Start,
             align => align,
         };
         let indent = if at_block_start
@@ -399,6 +400,8 @@ mod tests {
                 runs,
                 align: if line.starts_with('>') {
                     Align::Center
+                } else if line.starts_with('=') {
+                    Align::Justify
                 } else {
                     Align::Auto
                 },
@@ -486,6 +489,24 @@ mod tests {
             page.lines[1].word_spacing, 0.0,
             "last line is not justified"
         );
+    }
+
+    #[test]
+    fn the_readers_choice_wins_over_justified_books() {
+        // "=" marks a block the book justifies.
+        let doc = Text::new(
+            "=a bb cc dd ee
+",
+        );
+        let page = layout(&doc, 0, 100.0, &STYLE);
+        assert_eq!(texts(&page), vec!["=a bb cc", "dd ee"]);
+        assert_eq!(page.lines[0].word_spacing, 0.0);
+        let style = Style {
+            justify: true,
+            ..STYLE
+        };
+        let page = layout(&doc, 0, 100.0, &style);
+        assert_eq!(page.lines[0].word_spacing, 1.0);
     }
 
     #[test]

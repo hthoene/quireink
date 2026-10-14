@@ -14,8 +14,8 @@ use quireink_platform::{
 };
 use quireink_sdk::builtin::{actions, screens, settings, slots};
 use quireink_sdk::{
-    ActionSpec, Canvas, Cx, Env, Handled, Id, Manifest, Plugin, Priority, RegisterError, Registrar,
-    SDK_VERSION, Screen, ScreenSpec, SettingKind, SettingSpec, SettingValue, Version,
+    ActionSpec, Canvas, Command, Cx, Env, Handled, Id, Manifest, Plugin, Priority, RegisterError,
+    Registrar, SDK_VERSION, Screen, ScreenSpec, SettingKind, SettingSpec, SettingValue, Version,
 };
 
 use crate::{Kernel, WarningSource};
@@ -590,11 +590,14 @@ impl Screen for BaseScreen {
         Handled::No
     }
 
-    fn on_event(&mut self, event: &Id, params: &quireink_sdk::Params, _: &mut Cx<'_, '_>) {
+    fn on_event(&mut self, event: &Id, params: &quireink_sdk::Params, cx: &mut Cx<'_, '_>) {
         self.log.borrow_mut().push(alloc::format!(
             "event {event} {}",
             params.get("id").unwrap_or_default()
         ));
+        if event.as_str() == "ov.changed" {
+            cx.request_redraw();
+        }
     }
 }
 
@@ -641,7 +644,7 @@ impl Plugin for OverlayPlugin {
         for (action, order) in [(actions::TOGGLE_NIGHT_MODE, 20), (actions::HOME, 10)] {
             r.add_menu_entry(quireink_sdk::MenuEntry {
                 menu: quireink_sdk::builtin::menus::MAIN,
-                action,
+                item: action,
                 order,
             })?;
         }
@@ -684,6 +687,35 @@ fn overlays_redraw_only_their_region_and_close_on_outside_taps() {
 }
 
 #[test]
+fn screens_below_overlays_redraw_themselves() {
+    let log = log();
+    let mut kernel = Kernel::builder(DEVICE)
+        .plugin(OverlayPlugin { log: log.clone() })
+        .build()
+        .unwrap();
+    kernel.start(Instant(0));
+    render(&mut kernel);
+    press(&mut kernel, 100, "menu");
+    render(&mut kernel);
+    log.borrow_mut().clear();
+
+    // The base screen changes while the overlay is open: the whole screen
+    // is drawn again, the overlay on top.
+    kernel.apply(Command::Emit(
+        Id::new_static("ov.changed"),
+        quireink_sdk::Params::new(),
+    ));
+    let effects = kernel.finish();
+    assert_eq!(
+        effects.refresh().map(|(r, _)| r),
+        Some(Rect::new(0, 0, 90, 90))
+    );
+    render(&mut kernel);
+    assert_eq!(*log.borrow(), ["event ov.changed ", "draw base 90x90"]);
+    assert_eq!(kernel.frame().pixel(0, 60), Color::BLACK);
+}
+
+#[test]
 fn menus_follow_order_and_user_definitions() {
     let log = log();
     let kernel = Kernel::builder(DEVICE)
@@ -696,7 +728,7 @@ fn menus_follow_order_and_user_definitions() {
             .menus
             .items("core.main")
             .iter()
-            .map(|i| i.action.to_string())
+            .map(|i| i.id.to_string())
             .collect()
     };
     let items = env_items(&kernel);

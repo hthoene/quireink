@@ -4,14 +4,15 @@ use alloc::vec::Vec;
 use crate::collections::VecMap;
 use crate::id::Id;
 
-/// Puts an action into a menu.
+/// Puts an action or a setting into a menu.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MenuEntry {
     /// The menu, e.g. [`builtin::menus::MAIN`](crate::builtin::menus::MAIN)
     /// or `reader.menu`.
     pub menu: Id,
-    /// The action run when the entry is chosen; its title is the label.
-    pub action: Id,
+    /// An action, run when the entry is chosen, or a setting, shown with
+    /// its current value and changed in place. Its title is the label.
+    pub item: Id,
     /// Position; lower comes first.
     pub order: i16,
 }
@@ -19,7 +20,8 @@ pub struct MenuEntry {
 /// One entry of a resolved menu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MenuItem<'a> {
-    pub action: &'a Id,
+    /// An action or a setting.
+    pub id: &'a Id,
     /// Translation key of the label.
     pub title: &'a str,
 }
@@ -58,12 +60,12 @@ impl Menus {
         self.custom.insert(menu, actions);
     }
 
-    /// Registers the label of an action.
-    pub fn set_title(&mut self, action: Id, title: Cow<'static, str>) {
-        self.titles.insert(action, title);
+    /// Registers the label of an action or setting.
+    pub fn set_title(&mut self, item: Id, title: Cow<'static, str>) {
+        self.titles.insert(item, title);
     }
 
-    /// The entries of `menu`, in display order. Actions without a known
+    /// The entries of `menu`, in display order. Items without a known
     /// title are skipped.
     pub fn items(&self, menu: &str) -> Vec<MenuItem<'_>> {
         if let Some(actions) = self.custom.get(menu) {
@@ -77,22 +79,22 @@ impl Menus {
         entries.sort_by_key(|e| e.order);
         entries
             .into_iter()
-            .filter_map(|e| self.item(&e.action))
+            .filter_map(|e| self.item(&e.item))
             .collect()
     }
 
-    fn item<'a>(&'a self, action: &'a Id) -> Option<MenuItem<'a>> {
-        self.titles.get(action).map(|title| MenuItem {
-            action,
+    fn item<'a>(&'a self, id: &'a Id) -> Option<MenuItem<'a>> {
+        self.titles.get(id).map(|title| MenuItem {
+            id,
             title: title.as_ref(),
         })
     }
 
-    /// Every action referenced by a menu, for validation.
-    pub fn referenced_actions(&self) -> impl Iterator<Item = &Id> {
+    /// Every action or setting referenced by a menu, for validation.
+    pub fn referenced_items(&self) -> impl Iterator<Item = &Id> {
         self.entries
             .iter()
-            .map(|e| &e.action)
+            .map(|e| &e.item)
             .chain(self.custom.values().flatten())
     }
 }
@@ -108,7 +110,7 @@ mod tests {
         for (action, order) in [("a.second", 20), ("a.first", 10), ("a.untitled", 5)] {
             menus.add(MenuEntry {
                 menu: Id::new_static("a.menu"),
-                action: Id::parse(action).unwrap(),
+                item: Id::parse(action).unwrap(),
                 order,
             });
         }

@@ -25,7 +25,9 @@ use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use quireink_sdk::builtin::{actions as core_actions, events, groups, params, slots};
+use quireink_sdk::builtin::{
+    actions as core_actions, events, groups, params, settings as core_settings, slots,
+};
 use quireink_sdk::{
     Command, Env, Id, Manifest, Params, Plugin, Priority, RegisterError, Registrar, SDK_VERSION,
     ScreenSpec, SettingKind, SettingSpec, SettingValue, Version,
@@ -194,19 +196,19 @@ impl Plugin for Reader {
                 handler: Some(handler),
             })?;
         }
-        for (action, order) in [
+        // Settings in the menu show their state and change in place.
+        for (item, order) in [
             (actions::TOC, 5),
-            (actions::FONT_LARGER, 10),
-            (actions::FONT_SMALLER, 20),
-            (actions::TOGGLE_JUSTIFY, 30),
-            (core_actions::TOGGLE_NIGHT_MODE, 40),
+            (settings::FONT_SIZE, 10),
+            (settings::JUSTIFY, 30),
+            (core_settings::NIGHT_MODE, 40),
             (core_actions::LIBRARY, 50),
             (core_actions::SETTINGS, 60),
             (core_actions::HOME, 70),
         ] {
             r.add_menu_entry(quireink_sdk::MenuEntry {
                 menu: MENU,
-                action,
+                item,
                 order,
             })?;
         }

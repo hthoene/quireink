@@ -4,7 +4,10 @@
 //! setting, so every plugin's UI looks consistent and scales together when
 //! the user chooses larger text.
 
+use alloc::borrow::Cow;
+use alloc::format;
 use alloc::string::{String, ToString};
+use alloc::vec::Vec;
 
 use quireink_graphics::Canvas;
 use quireink_platform::{Color, Point, Rect};
@@ -12,6 +15,7 @@ use quireink_platform::{Color, Point, Rect};
 use crate::builtin::{fonts, settings};
 use crate::env::Env;
 use crate::fonts::FontHandle;
+use crate::settings::{SettingKind, SettingSpec, SettingValue};
 
 /// Sizes of the standard UI elements, in pixels.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -292,6 +296,162 @@ impl ListView {
             draw_row(canvas, index, rect, focused);
         }
     }
+}
+
+// ---- Settings as rows --------------------------------------------------
+
+/// Draws a row: `title` on the left, `value` right-aligned.
+#[allow(clippy::too_many_arguments)]
+pub fn draw_value_row(
+    canvas: &mut Canvas<'_>,
+    env: &Env<'_>,
+    style: &UiStyle,
+    rect: Rect,
+    focused: bool,
+    title: &str,
+    value: &str,
+) {
+    let Some(font) = style.font(env) else {
+        return;
+    };
+    let color = if focused { Color::WHITE } else { Color::BLACK };
+    let margin = style.margin as f32;
+    let value_width = font.measure(style.text, value);
+    let value_x = f32::from(rect.x) + f32::from(rect.width) - margin - value_width;
+    draw_label(canvas, &font, style.text, value_x, rect, value, color);
+    let title = fit(&font, style.text, title, value_x - margin * 3.0);
+    draw_label(canvas, &font, style.text, margin, rect, &title, color);
+}
+
+/// The − and + buttons of a focused number row, with room for `value`
+/// between them.
+pub fn stepper(env: &Env<'_>, style: &UiStyle, rect: Rect, value: &str) -> Option<(Rect, Rect)> {
+    let font = style.font(env)?;
+    let size = (u32::from(rect.height) * 7 / 10) as u16;
+    let y = rect.y + (rect.height - size) / 2;
+    let margin = style.margin as u16;
+    let gap = style.gap as u16;
+    let right = rect.x + rect.width - margin;
+    let plus = Rect::new(right.saturating_sub(size), y, size, size);
+    let value_width = font.measure(style.text, value) as u16;
+    let minus_x = plus.x.saturating_sub(2 * gap + value_width + size);
+    Some((Rect::new(minus_x, y, size, size), plus))
+}
+
+/// A focused number: title, then `[−] value [+]`. While editing with
+/// buttons the boxes are filled.
+pub fn draw_stepper(
+    canvas: &mut Canvas<'_>,
+    env: &Env<'_>,
+    style: &UiStyle,
+    rect: Rect,
+    title: &str,
+    value: &str,
+    editing: bool,
+) {
+    let (Some(font), Some((minus, plus))) = (style.font(env), stepper(env, style, rect, value))
+    else {
+        return;
+    };
+    let margin = style.margin as f32;
+    let title = fit(&font, style.text, title, f32::from(minus.x) - margin * 2.0);
+    draw_label(
+        canvas,
+        &font,
+        style.text,
+        margin,
+        rect,
+        &title,
+        Color::WHITE,
+    );
+    let value_x = f32::from(minus.x + minus.width + style.gap as u16);
+    draw_label(
+        canvas,
+        &font,
+        style.text,
+        value_x,
+        rect,
+        value,
+        Color::WHITE,
+    );
+    for (button, glyph) in [(minus, "−"), (plus, "+")] {
+        let (x, y, w, h) = (
+            i32::from(button.x),
+            i32::from(button.y),
+            u32::from(button.width),
+            u32::from(button.height),
+        );
+        let glyph_color = if editing {
+            canvas.fill_rect(x, y, w, h, Color::WHITE);
+            Color::BLACK
+        } else {
+            canvas.stroke_rect(x, y, w, h, style.line.max(2), Color::WHITE);
+            Color::WHITE
+        };
+        let glyph_width = font.measure(style.text, glyph);
+        let glyph_x = f32::from(button.x) + (f32::from(button.width) - glyph_width) / 2.0;
+        draw_label(canvas, &font, style.text, glyph_x, rect, glyph, glyph_color);
+    }
+}
+
+/// The value of a setting for display, with its unit.
+pub fn setting_value(env: &Env<'_>, spec: &SettingSpec) -> String {
+    match env.settings.get(spec.id.as_str()) {
+        Some(SettingValue::Bool(true)) => env.i18n.tr("settings.on").to_string(),
+        Some(SettingValue::Bool(false)) => env.i18n.tr("settings.off").to_string(),
+        Some(SettingValue::Int(v)) => match &spec.unit {
+            Some(unit) => env.i18n.plural(unit, *v, &[]),
+            None => format!("{v}"),
+        },
+        Some(SettingValue::Text(v)) => option_name(env, spec, v),
+        None => String::new(),
+    }
+}
+
+/// The display name of a choice or language value.
+pub fn option_name(env: &Env<'_>, spec: &SettingSpec, value: &str) -> String {
+    match spec.kind {
+        SettingKind::Language => env
+            .i18n
+            .languages()
+            .into_iter()
+            .find(|(tag, _)| *tag == value)
+            .map_or(value.to_string(), |(_, name)| name.to_string()),
+        // Choices are ids; their translation is their display name.
+        SettingKind::Choice(_) => env.i18n.tr(value).to_string(),
+        _ => value.to_string(),
+    }
+}
+
+/// The value after one step of the setting: a switch toggles, a number
+/// moves by `step` within its range, a choice or language moves to the
+/// next (or previous) option. `None` for text.
+pub fn next_value(env: &Env<'_>, spec: &SettingSpec, step: i64) -> Option<SettingValue> {
+    let current = env.settings.get(spec.id.as_str())?;
+    let cycle = |options: &[&str], value: &str| -> SettingValue {
+        let len = options.len().max(1) as i64;
+        let index = options.iter().position(|o| *o == value).unwrap_or(0) as i64;
+        let next = options
+            .get((index + step).rem_euclid(len) as usize)
+            .copied()
+            .unwrap_or_default();
+        SettingValue::Text(Cow::Owned(next.to_string()))
+    };
+    Some(match (&spec.kind, current) {
+        (SettingKind::Bool, SettingValue::Bool(v)) => SettingValue::Bool(!v),
+        (SettingKind::Int { min, max }, SettingValue::Int(v)) => {
+            SettingValue::Int((v + step).clamp(*min, *max))
+        }
+        (SettingKind::Choice(options), SettingValue::Text(v)) => {
+            let options: Vec<&str> = options.iter().map(|o| o.as_ref()).collect();
+            cycle(&options, v)
+        }
+        (SettingKind::Language, SettingValue::Text(v)) => {
+            let tags: Vec<&str> = env.i18n.languages().into_iter().map(|(t, _)| t).collect();
+            cycle(&tags, v)
+        }
+        _ => return None,
+    })
 }
 
 #[cfg(test)]

@@ -24,7 +24,6 @@ extern crate alloc;
 
 use alloc::borrow::Cow;
 use alloc::boxed::Box;
-use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
@@ -166,99 +165,6 @@ fn page_note(env: &Env<'_>, list: &ListView, len: usize) -> Option<String> {
     })
 }
 
-/// Draws a row: `title` on the left, `value` right-aligned.
-fn draw_row(
-    canvas: &mut Canvas<'_>,
-    env: &Env<'_>,
-    style: &UiStyle,
-    rect: Rect,
-    focused: bool,
-    title: &str,
-    value: &str,
-) {
-    let Some(font) = style.font(env) else {
-        return;
-    };
-    let color = if focused { Color::WHITE } else { Color::BLACK };
-    let margin = style.margin as f32;
-    let value_width = font.measure(style.text, value);
-    let value_x = f32::from(rect.x) + f32::from(rect.width) - margin - value_width;
-    ui::draw_label(canvas, &font, style.text, value_x, rect, value, color);
-    let title = ui::fit(&font, style.text, title, value_x - margin * 3.0);
-    ui::draw_label(canvas, &font, style.text, margin, rect, &title, color);
-}
-
-/// The − and + buttons of a focused number row, with room for `value`
-/// between them.
-fn stepper(env: &Env<'_>, style: &UiStyle, rect: Rect, value: &str) -> Option<(Rect, Rect)> {
-    let font = style.font(env)?;
-    let size = (u32::from(rect.height) * 7 / 10) as u16;
-    let y = rect.y + (rect.height - size) / 2;
-    let margin = style.margin as u16;
-    let gap = style.gap as u16;
-    let right = rect.x + rect.width - margin;
-    let plus = Rect::new(right.saturating_sub(size), y, size, size);
-    let value_width = font.measure(style.text, value) as u16;
-    let minus_x = plus.x.saturating_sub(2 * gap + value_width + size);
-    Some((Rect::new(minus_x, y, size, size), plus))
-}
-
-/// A focused number: title, then `[−] value [+]`. While editing with
-/// buttons the boxes are filled.
-fn draw_stepper(
-    canvas: &mut Canvas<'_>,
-    env: &Env<'_>,
-    style: &UiStyle,
-    rect: Rect,
-    title: &str,
-    value: &str,
-    editing: bool,
-) {
-    let (Some(font), Some((minus, plus))) = (style.font(env), stepper(env, style, rect, value))
-    else {
-        return;
-    };
-    let margin = style.margin as f32;
-    let title = ui::fit(&font, style.text, title, f32::from(minus.x) - margin * 2.0);
-    ui::draw_label(
-        canvas,
-        &font,
-        style.text,
-        margin,
-        rect,
-        &title,
-        Color::WHITE,
-    );
-    let value_x = f32::from(minus.x + minus.width + style.gap as u16);
-    ui::draw_label(
-        canvas,
-        &font,
-        style.text,
-        value_x,
-        rect,
-        value,
-        Color::WHITE,
-    );
-    for (button, glyph) in [(minus, "−"), (plus, "+")] {
-        let (x, y, w, h) = (
-            i32::from(button.x),
-            i32::from(button.y),
-            u32::from(button.width),
-            u32::from(button.height),
-        );
-        let glyph_color = if editing {
-            canvas.fill_rect(x, y, w, h, Color::WHITE);
-            Color::BLACK
-        } else {
-            canvas.stroke_rect(x, y, w, h, style.line.max(2), Color::WHITE);
-            Color::WHITE
-        };
-        let glyph_width = font.measure(style.text, glyph);
-        let glyph_x = f32::from(button.x) + (f32::from(button.width) - glyph_width) / 2.0;
-        ui::draw_label(canvas, &font, style.text, glyph_x, rect, glyph, glyph_color);
-    }
-}
-
 // ---- Main page: groups -------------------------------------------------
 
 #[derive(Debug)]
@@ -335,9 +241,9 @@ impl Screen for GroupList {
             len,
             |canvas, index, rect, focused| match groups.get(index) {
                 Some((_, title)) => {
-                    draw_row(canvas, env, &style, rect, focused, title, "›");
+                    ui::draw_value_row(canvas, env, &style, rect, focused, title, "›");
                 }
-                None => draw_row(
+                None => ui::draw_value_row(
                     canvas,
                     env,
                     &style,
@@ -479,35 +385,6 @@ impl GroupPage {
     }
 }
 
-/// The value of a setting for display, with its unit.
-fn display_value(env: &Env<'_>, spec: &SettingSpec) -> String {
-    match env.settings.get(spec.id.as_str()) {
-        Some(SettingValue::Bool(true)) => env.i18n.tr("settings.on").to_string(),
-        Some(SettingValue::Bool(false)) => env.i18n.tr("settings.off").to_string(),
-        Some(SettingValue::Int(v)) => match &spec.unit {
-            Some(unit) => env.i18n.plural(unit, *v, &[]),
-            None => format!("{v}"),
-        },
-        Some(SettingValue::Text(v)) => option_name(env, spec, v),
-        None => String::new(),
-    }
-}
-
-/// The display name of a choice or language value.
-fn option_name(env: &Env<'_>, spec: &SettingSpec, value: &str) -> String {
-    match spec.kind {
-        SettingKind::Language => env
-            .i18n
-            .languages()
-            .into_iter()
-            .find(|(tag, _)| *tag == value)
-            .map_or(value.to_string(), |(_, name)| name.to_string()),
-        // Choices are ids; their translation is their display name.
-        SettingKind::Choice(_) => env.i18n.tr(value).to_string(),
-        _ => value.to_string(),
-    }
-}
-
 impl Screen for GroupPage {
     fn draw(&mut self, canvas: &mut Canvas<'_>, env: &Env<'_>) {
         let style = self.style;
@@ -527,15 +404,15 @@ impl Screen for GroupPage {
             .draw(canvas, &style, len, |canvas, index, rect, focused| {
                 let spec = &specs[index];
                 let title = env.i18n.tr(&spec.title);
-                let mut value = display_value(env, spec);
+                let mut value = ui::setting_value(env, spec);
                 if focused && matches!(spec.kind, SettingKind::Int { .. }) {
-                    draw_stepper(canvas, env, &style, rect, title, &value, editing);
+                    ui::draw_stepper(canvas, env, &style, rect, title, &value, editing);
                     return;
                 }
                 if matches!(spec.kind, SettingKind::Choice(_) | SettingKind::Language) {
                     value.push_str(" ›");
                 }
-                draw_row(canvas, env, &style, rect, focused, title, &value);
+                ui::draw_value_row(canvas, env, &style, rect, focused, title, &value);
             });
 
         // The focused setting's description.
@@ -638,8 +515,8 @@ impl Screen for GroupPage {
                 return Handled::Yes;
             };
             let rect = self.list.row_rect(index % self.list.rows());
-            let value = display_value(&env, spec);
-            if let Some((minus, plus)) = stepper(&env, &self.style, rect, &value) {
+            let value = ui::setting_value(&env, spec);
+            if let Some((minus, plus)) = ui::stepper(&env, &self.style, rect, &value) {
                 let x = gesture.start.x;
                 let within = |r: Rect| x >= i32::from(r.x) && x < r.right() as i32;
                 if within(minus) {
@@ -696,7 +573,7 @@ impl Chooser {
                 .collect(),
             Some((SettingKind::Choice(values), spec)) => values
                 .iter()
-                .map(|v| (v.to_string(), option_name(env, spec, v)))
+                .map(|v| (v.to_string(), ui::option_name(env, spec, v)))
                 .collect(),
             _ => Vec::new(),
         };
@@ -742,7 +619,7 @@ impl Screen for Chooser {
             .draw(canvas, &style, len, |canvas, index, rect, focused| {
                 let (value, name) = &options[index];
                 let mark = if value == current { "•" } else { "" };
-                draw_row(canvas, env, &style, rect, focused, name, mark);
+                ui::draw_value_row(canvas, env, &style, rect, focused, name, mark);
             });
     }
 

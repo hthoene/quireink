@@ -62,7 +62,7 @@ impl Plugin for Home {
         for (action, order) in [(actions::LIBRARY, 10), (actions::SETTINGS, 20)] {
             r.add_menu_entry(MenuEntry {
                 menu: ACTIONS,
-                action,
+                item: action,
                 order,
             })?;
         }
@@ -129,7 +129,7 @@ impl Dashboard {
             env.menus
                 .items(ACTIONS.as_str())
                 .into_iter()
-                .map(|item| Item::Action(item.action.clone(), String::from(item.title))),
+                .map(|item| Item::Action(item.id.clone(), String::from(item.title))),
         );
 
         let display = env.device.display;
