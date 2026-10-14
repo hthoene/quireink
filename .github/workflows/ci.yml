@@ -83,10 +83,10 @@ jobs:
           done
           # Open a sample book from the library and read a few pages.
           $emu --headless --profile xteink-x4 \
-            --script "right,confirm,page-forward,page-forward,page-back,wait:2000" \
+            --script "confirm,right,confirm,page-forward,page-forward,page-back,wait:2000" \
             --screenshot out/xteink-x4-reading.png
           $emu --headless --profile kobo-clara-bw --set core.language=de \
-            --script "tap:500:200,swipe:900:700:100:700,tap:100:700,long-tap:500:700" \
+            --script "tap:500:480,tap:500:190,swipe:900:700:100:700,tap:100:700,long-tap:500:700" \
             --screenshot out/kobo-clara-bw-reading.png
           # Reader menu (long confirm), larger text, settings screen.
           $emu --headless --profile xteink-x4 --script "long:confirm,confirm,wait:300" \
@@ -96,7 +96,7 @@ jobs:
             --screenshot out/xteink-x4-settings.png
           # Only two buttons: open a book, the menu and the settings, edit a value.
           $emu --headless --profile two-buttons \
-            --script "page-forward,long:page-forward,page-forward,long:page-forward,page-forward,page-forward,page-forward,page-forward,page-forward,long:page-forward,page-forward,long:page-forward,page-forward" \
+            --script "long:page-forward,page-forward,long:page-forward,page-forward,long:page-forward,page-forward,page-forward,page-forward,page-forward,page-forward,long:page-forward,page-forward,long:page-forward,page-forward" \
             --screenshot out/two-buttons-settings.png
           $emu --headless --profile boox-go-7 --set slots.core.home=diagnostics.screen \
             --script "page-forward,long-tap:600:800"

@@ -1,6 +1,6 @@
 # QuireInk — Project Plan
 
-> Status: **Draft v0.8** — living document. Decisions that are not yet final are
+> Status: **Draft v0.9** — living document. Decisions that are not yet final are
 > marked **[OPEN]**. Facts about hardware that still need verification are
 > marked **[VERIFY]**. Once a decision is final it moves into an Architecture
 > Decision Record under `docs/adr/`.
@@ -392,6 +392,31 @@ overridden per screen.
   families are a few lines in `quireink-i18n`.
 - CI checks every catalog against English (missing/unknown keys, placeholders).
 
+### 6.7 Settings structure (planned, next UI step)
+
+The generated settings screen is a flat list in registration order — fine
+for a dozen settings, confusing for many. Planned, keeping it generated
+from contributions so every plugin benefits automatically:
+
+- **Groups and sub-pages:** settings declare a group (`core.group.reading`,
+  `display`, `controls`, `device`, `language`, or a plugin's own group).
+  The main page lists groups; groups open sub-pages. Groups are
+  contributions with a title, an icon and an order, so plugins can add
+  their own and users can reorder them.
+- **Levels:** each setting is *basic* or *advanced*; the basic view shows
+  only what most readers need (font size, night mode, language, button
+  layout), the advanced view everything (refresh interval, long-press
+  time, diagnostics).
+- **Descriptions and units:** a short help text per setting and units
+  rendered by the UI ("11 pt", "6 pages") instead of in the title.
+- **Better editors per kind:** sliders for ranges, a picker overlay for
+  choices with many options (languages, fonts, key map presets), and the
+  on-screen keyboard for text (library folder).
+- **Live preview:** reading settings preview on a sample paragraph.
+- **Search** on devices with a keyboard or touch.
+- **Contributed settings pages:** a plugin may replace the generated page
+  for its group with its own screen (e.g. Wi-Fi with scanning).
+
 ---
 
 ## 7. Extensibility
@@ -694,7 +719,7 @@ If the X4 has not arrived by the end of M3, M6 (Boox) is done before M4.
 |-----------|---------|---------------|
 | **M0 Foundation** ✅ | Workspace, CI, license, ADRs, platform vocabulary, config + i18n crates, SDK 0.1 with plugin/registry/slot/action/key-map model, raw input + gesture recognition, timers, kernel, emulator with device profiles and heap cap, `diagnostics` plugin | Emulator shows the diagnostics screen contributed by a plugin; CI green on all targets |
 | **M1 Plain text** ✅ | Fonts, rasterizer, bitmap packs + `fontgen`, line breaking, storage service, document model, layout engine, TXT plugin, reader (progress, background page index, reopen last book), file browser, events, timers | ✅ A 5.3 MB TXT reads in the X4 profile within the heap budget (peak 159 KiB of 192 KiB); index of 18,844 pages built in the background |
-| **M2 UI** 🔶 | ✅ key map presets (two-button layout), device setting defaults, `core.next`/`core.previous`, overlays, menus as contributions (+ `[menus]`), generated settings screen, settings saved to `quireink.ini`, screen events, `ui` building blocks, `core.ui-size`, reader menu with live re-layout, button-only and touch flows · ⬜ themes beyond `core.ui-size`, layout files + home dashboard, library service, widget semantics, on-screen keyboard, snapshot tests | Full button-only flow in the emulator ✅; home screen replaceable by config ✅; snapshot tests ⬜ |
+| **M2 UI** 🔶 | ✅ home screen (continue reading, recently read, shortcuts as menu `home.actions`), standard reading events `core.book-opened`/`core.page-turned`, key map presets (two-button layout), device setting defaults, `core.next`/`core.previous`, overlays, menus as contributions (+ `[menus]`), generated settings screen, settings saved to `quireink.ini`, screen events, `ui` building blocks, `core.ui-size`, reader menu with live re-layout · ⬜ settings structure (§6.7), themes beyond `core.ui-size`, layout files for dashboards, library service, widget semantics, on-screen keyboard, snapshot tests | Full button-only flow ✅ (also with two buttons); home screen replaceable by config ✅; snapshot tests ⬜ |
 | **M3 EPUB** | Streaming ZIP, XML tokenizer, CSS subset, TOC, images (dithered) | Standard Ebooks / Gutenberg test corpus renders correctly |
 | **M4 Xteink X4** | ESP32 shell: display, buttons, SD, sleep, firmware backup/restore | Read an EPUB on real hardware; battery measurement |
 | **M5 Plugins v1** | SDK 0.1 published + docs, plugin manifests loaded from storage, events/filters/services complete, kosync, OPDS | Progress syncs with KOReader; a sample community plugin lives outside the repo |

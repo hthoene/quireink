@@ -45,6 +45,7 @@ impl Device {
                 .plugin(quireink_plugin_format_txt::TxtFormat)
                 .plugin(quireink_plugin_reader::Reader)
                 .plugin(quireink_plugin_files::Files)
+                .plugin(quireink_plugin_home::Home)
                 .plugin(quireink_plugin_menu::Menu)
                 .plugin(quireink_plugin_settings::SettingsPlugin)
                 .plugin(quireink_plugin_diagnostics::Diagnostics);

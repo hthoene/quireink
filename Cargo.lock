@@ -1147,6 +1147,7 @@ dependencies = [
  "quireink-plugin-files",
  "quireink-plugin-fonts-default",
  "quireink-plugin-format-txt",
+ "quireink-plugin-home",
  "quireink-plugin-menu",
  "quireink-plugin-reader",
  "quireink-plugin-settings",
@@ -1214,6 +1215,14 @@ dependencies = [
 
 [[package]]
 name = "quireink-plugin-format-txt"
+version = "0.1.0"
+dependencies = [
+ "quireink-i18n",
+ "quireink-sdk",
+]
+
+[[package]]
+name = "quireink-plugin-home"
 version = "0.1.0"
 dependencies = [
  "quireink-i18n",

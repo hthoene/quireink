@@ -110,7 +110,7 @@ cargo run -p quireink-emulator -- --headless --profile boox-go-7 --set core.lang
 | `crates/quireink-layout` | Deterministic page layout usable by any reader plugin |
 | `crates/quireink-sdk` | **The plugin SDK** — the only API plugins use |
 | `crates/quireink-core` | The kernel: plugin host, registries, input routing, refresh policy |
-| `plugins/` | First-party plugins: reader, file browser, menu, settings, TXT format, default fonts, diagnostics |
+| `plugins/` | First-party plugins: home screen, reader, file browser, menu, settings, TXT format, default fonts, diagnostics |
 | `tools/fontgen` | Converts fonts into bitmap font packs for small devices |
 | `shells/desktop` | Desktop emulator with device profiles |
 | `samples/` | Emulator library with public-domain books |

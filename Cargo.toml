@@ -17,6 +17,7 @@ members = [
     "plugins/files",
     "plugins/menu",
     "plugins/settings",
+    "plugins/home",
     "shells/desktop",
     "tools/fontgen",
 ]
@@ -42,6 +43,7 @@ quireink-sdk = { path = "crates/quireink-sdk", version = "0.1.0" }
 quireink-core = { path = "crates/quireink-core", version = "0.1.0" }
 quireink-plugin-diagnostics = { path = "plugins/diagnostics", version = "0.1.0" }
 quireink-plugin-menu = { path = "plugins/menu", version = "0.1.0" }
+quireink-plugin-home = { path = "plugins/home", version = "0.1.0" }
 quireink-plugin-settings = { path = "plugins/settings", version = "0.1.0" }
 quireink-plugin-files = { path = "plugins/files", version = "0.1.0" }
 quireink-plugin-reader = { path = "plugins/reader", version = "0.1.0" }

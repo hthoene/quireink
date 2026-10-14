@@ -11,7 +11,6 @@ use quireink_sdk::{
     Screen,
 };
 
-use crate::events_out::{BOOK_OPENED, PAGE_TURNED};
 use crate::index::PageIndex;
 use crate::settings::{FONT_SIZE, INDENT, JUSTIFY, LINE_SPACING, MARGIN};
 use crate::{PLUGIN, state_path};
@@ -167,6 +166,14 @@ impl Book {
         Ok(book)
     }
 
+    /// Parameters of the standard reading events.
+    fn event_params(&self) -> Params {
+        Params::new()
+            .with(params::PATH, self.path.clone())
+            .with(params::TITLE, self.title.clone())
+            .with(params::PROGRESS, format!("{:.1}", self.percent()))
+    }
+
     fn open_index(&self, env: &Env<'_>) -> PageIndex {
         PageIndex::open(
             env.storage,
@@ -273,13 +280,7 @@ impl Book {
         }
         self.page = page;
         self.save_position(&env);
-        let progress = format!("{:.1}", self.percent());
-        cx.command(Command::Emit(
-            PAGE_TURNED,
-            Params::new()
-                .with(params::PATH, self.path.clone())
-                .with("progress", progress),
-        ));
+        cx.command(Command::Emit(events::PAGE_TURNED, self.event_params()));
         cx.request_redraw();
         true
     }
@@ -416,11 +417,7 @@ impl Screen for ReaderScreen {
 
     fn on_show(&mut self, cx: &mut Cx<'_, '_>) {
         if let Ok(book) = &self.book {
-            let path = book.path.clone();
-            cx.command(Command::Emit(
-                BOOK_OPENED,
-                Params::new().with(params::PATH, path),
-            ));
+            cx.command(Command::Emit(events::BOOK_OPENED, book.event_params()));
             let now = cx.env().now;
             cx.wake_at(now);
         }

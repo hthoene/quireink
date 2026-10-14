@@ -7,8 +7,8 @@
 //!   start-up (setting `reader.open-last`).
 //! - Builds a page index in the background, so page numbers and total pages
 //!   become available without slowing down page turns.
-//! - Emits `reader.book-opened` and `reader.page-turned`, so other plugins
-//!   (statistics, sync, …) can follow the reading.
+//! - Emits the standard events `core.book-opened` and `core.page-turned`,
+//!   so other plugins (home screen, statistics, sync, …) follow the reading.
 //!
 //! It is bound to the `core.reader` slot; any other plugin can replace it.
 
@@ -61,15 +61,6 @@ pub mod actions {
     pub const FONT_LARGER: Id = Id::new_static("reader.font-larger");
     pub const FONT_SMALLER: Id = Id::new_static("reader.font-smaller");
     pub const TOGGLE_JUSTIFY: Id = Id::new_static("reader.toggle-justify");
-}
-
-/// Events emitted by the reader; all carry the parameter `path`.
-pub mod events_out {
-    use quireink_sdk::Id;
-
-    pub const BOOK_OPENED: Id = Id::new_static("reader.book-opened");
-    /// Also carries `progress` (percent with one decimal).
-    pub const PAGE_TURNED: Id = Id::new_static("reader.page-turned");
 }
 
 /// The reader plugin.

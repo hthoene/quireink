@@ -197,6 +197,9 @@ pub struct ListView {
     pub area: Rect,
     pub row: u32,
     pub focus: usize,
+    /// Whether the focused row is highlighted; off while the focus is on
+    /// another element of the screen.
+    pub active: bool,
 }
 
 impl ListView {
@@ -205,6 +208,7 @@ impl ListView {
             area,
             row: row.max(1),
             focus: 0,
+            active: true,
         }
     }
 
@@ -273,7 +277,7 @@ impl ListView {
         let first = self.page() * self.rows();
         for (slot, index) in (first..len).take(self.rows()).enumerate() {
             let rect = self.row_rect(slot);
-            let focused = index == self.focus;
+            let focused = self.active && index == self.focus;
             if focused {
                 fill(canvas, rect, Color::BLACK);
             } else {

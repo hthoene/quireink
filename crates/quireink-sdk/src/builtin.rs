@@ -68,6 +68,10 @@ pub mod params {
     pub const MENU: &str = "menu";
     /// An id, e.g. of the setting in `core.setting-changed`.
     pub const ID: &str = "id";
+    /// A book's title.
+    pub const TITLE: &str = "title";
+    /// Reading progress in percent, e.g. `12.5`.
+    pub const PROGRESS: &str = "progress";
 }
 
 /// Events emitted by the kernel.
@@ -79,6 +83,14 @@ pub mod events {
     pub const STARTED: Id = Id::new_static("core.started");
     /// After a setting changed; parameter [`ID`](super::params::ID).
     pub const SETTING_CHANGED: Id = Id::new_static("core.setting-changed");
+    /// A book was opened for reading. Every reader plugin emits it, so home
+    /// screens, statistics or sync plugins work with any reader. Parameters
+    /// [`PATH`](super::params::PATH), [`TITLE`](super::params::TITLE),
+    /// [`PROGRESS`](super::params::PROGRESS).
+    pub const BOOK_OPENED: Id = Id::new_static("core.book-opened");
+    /// The reader moved to another page; same parameters as
+    /// [`BOOK_OPENED`].
+    pub const PAGE_TURNED: Id = Id::new_static("core.page-turned");
 }
 
 /// Standard screens.

@@ -1,9 +1,8 @@
 //! A simple file browser for the library folder.
 //!
 //! It lists folders and every file a format plugin can open, and opens books
-//! in the `core.reader` slot. It is bound to the `core.home` and
-//! `core.library` slots with default priority, so a dashboard or bookshelf
-//! plugin can take over the home screen while this stays the library view.
+//! in the `core.reader` slot. It is bound to `core.library`, and to
+//! `core.home` only as a fallback when no home screen plugin is installed.
 //!
 //! Works with buttons only (up/down or left/right move the selection,
 //! page buttons scroll, confirm opens, back goes to the parent folder) and
@@ -52,7 +51,9 @@ impl Plugin for Files {
             title: Cow::Borrowed("files.title"),
             factory: Box::new(|env, params| Box::new(Browser::new(env, params))),
         })?;
-        r.bind_slot(slots::HOME, SCREEN, Priority::DEFAULT)?;
+        // The library; also the start screen when no home screen plugin
+        // is installed.
+        r.bind_slot(slots::HOME, SCREEN, Priority::FALLBACK)?;
         r.bind_slot(slots::LIBRARY, SCREEN, Priority::DEFAULT)?;
         r.add_setting(SettingSpec {
             id: ROOT,
