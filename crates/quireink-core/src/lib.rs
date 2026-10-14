@@ -405,6 +405,8 @@ struct ActiveScreen {
     id: Id,
     /// The slot it was opened for, if any.
     slot: Option<Id>,
+    /// What it was opened with, e.g. the book.
+    params: Params,
     screen: Box<dyn Screen>,
 }
 
@@ -1118,10 +1120,15 @@ impl Kernel {
                     .iter()
                     .position(|s| s.slot.as_ref() == Some(&slot));
                 if let Some(index) = open {
-                    if index + 1 < self.stack.len() {
-                        self.close_above(index);
+                    if params.is_empty() || self.stack[index].params == params {
+                        if index + 1 < self.stack.len() {
+                            self.close_above(index);
+                        }
+                        return;
                     }
-                    return;
+                    // The slot for something else (e.g. another book):
+                    // opened anew in place of the old screen.
+                    self.stack.truncate(index);
                 }
                 match self.registry.resolve_slot(slot.as_str()).cloned() {
                     Some(screen) => self.open(screen, Some(slot), &params),
@@ -1184,7 +1191,12 @@ impl Kernel {
         };
         let env = self.shared.env(self.now);
         let screen = (spec.factory)(&env, params);
-        self.stack.push(ActiveScreen { id, slot, screen });
+        self.stack.push(ActiveScreen {
+            id,
+            slot,
+            params: params.clone(),
+            screen,
+        });
         let top = self.stack.len() - 1;
         let overlay = self.overlay(top);
         self.screen_changed(self.region_of(top), overlay.is_some());

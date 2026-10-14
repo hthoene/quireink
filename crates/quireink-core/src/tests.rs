@@ -721,6 +721,38 @@ fn screens_below_overlays_redraw_themselves() {
 }
 
 #[test]
+fn open_slots_reopen_for_other_params() {
+    let log = log();
+    let mut kernel = Kernel::builder(DEVICE)
+        .plugin(OverlayPlugin { log: log.clone() })
+        .build()
+        .unwrap();
+    kernel.start(Instant(0));
+    let open = |kernel: &mut Kernel, menu: &str| {
+        kernel.apply(Command::OpenSlot(
+            slots::MENU,
+            quireink_sdk::Params::new().with("menu", menu.to_string()),
+        ));
+        kernel.finish();
+    };
+    let shown = |kernel: &Kernel| -> Vec<String> {
+        kernel
+            .stack
+            .iter()
+            .map(|s| alloc::format!("{} {}", s.id, s.params.get("menu").unwrap_or("-")))
+            .collect()
+    };
+    open(&mut kernel, "a");
+    assert_eq!(shown(&kernel), ["ov.base -", "ov.half a"]);
+    // The same slot with the same params is just brought to the front.
+    open(&mut kernel, "a");
+    assert_eq!(shown(&kernel), ["ov.base -", "ov.half a"]);
+    // Other params (e.g. another book) open it anew in its place.
+    open(&mut kernel, "b");
+    assert_eq!(shown(&kernel), ["ov.base -", "ov.half b"]);
+}
+
+#[test]
 fn menus_follow_order_and_user_definitions() {
     let log = log();
     let kernel = Kernel::builder(DEVICE)
