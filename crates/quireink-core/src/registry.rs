@@ -1,11 +1,11 @@
 //! Contribution registries and plugin registration.
 
 use alloc::borrow::Cow;
-use alloc::collections::BTreeMap;
 use alloc::string::ToString;
 use alloc::vec::Vec;
 
 use quireink_i18n::Catalog;
+use quireink_sdk::collections::VecMap;
 use quireink_sdk::{
     ActionSpec, EventHandler, FontSpec, FormatSpec, Id, MenuEntry, Priority, RegisterError,
     Registrar, ScreenSpec, SettingSpec, SlotSpec,
@@ -23,15 +23,24 @@ struct SlotCandidate {
 /// which live in their own stores.
 #[derive(Debug, Default)]
 pub(crate) struct Registry {
-    pub(crate) actions: BTreeMap<Id, ActionSpec>,
-    pub(crate) screens: BTreeMap<Id, ScreenSpec>,
-    pub(crate) slots: BTreeMap<Id, SlotSpec>,
+    pub(crate) actions: VecMap<Id, ActionSpec>,
+    pub(crate) screens: VecMap<Id, ScreenSpec>,
+    pub(crate) slots: VecMap<Id, SlotSpec>,
     candidates: Vec<SlotCandidate>,
     /// Slot bindings from the user's configuration.
-    user_bindings: BTreeMap<Id, Id>,
+    user_bindings: VecMap<Id, Id>,
 }
 
 impl Registry {
+    /// Releases unused capacity once registration is complete.
+    pub(crate) fn shrink_to_fit(&mut self) {
+        self.actions.shrink_to_fit();
+        self.screens.shrink_to_fit();
+        self.slots.shrink_to_fit();
+        self.candidates.shrink_to_fit();
+        self.user_bindings.shrink_to_fit();
+    }
+
     /// The screen bound to `slot`: the user's choice if that screen exists,
     /// otherwise the candidate with the highest priority (the later
     /// registration wins a tie).
@@ -235,7 +244,7 @@ impl Registrar for PluginRegistrar<'_> {
     }
 
     fn add_translations(&mut self, source: Cow<'static, str>) -> Result<(), RegisterError> {
-        let catalog = Catalog::parse(&source).map_err(|error| RegisterError::Parse {
+        let catalog = Catalog::parse(source).map_err(|error| RegisterError::Parse {
             line: match &error {
                 quireink_i18n::CatalogError::Syntax(e) => e.line,
                 quireink_i18n::CatalogError::UnknownPluralRule { line }

@@ -43,6 +43,11 @@ impl Formats {
         Self::default()
     }
 
+    /// Releases unused capacity once registration is complete.
+    pub fn shrink_to_fit(&mut self) {
+        self.specs.shrink_to_fit();
+    }
+
     /// Registers a format. Later registrations win for shared extensions,
     /// so a plugin can replace a built-in format.
     pub fn add(&mut self, spec: FormatSpec) -> Result<(), RegisterError> {

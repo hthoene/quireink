@@ -1,4 +1,3 @@
-use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 use core::cell::RefCell;
 use core::fmt;
@@ -8,6 +7,7 @@ use quireink_graphics::Canvas;
 use quireink_platform::Color;
 use quireink_text::{Font, GlyphCache, LineMetrics};
 
+use crate::collections::VecMap;
 use crate::id::Id;
 use crate::plugin::{Priority, RegisterError};
 
@@ -28,7 +28,7 @@ pub struct FontSpec {
 pub struct Fonts {
     fonts: Vec<(Id, Font)>,
     candidates: Vec<(Id, Id, Priority)>,
-    user: BTreeMap<Id, Id>,
+    user: VecMap<Id, Id>,
     cache: RefCell<GlyphCache>,
 }
 
@@ -49,7 +49,7 @@ impl Fonts {
         Self {
             fonts: Vec::new(),
             candidates: Vec::new(),
-            user: BTreeMap::new(),
+            user: VecMap::new(),
             cache: RefCell::new(GlyphCache::new(cache_bytes)),
         }
     }
@@ -68,6 +68,13 @@ impl Fonts {
     }
 
     /// The user's explicit choice for a role.
+    /// Releases unused capacity once registration is complete.
+    pub fn shrink_to_fit(&mut self) {
+        self.fonts.shrink_to_fit();
+        self.candidates.shrink_to_fit();
+        self.user.shrink_to_fit();
+    }
+
     pub fn bind_user(&mut self, role: Id, font: Id) {
         self.user.insert(role, font);
     }

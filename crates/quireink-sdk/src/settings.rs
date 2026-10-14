@@ -1,9 +1,9 @@
 use alloc::borrow::Cow;
-use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
 
+use crate::collections::VecMap;
 use crate::id::Id;
 use crate::plugin::RegisterError;
 
@@ -110,8 +110,8 @@ impl core::error::Error for SettingError {}
 /// with [`Command::SetSetting`](crate::Command::SetSetting).
 #[derive(Debug, Default)]
 pub struct Settings {
-    specs: BTreeMap<Id, SettingSpec>,
-    values: BTreeMap<Id, SettingValue>,
+    specs: VecMap<Id, SettingSpec>,
+    values: VecMap<Id, SettingValue>,
     /// Ids in registration order, for settings UIs.
     order: Vec<Id>,
 }
@@ -119,6 +119,13 @@ pub struct Settings {
 impl Settings {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Releases unused capacity once registration is complete.
+    pub fn shrink_to_fit(&mut self) {
+        self.specs.shrink_to_fit();
+        self.values.shrink_to_fit();
+        self.order.shrink_to_fit();
     }
 
     /// Registers a setting. Its default must be valid.

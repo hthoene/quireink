@@ -346,6 +346,7 @@ impl KernelBuilder {
                 .settings
                 .bool(core_settings::NIGHT_MODE.as_str()),
         );
+        kernel.shrink_to_fit();
         Ok(kernel)
     }
 }
@@ -453,6 +454,23 @@ impl Kernel {
             });
         }
         self.finish()
+    }
+
+    /// Releases memory reserved while plugins registered: on small devices
+    /// every kilobyte counts, and registries are not modified afterwards.
+    fn shrink_to_fit(&mut self) {
+        self.registry.shrink_to_fit();
+        self.keymap_sources.shrink_to_fit();
+        self.keymap_presets.shrink_to_fit();
+        self.subscriptions.shrink_to_fit();
+        self.plugins.shrink_to_fit();
+        self.warnings.shrink_to_fit();
+        let shared = &mut self.shared;
+        shared.settings.shrink_to_fit();
+        shared.menus.shrink_to_fit();
+        shared.fonts.shrink_to_fit();
+        shared.formats.shrink_to_fit();
+        shared.translator.shrink_to_fit();
     }
 
     /// Draws everything that changed since the last call and passes it to
@@ -1039,6 +1057,7 @@ impl Kernel {
         for (origin, source) in &self.keymap_sources {
             keymap.load(source, *origin, *origin != Origin::User);
         }
+        keymap.shrink_to_fit();
         self.keymap = keymap;
     }
 

@@ -30,6 +30,7 @@ extern crate alloc;
 
 mod action;
 pub mod builtin;
+pub mod collections;
 mod command;
 mod env;
 mod event;

@@ -1,12 +1,12 @@
 //! Layered key maps: raw input → action id.
 
 use alloc::borrow::Cow;
-use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use quireink_platform::Point;
 use quireink_sdk::builtin::GLOBAL_KEYMAP_LAYER;
+use quireink_sdk::collections::VecMap;
 use quireink_sdk::{Direction, Id};
 
 /// Section prefix of key map layers in config files.
@@ -139,10 +139,18 @@ pub(crate) struct Problem {
 
 #[derive(Debug, Default)]
 pub(crate) struct Keymap {
-    layers: BTreeMap<String, BTreeMap<InputKey, Binding>>,
+    layers: VecMap<String, VecMap<InputKey, Binding>>,
 }
 
 impl Keymap {
+    /// Releases unused capacity once all sources are loaded.
+    pub(crate) fn shrink_to_fit(&mut self) {
+        self.layers.shrink_to_fit();
+        for layer in self.layers.values_mut() {
+            layer.shrink_to_fit();
+        }
+    }
+
     /// Loads bindings from `source`.
     ///
     /// With `strict`, sections other than `[keymap.*]` are problems;
@@ -200,7 +208,9 @@ impl Keymap {
                 problem(&mut problems, entry.line, "invalid action id");
                 continue;
             };
-            let bindings = self.layers.entry(String::from(layer)).or_default();
+            let bindings = self
+                .layers
+                .get_or_insert_with(String::from(layer), VecMap::new);
             let overrides = bindings.get(&input).is_none_or(|b| origin >= b.origin);
             if overrides {
                 bindings.insert(input, Binding { action, origin });

@@ -1,7 +1,7 @@
 use alloc::borrow::Cow;
-use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
+use crate::collections::VecMap;
 use crate::id::Id;
 
 /// Puts an action into a menu.
@@ -30,13 +30,23 @@ pub struct MenuItem<'a> {
 pub struct Menus {
     entries: Vec<MenuEntry>,
     /// Menus redefined by the user (`[menus] reader.menu = a, b, c`).
-    custom: BTreeMap<Id, Vec<Id>>,
-    titles: BTreeMap<Id, Cow<'static, str>>,
+    custom: VecMap<Id, Vec<Id>>,
+    titles: VecMap<Id, Cow<'static, str>>,
 }
 
 impl Menus {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Releases unused capacity once registration is complete.
+    pub fn shrink_to_fit(&mut self) {
+        self.entries.shrink_to_fit();
+        self.custom.shrink_to_fit();
+        for menu in self.custom.values_mut() {
+            menu.shrink_to_fit();
+        }
+        self.titles.shrink_to_fit();
     }
 
     pub fn add(&mut self, entry: MenuEntry) {

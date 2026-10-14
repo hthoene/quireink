@@ -67,6 +67,11 @@ impl Translator {
         self.rebuild_order();
     }
 
+    /// Releases unused capacity once all catalogs are added.
+    pub fn shrink_to_fit(&mut self) {
+        self.catalogs.shrink_to_fit();
+    }
+
     /// Selects the UI language, e.g. `de` or `pt-BR`.
     pub fn set_language(&mut self, language: &str) {
         self.language.clear();
@@ -135,6 +140,14 @@ impl Translator {
                 chain.push(language);
             }
         }
+        // Only catalogs in the chain keep their message index.
+        for catalog in &mut self.catalogs {
+            if chain.contains(&catalog.language()) {
+                catalog.load();
+            } else {
+                catalog.unload();
+            }
+        }
         self.order.clear();
         for language in chain {
             let matching = self
@@ -146,6 +159,7 @@ impl Translator {
                 .map(|(i, _)| i as u16);
             self.order.extend(matching);
         }
+        self.order.shrink_to_fit();
     }
 }
 
