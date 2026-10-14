@@ -49,7 +49,8 @@ impl Plugin for TxtFormat {
             id: FORMAT,
             title: Cow::Borrowed("format-txt.title"),
             extensions: vec![Cow::Borrowed("txt"), Cow::Borrowed("text")],
-            open: Box::new(|storage, path| {
+            // Plain text has no styles of its own.
+            open: Box::new(|storage, path, _| {
                 TxtDocument::open(storage, path).map(|d| Box::new(d) as Box<dyn Document>)
             }),
         })?;

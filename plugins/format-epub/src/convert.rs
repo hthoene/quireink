@@ -95,8 +95,14 @@ struct Frame {
 }
 
 /// What an element sets: defaults for its name, then the stylesheet
-/// rules, then its own `align` and `style` attributes.
-fn element_props(tag: &str, attrs: &quireink_sdk::xml::Attrs<'_>, rules: &Rules) -> Props {
+/// rules, then its own `align` and `style` attributes (CSS only with
+/// `styles`).
+fn element_props(
+    tag: &str,
+    attrs: &quireink_sdk::xml::Attrs<'_>,
+    rules: &Rules,
+    styles: bool,
+) -> Props {
     let mut props = Props::default();
     match tag {
         "b" | "strong" => props.bold = Some(true),
@@ -109,7 +115,7 @@ fn element_props(tag: &str, attrs: &quireink_sdk::xml::Attrs<'_>, rules: &Rules)
     if let Some(value) = attrs.get("align") {
         props.align = parse_align(&value).or(props.align);
     }
-    if let Some(css) = attrs.get("style") {
+    if styles && let Some(css) = attrs.get("style") {
         props.apply(&Props::parse(&css));
     }
     props
@@ -148,6 +154,8 @@ struct Converter<'a> {
     stack: Vec<Frame>,
     /// The book's stylesheet rules, plus those of `<style>` elements.
     rules: Rules,
+    /// Whether the book's CSS applies.
+    styles: bool,
     css: css::Parser,
     /// Directory of the chapter in the archive, for relative links.
     base: String,
@@ -249,7 +257,7 @@ impl Converter<'_> {
         let _ = self_closing;
         let tag = local_name(name).to_ascii_lowercase();
         let props = if self.hidden == 0 {
-            element_props(&tag, &attrs, &self.rules)
+            element_props(&tag, &attrs, &self.rules, self.styles)
         } else {
             Props::default()
         };
@@ -353,7 +361,9 @@ impl Converter<'_> {
 
     fn characters(&mut self, text: &str) {
         if self.stack.last().is_some_and(|f| f.tag == "style") {
-            self.css.feed(text, &mut self.rules);
+            if self.styles {
+                self.css.feed(text, &mut self.rules);
+            }
             return;
         }
         if self.hidden > 0 {
@@ -538,6 +548,7 @@ pub(crate) fn convert(
     entry: &Entry,
     paths: &CachePaths,
     rules: Rules,
+    styles: bool,
 ) -> Result<u32, DocumentError> {
     let base = String::from(entry.name.rfind('/').map_or("", |i| &entry.name[..=i]));
     let _ = storage.remove(&paths.end);
@@ -557,6 +568,7 @@ pub(crate) fn convert(
         align: None,
         stack: Vec::new(),
         rules,
+        styles,
         css: css::Parser::default(),
         base,
         images: Vec::new(),

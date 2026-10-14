@@ -57,8 +57,9 @@ impl Plugin for EpubFormat {
             id: FORMAT,
             title: Cow::Borrowed("format-epub.title"),
             extensions: vec![Cow::Borrowed("epub")],
-            open: Box::new(|storage, path| {
-                EpubDocument::open(storage, path).map(|d| Box::new(d) as Box<dyn Document>)
+            open: Box::new(|storage, path, options| {
+                EpubDocument::open_with(storage, path, options.publisher_styles)
+                    .map(|d| Box::new(d) as Box<dyn Document>)
             }),
         })?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/en.ini")))?;
@@ -300,6 +301,43 @@ mod tests {
                 (String::from("Mitte"), Align::Center, TextStyle::REGULAR),
                 (String::from("Fett"), Align::Auto, TextStyle::BOLD),
                 (String::from("Normal"), Align::Auto, TextStyle::REGULAR),
+            ]
+        );
+    }
+
+    #[test]
+    fn ignores_stylesheets_without_publisher_styles() {
+        let ch2 = String::from(
+            "<html><head><style>p.b { font-weight: bold }</style></head><body>\
+             <p class=\"c\">Mitte</p><p class=\"b\">Fett?</p>\
+             <p style=\"font-style: italic\">Kursiv?</p><p><b>Fett</b></p></body></html>",
+        );
+        let storage = epub(ch2);
+        // With styles first, so both caches exist side by side.
+        let styled = EpubDocument::open(&storage, "books/test.epub").unwrap();
+        assert_eq!(
+            styled
+                .block_at(&storage, Locator::new(1, 0))
+                .unwrap()
+                .unwrap()
+                .align,
+            Align::Center
+        );
+        let doc = EpubDocument::open_with(&storage, "books/test.epub", false).unwrap();
+        let mut at = Locator::new(1, 0);
+        let mut found = Vec::new();
+        while let Some(block) = doc.block_at(&storage, at).unwrap() {
+            at = Locator::new(1, block.end);
+            found.push((block.text.clone(), block.align, block.style_at(0)));
+        }
+        assert_eq!(
+            found,
+            [
+                (String::from("Mitte"), Align::Auto, TextStyle::REGULAR),
+                (String::from("Fett?"), Align::Auto, TextStyle::REGULAR),
+                (String::from("Kursiv?"), Align::Auto, TextStyle::REGULAR),
+                // Markup stays.
+                (String::from("Fett"), Align::Auto, TextStyle::BOLD),
             ]
         );
     }

@@ -90,6 +90,8 @@ pub mod settings {
     pub const OPEN_LAST: Id = Id::new_static("reader.open-last");
     /// Hyphenate words at line ends, in the book's language.
     pub const HYPHENATE: Id = Id::new_static("reader.hyphenate");
+    /// Apply the book's own styles (an EPUB's CSS).
+    pub const PUBLISHER_STYLES: Id = Id::new_static("reader.publisher-styles");
     /// A tap on the top right corner sets or removes a bookmark.
     pub const CORNER_BOOKMARK: Id = Id::new_static("reader.corner-bookmark");
 }
@@ -249,6 +251,12 @@ impl Plugin for Reader {
                 .description("reader.setting.justify.help"),
             flag(settings::HYPHENATE, "reader.setting.hyphenate", true)
                 .description("reader.setting.hyphenate.help"),
+            flag(
+                settings::PUBLISHER_STYLES,
+                "reader.setting.publisher-styles",
+                true,
+            )
+            .description("reader.setting.publisher-styles.help"),
             flag(settings::INDENT, "reader.setting.indent", true)
                 .advanced()
                 .description("reader.setting.indent.help"),
@@ -334,6 +342,7 @@ impl Plugin for Reader {
             (LAYOUT_MENU, settings::MARGIN, 30),
             (LAYOUT_MENU, settings::JUSTIFY, 40),
             (LAYOUT_MENU, settings::HYPHENATE, 50),
+            (LAYOUT_MENU, settings::PUBLISHER_STYLES, 60),
             (MORE_MENU, actions::TOGGLE_BOOKMARK, 10),
             (MORE_MENU, actions::SELECT, 20),
             (MORE_MENU, core_actions::LIBRARY, 30),

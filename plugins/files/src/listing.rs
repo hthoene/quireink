@@ -216,7 +216,7 @@ mod tests {
                 id: quireink_sdk::Id::new_static("test.txt"),
                 title: alloc::borrow::Cow::Borrowed("TXT"),
                 extensions: alloc::vec![alloc::borrow::Cow::Borrowed("txt")],
-                open: alloc::boxed::Box::new(|_, _| {
+                open: alloc::boxed::Box::new(|_, _, _| {
                     Err(quireink_sdk::document::DocumentError::UnsupportedFormat)
                 }),
             })

@@ -30,6 +30,11 @@ pub struct EpubDocument {
     metadata: Metadata,
     toc_len: u32,
     cache: String,
+    /// Where converted chapters are: `cache`, or its `plain` folder when
+    /// the book's styles are off.
+    chapters: String,
+    /// Whether the book's CSS applies.
+    styles: bool,
     /// Archive path of the cover image.
     cover: Option<String>,
 }
@@ -50,6 +55,11 @@ fn paths(cache: &str, section: u32) -> CachePaths {
     }
 }
 
+/// Where chapters converted without the book's styles are kept.
+fn plain_cache(cache: &str) -> String {
+    alloc::format!("{cache}/plain")
+}
+
 fn u32_at(storage: &dyn Storage, path: &str, offset: u64) -> Result<u32, StorageError> {
     let mut buf = [0u8; 4];
     if storage.read_at(path, offset, &mut buf)? != 4 {
@@ -60,6 +70,16 @@ fn u32_at(storage: &dyn Storage, path: &str, offset: u64) -> Result<u32, Storage
 
 impl EpubDocument {
     pub fn open(storage: &dyn Storage, path: &str) -> Result<Self, DocumentError> {
+        Self::open_with(storage, path, true)
+    }
+
+    /// Opens a book; without `styles` its CSS is ignored (chapters are
+    /// then converted into a cache of their own).
+    pub fn open_with(
+        storage: &dyn Storage,
+        path: &str,
+        styles: bool,
+    ) -> Result<Self, DocumentError> {
         let archive = ZipArchive::open(storage, path).map_err(package::error)?;
         let cache = alloc::format!("{}/{:016x}", Env::plugin_dir(PLUGIN.as_str()), fnv(path));
         let size = storage.size(path)?;
@@ -67,9 +87,18 @@ impl EpubDocument {
             Some(package) => package,
             None => {
                 // Another book, file version or cache format: start over.
-                package::invalidate(storage, &cache, |section| paths(&cache, section).end);
+                let plain = plain_cache(&cache);
+                package::invalidate(storage, &cache, |section| {
+                    let _ = storage.remove(&paths(&plain, section).end);
+                    paths(&cache, section).end
+                });
                 package::build(storage, &archive, &cache, size)?
             }
+        };
+        let chapters = if styles {
+            cache.clone()
+        } else {
+            plain_cache(&cache)
         };
         let mut metadata = package.metadata;
         if metadata.title.is_none() {
@@ -84,11 +113,13 @@ impl EpubDocument {
             cover: package.cover,
             archive,
             cache,
+            chapters,
+            styles,
         })
     }
 
     fn paths(&self, section: u32) -> CachePaths {
-        paths(&self.cache, section)
+        paths(&self.chapters, section)
     }
 
     fn length(&self, section: u32) -> Option<u32> {
@@ -111,8 +142,12 @@ impl EpubDocument {
                     .archive
                     .entry_by_record(storage, self.spine[section as usize].record)
                     .map_err(package::error)?;
-                let rules = package::styles(storage, &self.cache);
-                convert::convert(storage, &self.archive, &entry, &paths, rules)?
+                let rules = if self.styles {
+                    package::styles(storage, &self.cache)
+                } else {
+                    Default::default()
+                };
+                convert::convert(storage, &self.archive, &entry, &paths, rules, self.styles)?
             }
         };
         if let Some(slot) = self.lengths.get(section as usize) {

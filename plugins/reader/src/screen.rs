@@ -150,7 +150,7 @@ impl Typography {
         let key = format!(
             "{:016x}",
             fnv(&format!(
-                "{}|{}|{}|{}|{size}|{line_height}|{}|{}|{justify}|{width}x{height}|{}",
+                "{}|{}|{}|{}|{size}|{line_height}|{}|{}|{justify}|{width}x{height}|{}|{}",
                 font.id(),
                 face_id(env, &fonts::READING_BOLD),
                 face_id(env, &fonts::READING_ITALIC),
@@ -158,6 +158,7 @@ impl Typography {
                 style.indent,
                 style.paragraph_spacing,
                 hyphenation.as_deref().unwrap_or("-"),
+                settings.bool(crate::settings::PUBLISHER_STYLES.as_str()),
             ))
         );
         Self {
@@ -555,7 +556,14 @@ impl Book {
             .get(params::PATH)
             .ok_or_else(|| env.i18n.tr("reader.no-book").to_string())?;
         let error = |e: DocumentError| format!("{}\n{e}", env.i18n.tr("reader.error"));
-        let document = env.formats.open(env.storage, path).map_err(error)?;
+        let styles = env
+            .settings
+            .bool(crate::settings::PUBLISHER_STYLES.as_str());
+        let options = quireink_sdk::OpenOptions::default().publisher_styles(styles);
+        let document = env
+            .formats
+            .open_with(env.storage, path, &options)
+            .map_err(error)?;
         let font = env
             .fonts
             .role(fonts::READING.as_str())
@@ -1316,6 +1324,16 @@ impl Screen for ReaderScreen {
             return;
         };
         let id = params.get(params::ID).unwrap_or_default();
+        if *event == events::SETTING_CHANGED && id == crate::settings::PUBLISHER_STYLES.as_str() {
+            // Another conversion of the book: open it again where it was.
+            let env = *cx.env();
+            let path = book.path.clone();
+            self.selection = None;
+            self.book = Book::open(&env, &Params::new().with(params::PATH, path));
+            cx.request_redraw();
+            cx.wake_at(env.now);
+            return;
+        }
         let affects_layout = id.starts_with("reader.") && id != crate::settings::OPEN_LAST.as_str();
         if *event == events::SETTING_CHANGED && affects_layout {
             self.selection = None;

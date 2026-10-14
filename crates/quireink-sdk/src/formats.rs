@@ -10,7 +10,32 @@ use crate::id::Id;
 use crate::plugin::RegisterError;
 
 /// Opens a file of a format as a [`Document`].
-pub type FormatOpener = Box<dyn Fn(&dyn Storage, &str) -> Result<Box<dyn Document>, DocumentError>>;
+pub type FormatOpener =
+    Box<dyn Fn(&dyn Storage, &str, &OpenOptions) -> Result<Box<dyn Document>, DocumentError>>;
+
+/// How a document is opened.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct OpenOptions {
+    /// Apply the book's own styles (e.g. the CSS of an EPUB). Without
+    /// them the text keeps only its markup: emphasis, headings, lists.
+    pub publisher_styles: bool,
+}
+
+impl Default for OpenOptions {
+    fn default() -> Self {
+        Self {
+            publisher_styles: true,
+        }
+    }
+}
+
+impl OpenOptions {
+    pub fn publisher_styles(mut self, on: bool) -> Self {
+        self.publisher_styles = on;
+        self
+    }
+}
 
 /// A file format contribution (TXT, EPUB, FB2, …).
 pub struct FormatSpec {
@@ -78,16 +103,26 @@ impl Formats {
         self.for_path(path).is_some()
     }
 
-    /// Opens `path` with the matching format.
+    /// Opens `path` with the matching format, as the book intends.
     pub fn open(
         &self,
         storage: &dyn Storage,
         path: &str,
     ) -> Result<Box<dyn Document>, DocumentError> {
+        self.open_with(storage, path, &OpenOptions::default())
+    }
+
+    /// Opens `path` with the matching format and `options`.
+    pub fn open_with(
+        &self,
+        storage: &dyn Storage,
+        path: &str,
+        options: &OpenOptions,
+    ) -> Result<Box<dyn Document>, DocumentError> {
         let spec = self
             .for_path(path)
             .ok_or(DocumentError::UnsupportedFormat)?;
-        (spec.open)(storage, path)
+        (spec.open)(storage, path, options)
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &FormatSpec> {
@@ -105,7 +140,7 @@ mod tests {
             id: Id::new_static(id),
             title: Cow::Borrowed(""),
             extensions: vec![Cow::Borrowed(ext)],
-            open: Box::new(|_, _| Err(DocumentError::UnsupportedFormat)),
+            open: Box::new(|_, _, _| Err(DocumentError::UnsupportedFormat)),
         }
     }
 

@@ -56,7 +56,7 @@ pub use command::Command;
 pub use env::{Env, Metrics};
 pub use event::EventHandler;
 pub use fonts::{FontHandle, FontSpec, Fonts};
-pub use formats::{FormatOpener, FormatSpec, Formats};
+pub use formats::{FormatOpener, FormatSpec, Formats, OpenOptions};
 pub use gesture::{Direction, Gesture, GestureKind};
 pub use hyphenation::{Hyphenation, HyphenationSpec};
 pub use id::{Id, InvalidId};
