@@ -24,6 +24,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use quireink_sdk::builtin::{actions, events, params, slots};
+use quireink_sdk::document::ImageRef;
 use quireink_sdk::ui::{self, ListChange, ListView, UiStyle};
 use quireink_sdk::{
     Arg, Canvas, Color, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Manifest, MenuEntry,
@@ -101,6 +102,8 @@ struct Dashboard {
     items: Vec<Item>,
     /// The focus is on the card rather than the list.
     on_card: bool,
+    /// The current book's cover, once looked up: `(path, cover)`.
+    cover: Option<(String, Option<ImageRef>)>,
 }
 
 impl Dashboard {
@@ -115,6 +118,7 @@ impl Dashboard {
             current: None,
             items: Vec::new(),
             on_card: false,
+            cover: None,
         };
         dashboard.load(env);
         dashboard
@@ -249,16 +253,33 @@ impl Dashboard {
             border,
             Color::BLACK,
         );
-        let pad = style.margin as f32 + border as f32;
-        let inner_w = f32::from(r.width) - 2.0 * pad;
-        let third = r.height / 3;
-        let line = |i: u16| Rect::new(r.x, r.y + i * third, r.width, third);
         let gray = Color::gray(90);
-
         let Some(book) = &self.current else {
             ui::draw_message(canvas, env, &style, r, env.i18n.tr("home.nothing-read"));
             return;
         };
+
+        // The cover on the left, if the book has one.
+        let inset = style.margin as u16 + border as u16;
+        let cover = self
+            .cover
+            .as_ref()
+            .filter(|(path, _)| *path == book.path)
+            .and_then(|(_, cover)| cover.as_ref());
+        let r = match cover {
+            Some(cover) => {
+                let (w, h) = ui::fit_image(cover, r.width / 4, r.height.saturating_sub(2 * inset));
+                let area = Rect::new(r.x + inset, r.y + (r.height - h) / 2, w, h);
+                ui::draw_image(canvas, env.storage, cover, area);
+                let shift = inset + w;
+                Rect::new(r.x + shift, r.y, r.width.saturating_sub(shift), r.height)
+            }
+            None => r,
+        };
+        let pad = style.margin as f32 + border as f32;
+        let inner_w = f32::from(r.width) - 2.0 * pad;
+        let third = r.height / 3;
+        let line = |i: u16| Rect::new(r.x, r.y + i * third, r.width, third);
         ui::draw_label(
             canvas,
             &font,
@@ -282,11 +303,17 @@ impl Dashboard {
             &percent,
             gray,
         );
-        let title = ui::fit(&font, style.title, &book.title, inner_w);
+        // Long titles in the body size rather than cut short.
+        let size = if font.measure(style.title, &book.title) <= inner_w {
+            style.title
+        } else {
+            style.text
+        };
+        let title = ui::fit(&font, size, &book.title, inner_w);
         ui::draw_label(
             canvas,
             &font,
-            style.title,
+            size,
             f32::from(r.x) + pad,
             line(1),
             &title,
@@ -360,6 +387,34 @@ impl Screen for Dashboard {
         // The reader may have changed the recent books meanwhile.
         let env = *cx.env();
         self.load(&env);
+        cx.wake_at(env.now);
+    }
+
+    /// Looks up the current book's cover (opening the book through its
+    /// format plugin, which caches the cover).
+    fn on_timer(&mut self, cx: &mut Cx<'_, '_>) {
+        let env = *cx.env();
+        let Some(book) = &self.current else {
+            return;
+        };
+        if self
+            .cover
+            .as_ref()
+            .is_some_and(|(path, _)| *path == book.path)
+        {
+            return;
+        }
+        let cover = env
+            .formats
+            .open(env.storage, &book.path)
+            .ok()
+            .and_then(|document| document.cover(env.storage).ok().flatten());
+        let found = cover.is_some();
+        self.cover = Some((book.path.clone(), cover));
+        if found {
+            cx.request_redraw_area(self.card);
+            cx.request_refresh(RefreshMode::Partial);
+        }
     }
 
     fn on_event(&mut self, event: &Id, _: &Params, cx: &mut Cx<'_, '_>) {
