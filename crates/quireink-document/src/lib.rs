@@ -349,6 +349,27 @@ pub struct TocEntry {
     pub at: Locator,
 }
 
+/// A link in a section's text: source offsets `start..end`, and where it
+/// goes (see [`Document::link_target`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Link {
+    pub start: u32,
+    pub end: u32,
+    pub href: String,
+}
+
+/// Whether `href` leads out of the document, e.g. to a web page: it has a
+/// scheme such as `https:` or `mailto:`.
+pub fn is_external(href: &str) -> bool {
+    href.split_once(':').is_some_and(|(scheme, _)| {
+        scheme.len() > 1
+            && scheme.starts_with(|c: char| c.is_ascii_alphabetic())
+            && scheme
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+    })
+}
+
 /// An open document.
 pub trait Document {
     fn metadata(&self) -> &Metadata;
@@ -425,6 +446,20 @@ pub trait Document {
         Err(DocumentError::Malformed(Cow::Borrowed("no embedded fonts")))
     }
 
+    /// The links of `section` that overlap source offsets `from..to`, in
+    /// order.
+    fn links(&self, storage: &dyn Storage, section: u32, from: u32, to: u32) -> Vec<Link> {
+        let _ = (storage, section, from, to);
+        Vec::new()
+    }
+
+    /// Where link `href` (of [`Document::links`]) leads in the document;
+    /// `None` for links out of it ([`is_external`]) or to nothing.
+    fn link_target(&self, storage: &dyn Storage, href: &str) -> Option<Locator> {
+        let _ = (storage, href);
+        None
+    }
+
     /// Reading progress of `at` from 0.0 to 1.0.
     fn progress(&self, at: Locator) -> f32 {
         let total: u64 = (0..self.sections())
@@ -458,6 +493,16 @@ mod tests {
             space: None,
             size: None,
             image: None,
+        }
+    }
+
+    #[test]
+    fn external_links_have_a_scheme() {
+        for href in ["https://example.org/a", "mailto:a@b.c", "HTTP://X"] {
+            assert!(is_external(href), "{href}");
+        }
+        for href in ["text/ch2.xhtml#note", "#note", "c:/x", "../a:b", ""] {
+            assert!(!is_external(href), "{href}");
         }
     }
 

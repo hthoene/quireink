@@ -264,6 +264,49 @@ mod tests {
     }
 
     #[test]
+    fn links_lead_within_and_out_of_the_book() {
+        let ch2 = String::from(
+            "<html><body><p>Siehe <a href=\"ch1.xhtml#later\">später<sup>1</sup></a> \
+             und <a href=\"#end\">unten</a>.</p>\
+             <p>Mehr <a href=\"https://example.org/x?a=1&amp;b=2\">im Netz</a>.</p>\
+             <p id=\"end\">Ende <a>ohne Ziel</a>.</p></body></html>",
+        );
+        let storage = epub(ch2);
+        let doc = EpubDocument::open(&storage, "books/test.epub").unwrap();
+        let links = doc.links(&storage, 1, 0, u32::MAX);
+        let hrefs: Vec<&str> = links.iter().map(|l| l.href.as_str()).collect();
+        assert_eq!(
+            hrefs,
+            [
+                "OEBPS/text/ch1.xhtml#later",
+                "OEBPS/text/ch 2.xhtml#end",
+                "https://example.org/x?a=1&b=2"
+            ]
+        );
+        // The ranges cover the link texts.
+        let first = doc.block_at(&storage, Locator::new(1, 0)).unwrap().unwrap();
+        let text_of = |link: &quireink_sdk::document::Link| {
+            let from = first.text_index(link.start);
+            let to = first.text_index(link.end);
+            String::from(&first.text[from..to])
+        };
+        assert_eq!(text_of(&links[0]), "später1");
+        assert_eq!(text_of(&links[1]), "unten");
+        // Only those overlapping a range.
+        let tail = doc.links(&storage, 1, links[1].start, u32::MAX);
+        assert_eq!(tail.len(), 2);
+        // Into another chapter, at the anchor.
+        let later = doc.link_target(&storage, &links[0].href).unwrap();
+        assert_eq!(later.section, 0);
+        let block = doc.block_at(&storage, later).unwrap().unwrap();
+        assert_eq!(block.text, "Später.");
+        let end = doc.link_target(&storage, &links[1].href).unwrap();
+        let block = doc.block_at(&storage, end).unwrap().unwrap();
+        assert_eq!(block.text, "Ende ohne Ziel.");
+        assert_eq!(doc.link_target(&storage, &links[2].href), None);
+    }
+
+    #[test]
     fn reads_metadata_chapters_and_toc() {
         let ch2 = String::from("<html><body><p>Zweites.</p></body></html>");
         let storage = epub(ch2);

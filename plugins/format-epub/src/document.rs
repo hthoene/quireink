@@ -4,8 +4,8 @@ use alloc::vec::Vec;
 use core::cell::Cell;
 
 use quireink_sdk::document::{
-    Align, Block, BlockKind, Document, DocumentError, EmbeddedFont, ImageRef, Locator, Metadata,
-    OffsetMap, Run, TextStyle, TocEntry,
+    Align, Block, BlockKind, Document, DocumentError, EmbeddedFont, ImageRef, Link, Locator,
+    Metadata, OffsetMap, Run, TextStyle, TocEntry,
 };
 use quireink_sdk::image::GrayFile;
 use quireink_sdk::zip::ZipArchive;
@@ -56,6 +56,7 @@ fn paths(cache: &str, section: u32) -> CachePaths {
         text: alloc::format!("{cache}/{section}.txt"),
         index: alloc::format!("{cache}/{section}.idx"),
         anchors: alloc::format!("{cache}/{section}.anc"),
+        links: alloc::format!("{cache}/{section}.lnk"),
         positions: alloc::format!("{cache}/{section}.pos"),
         end: alloc::format!("{cache}/{section}.end"),
     }
@@ -295,6 +296,36 @@ impl EpubDocument {
         })
     }
 
+    /// Calls `visit` with each line of a cache file until it returns
+    /// `false`, reading in small pieces.
+    fn lines(storage: &dyn Storage, path: &str, mut visit: impl FnMut(&str) -> bool) {
+        let mut chunk = [0u8; 256];
+        let mut line: Vec<u8> = Vec::new();
+        let mut offset = 0u64;
+        loop {
+            let Ok(n) = storage.read_at(path, offset, &mut chunk) else {
+                return;
+            };
+            offset += n as u64;
+            for &byte in &chunk[..n] {
+                if byte != b'\n' {
+                    // Longer lines are cut; nothing sensible is that long.
+                    if line.len() < 2048 {
+                        line.push(byte);
+                    }
+                    continue;
+                }
+                if !visit(core::str::from_utf8(&line).unwrap_or_default()) {
+                    return;
+                }
+                line.clear();
+            }
+            if n == 0 {
+                return;
+            }
+        }
+    }
+
     /// The offset of anchor `id` in a chapter, scanning the anchor file
     /// line by line.
     fn anchor(&self, storage: &dyn Storage, section: u32, id: &str) -> Option<u32> {
@@ -485,6 +516,51 @@ impl Document for EpubDocument {
         let i = low.saturating_sub(1);
         self.read_block(storage, &paths, length, blocks, i)
             .map(Some)
+    }
+
+    fn links(&self, storage: &dyn Storage, section: u32, from: u32, to: u32) -> Vec<Link> {
+        let mut links = Vec::new();
+        let Ok((paths, ..)) = self.chapter(storage, section) else {
+            return links;
+        };
+        Self::lines(storage, &paths.links, |line| {
+            let mut parts = line.splitn(3, '\t');
+            let (Some(start), Some(end), Some(href)) = (parts.next(), parts.next(), parts.next())
+            else {
+                return true;
+            };
+            let (Ok(start), Ok(end)) = (start.parse::<u32>(), end.parse::<u32>()) else {
+                return true;
+            };
+            if start >= to {
+                return false;
+            }
+            if end > from {
+                links.push(Link {
+                    start,
+                    end,
+                    href: String::from(href),
+                });
+            }
+            true
+        });
+        links
+    }
+
+    fn link_target(&self, storage: &dyn Storage, href: &str) -> Option<Locator> {
+        if quireink_sdk::document::is_external(href) {
+            return None;
+        }
+        let (path, fragment) = match href.split_once('#') {
+            Some((path, fragment)) => (path, Some(fragment)),
+            None => (href, None),
+        };
+        let entry = self.archive.entry(storage, path).ok()??;
+        let section = self.spine.iter().position(|c| c.record == entry.record())? as u32;
+        let offset = fragment
+            .and_then(|id| self.anchor(storage, section, id))
+            .unwrap_or(0);
+        Some(Locator::new(section, offset))
     }
 
     fn toc_len(&self, _: &dyn Storage) -> u32 {

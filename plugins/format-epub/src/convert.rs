@@ -11,6 +11,9 @@
 //!   sets none). Kept apart from the text so positions in it stay the same
 //!   when more is stored per block.
 //! - `<n>.anc`: `id<TAB>offset` lines for anchors (table of contents).
+//! - `<n>.lnk`: `start<TAB>end<TAB>href` lines for links, in order: `href`
+//!   as an archive path with its fragment (`text/ch2.xhtml#note3`), or as
+//!   written for links out of the book.
 //! - `<n>.pos`: `offset<TAB>path` lines: the element each record comes
 //!   from, as a path below `<body>` such as `div[2]/p[22]`, for positions
 //!   other readers understand (KOReader's XPointers).
@@ -58,6 +61,7 @@ pub(crate) struct CachePaths {
     pub text: String,
     pub index: String,
     pub anchors: String,
+    pub links: String,
     pub positions: String,
     pub end: String,
 }
@@ -123,6 +127,8 @@ struct Frame {
     /// Its number among its parent's children of the same name (1 for
     /// the first).
     index: u32,
+    /// A link (`<a href>`): where it starts, and where it goes.
+    link: Option<(u32, String)>,
     /// How many children of each name it has had so far.
     children: Vec<(String, u32)>,
 }
@@ -182,6 +188,10 @@ struct Converter<'a> {
     out: Vec<u8>,
     index: Vec<u8>,
     anchors: String,
+    /// Pending `<n>.lnk` lines.
+    links: String,
+    /// The chapter's archive path, for links within it.
+    chapter: String,
     /// Pending `<n>.pos` lines.
     positions: String,
     /// The element path of the block being collected.
@@ -306,6 +316,33 @@ impl Converter<'_> {
         self.length + HEADER + self.text.len() as u32
     }
 
+    /// Where an element starting now begins: after the space still to
+    /// come, or at the next block if none is being collected.
+    fn here(&self) -> u32 {
+        if self.text.is_empty() {
+            self.length + HEADER
+        } else {
+            self.position() + u32::from(self.space)
+        }
+    }
+
+    /// Where a link goes, as stored in `<n>.lnk`; `None` for none.
+    fn target(&self, href: &str) -> Option<String> {
+        let href: String = href.trim().chars().filter(|c| !c.is_control()).collect();
+        if href.is_empty() || quireink_sdk::document::is_external(&href) {
+            return (!href.is_empty()).then_some(href);
+        }
+        let (path, fragment) = if href.starts_with('#') {
+            (self.chapter.clone(), Some(String::from(&href[1..])))
+        } else {
+            crate::package::resolve(&self.base, &href)
+        };
+        Some(match fragment {
+            Some(fragment) => alloc::format!("{path}#{fragment}"),
+            None => path,
+        })
+    }
+
     fn start(&mut self, name: &str, attrs: quireink_sdk::xml::Attrs<'_>, self_closing: bool) {
         let _ = self_closing;
         let tag = local_name(name).to_ascii_lowercase();
@@ -325,15 +362,13 @@ impl Converter<'_> {
             self.flush();
         }
         if let Some(id) = attrs.get("id") {
-            let at = if self.text.is_empty() {
-                // The element starts the next block.
-                self.length + HEADER
-            } else {
-                self.position()
-            };
+            let at = self.here();
             self.anchors.push_str(&alloc::format!("{id}\t{at}\n"));
             if self.anchors.len() >= FLUSH_SMALL {
                 self.write_anchors();
+            }
+            if self.links.len() >= FLUSH_SMALL {
+                self.write_links();
             }
         }
         // Self-closing elements are ended right away by the caller.
@@ -364,8 +399,15 @@ impl Converter<'_> {
             },
             None => 1,
         };
+        let link = match attrs.get("href") {
+            Some(href) if tag == "a" && !hides && self.hidden == 0 => {
+                self.target(&href).map(|target| (self.here(), target))
+            }
+            _ => None,
+        };
         self.stack.push(Frame {
             index,
+            link,
             children: Vec::new(),
             tag: tag.clone(),
             style: styled(style, &props),
@@ -437,9 +479,16 @@ impl Converter<'_> {
         }
         // Close the element (and any left open inside it).
         let (mut margin, mut padding) = (None, None);
+        let here = self.position();
         for frame in self.stack.drain(open..) {
             if frame.hides {
                 self.hidden = self.hidden.saturating_sub(1);
+            }
+            if let Some((start, href)) = frame.link
+                && here > start
+            {
+                self.links
+                    .push_str(&alloc::format!("{start}\t{here}\t{href}\n"));
             }
             margin = larger(margin, frame.after.0);
             padding = css::sum(padding, frame.after.1);
@@ -631,6 +680,12 @@ impl Converter<'_> {
         self.failed = self.failed.take().or(failed);
         self.anchors.clear();
     }
+
+    fn write_links(&mut self) {
+        let failed = self.append(&self.paths.links, self.links.as_bytes());
+        self.failed = self.failed.take().or(failed);
+        self.links.clear();
+    }
 }
 
 fn is_block(tag: &str) -> bool {
@@ -684,7 +739,13 @@ pub(crate) fn convert(
 ) -> Result<u32, DocumentError> {
     let base = String::from(entry.name.rfind('/').map_or("", |i| &entry.name[..=i]));
     let _ = storage.remove(&paths.end);
-    for path in [&paths.text, &paths.index, &paths.anchors, &paths.positions] {
+    for path in [
+        &paths.text,
+        &paths.index,
+        &paths.anchors,
+        &paths.links,
+        &paths.positions,
+    ] {
         storage.write(path, &[])?;
     }
     let mut converter = Converter {
@@ -694,6 +755,8 @@ pub(crate) fn convert(
         out: Vec::with_capacity(FLUSH + HEADER as usize),
         index: Vec::with_capacity(FLUSH_SMALL + 4),
         anchors: String::new(),
+        links: String::new(),
+        chapter: entry.name.clone(),
         positions: String::new(),
         block_path: String::new(),
         // Blocks are split before they outgrow this, so it never grows.
@@ -745,6 +808,7 @@ pub(crate) fn convert(
     converter.write_out();
     converter.write_index();
     converter.write_anchors();
+    converter.write_links();
     converter.write_positions();
     if let Some(e) = converter.failed {
         return Err(e);

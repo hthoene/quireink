@@ -4,8 +4,9 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use quireink_sdk::builtin::{actions, events, fonts, params, slots};
-use quireink_sdk::document::{Document, DocumentError, Locator};
+use quireink_sdk::document::{Document, DocumentError, Link, Locator};
 use quireink_sdk::layout::{Face, Hyphenate, Page, PageImage, Style, Typesetter, layout_page};
+use quireink_sdk::ui::{self, UiStyle};
 use quireink_sdk::{
     Arg, Canvas, Color, Command, Cx, Env, FontHandle, FontSet, Gesture, GestureKind, Handled, Id,
     Params, Point, Rect, RefreshMode, Screen,
@@ -27,6 +28,8 @@ const PAGES_PER_STEP: usize = 8;
 const STEP_DELAY_MS: u64 = 2;
 /// Pages remembered for going back before the index covers them.
 const HISTORY: usize = 64;
+/// Places links were followed from, kept for *Back*.
+const RETURNS: usize = 32;
 
 /// Page geometry and text style, derived from settings and the screen.
 /// Relative sizes of headings 1 to 6.
@@ -328,6 +331,12 @@ struct Book {
     chapter: Option<(Locator, Option<Locator>, String)>,
     /// The book's own fonts, if used.
     embedded: Option<Embedded>,
+    /// The links on the page.
+    links: Vec<Link>,
+    /// Where links were followed from, the last last.
+    returns: Vec<Locator>,
+    /// The page the last link led to: it offers the way back.
+    landed: Option<Locator>,
 }
 
 /// A word on the page, with its box on the screen and its place in the
@@ -648,6 +657,28 @@ impl ReaderScreen {
         cx.command(Command::OpenSlot(slots::KEYBOARD, request));
     }
 
+    /// Follows link `href`: to its place in the book, remembering where
+    /// it was followed from for *Back*.
+    fn follow(&mut self, href: &str, cx: &mut Cx<'_, '_>) -> Handled {
+        let env = *cx.env();
+        let Ok(book) = &mut self.book else {
+            return Handled::No;
+        };
+        let Some(target) = book.document.link_target(env.storage, href) else {
+            return Handled::No;
+        };
+        let from = book.page.start;
+        let start = book.page_start(&env, target);
+        if book.show(cx, start, true) {
+            if book.returns.len() == RETURNS {
+                book.returns.remove(0);
+            }
+            book.returns.push(from);
+            book.landed = Some(book.page.start);
+        }
+        Handled::Yes
+    }
+
     /// Sets or removes the bookmark of the page.
     fn toggle_bookmark(&mut self, cx: &mut Cx<'_, '_>) {
         let env = *cx.env();
@@ -727,6 +758,9 @@ impl Book {
             found: None,
             chapter: None,
             embedded: None,
+            links: Vec::new(),
+            returns: Vec::new(),
+            landed: None,
         };
         book.embedded = Embedded::load(env, book.document.as_ref());
         let start = book.saved_position(env).unwrap_or(Locator::START);
@@ -738,6 +772,7 @@ impl Book {
         };
         book.index = Some(book.open_index(env));
         book.update_chapter(env);
+        book.update_links(env);
         let state = format!("[reader]\nlast = \"{}\"\n", escape(&book.path));
         let _ = env.storage.write(&state_path(), state.as_bytes());
         Ok(book)
@@ -779,6 +814,7 @@ impl Book {
         if let Ok(page) = self.layout(env, self.page.start) {
             self.page = page;
         }
+        self.update_links(env);
         self.history.clear();
         self.index = Some(self.open_index(env));
         self.indexing = None;
@@ -878,6 +914,7 @@ impl Book {
         }
         self.page = page;
         self.update_chapter(&env);
+        self.update_links(&env);
         self.save_position(&env);
         cx.command(Command::Emit(events::PAGE_TURNED, self.event_params(&env)));
         cx.request_redraw();
@@ -1035,6 +1072,99 @@ impl Book {
             }
         }
         words
+    }
+
+    /// Reads the links of the page.
+    fn update_links(&mut self, env: &Env<'_>) {
+        let (start, end) = (self.page.start, self.page.end);
+        let to = if end.section == start.section {
+            end.offset
+        } else {
+            u32::MAX
+        };
+        self.links = self
+            .document
+            .links(env.storage, start.section, start.offset, to);
+    }
+
+    /// The link `word` is part of, if any.
+    fn link_of(&self, word: &WordBox) -> Option<&Link> {
+        if word.start.section != self.page.start.section {
+            return None;
+        }
+        self.links
+            .iter()
+            .find(|l| word.end.offset > l.start && word.start.offset < l.end)
+    }
+
+    /// Back to where the last link was followed from.
+    fn go_back(&mut self, cx: &mut Cx<'_, '_>) {
+        if let Some(from) = self.returns.pop() {
+            self.landed = None;
+            self.show(cx, from, false);
+        }
+    }
+
+    /// Where *Back* is offered on the page a link led to: a small button
+    /// in the top margin, on the left.
+    fn back_area(&self, env: &Env<'_>) -> Option<Rect> {
+        if self.returns.is_empty() || self.landed != Some(self.page.start) {
+            return None;
+        }
+        let style = UiStyle::new(env);
+        let font = style.font(env)?;
+        let label = env.i18n.tr("reader.link-back");
+        let pad = style.gap as f32;
+        let width = font.measure(style.small, label) + 2.0 * pad;
+        let height = font.line_metrics(style.small).line_height + pad;
+        let y = ((self.typography.y - height) / 2.0).max(2.0);
+        Some(Rect::new(
+            self.typography.x as u16,
+            y as u16,
+            width as u16,
+            height as u16,
+        ))
+    }
+
+    fn draw_back(&self, canvas: &mut Canvas<'_>, env: &Env<'_>) {
+        let Some(area) = self.back_area(env) else {
+            return;
+        };
+        let style = UiStyle::new(env);
+        let Some(font) = style.font(env) else {
+            return;
+        };
+        let (x, y, w, h) = (
+            i32::from(area.x),
+            i32::from(area.y),
+            u32::from(area.width),
+            u32::from(area.height),
+        );
+        canvas.fill_rect(x, y, w, h, Color::WHITE);
+        canvas.stroke_rect(x, y, w, h, 1, Color::BLACK);
+        let label = env.i18n.tr("reader.link-back");
+        ui::draw_label(
+            canvas,
+            &font,
+            style.small,
+            f32::from(area.x) + style.gap as f32,
+            area,
+            label,
+            Color::BLACK,
+        );
+    }
+
+    /// Links underlined thinly, so they can be found without standing out.
+    fn draw_links(&self, canvas: &mut Canvas<'_>, words: &[WordBox]) {
+        for b in selection::line_boxes(words, |i| self.link_of(&words[i]).is_some()) {
+            canvas.fill_rect(
+                i32::from(b.x),
+                b.bottom() as i32 - 2,
+                u32::from(b.width),
+                1,
+                Color::gray(90),
+            );
+        }
     }
 
     /// Whether the page has a bookmark.
@@ -1213,13 +1343,19 @@ impl Screen for ReaderScreen {
         };
         // Word boxes are measured only when something is drawn on words.
         let has_highlights = book.marks.iter().any(|m| m.kind == Kind::Highlight);
-        let words = if has_highlights || self.selection.is_some() || book.found.is_some() {
+        let words = if has_highlights
+            || self.selection.is_some()
+            || book.found.is_some()
+            || !book.links.is_empty()
+        {
             book.words(env)
         } else {
             Vec::new()
         };
         book.draw_highlights(canvas, &words);
         book.draw_page(canvas, env);
+        book.draw_links(canvas, &words);
+        book.draw_back(canvas, env);
         book.draw_status(canvas, env);
         if book.bookmarked() {
             book.draw_ribbon(canvas, env);
@@ -1334,6 +1470,9 @@ impl Screen for ReaderScreen {
                 Params::new().with(params::PATH, book.path.clone()),
             ));
             Handled::Yes
+        } else if *action == actions::BACK && !book.returns.is_empty() {
+            book.go_back(cx);
+            Handled::Yes
         } else if *action == actions::MENU || *action == actions::CONFIRM {
             cx.command(Command::OpenSlot(
                 slots::MENU,
@@ -1345,8 +1484,9 @@ impl Screen for ReaderScreen {
         }
     }
 
-    /// A long press selects the word under the finger; while text is
-    /// selected, taps extend the selection or choose an item of the bar.
+    /// A tap on a link follows it, a long press selects the word under
+    /// the finger; while text is selected, taps extend the selection or
+    /// choose an item of the bar.
     fn on_gesture(&mut self, gesture: Gesture, cx: &mut Cx<'_, '_>) -> Handled {
         let env = *cx.env();
         let Ok(book) = &self.book else {
@@ -1364,6 +1504,9 @@ impl Screen for ReaderScreen {
                     && point.y < area.bottom() as i32
             })
         };
+        let link = at(gesture.start)
+            .and_then(|i| book.link_of(&words[i]))
+            .map(|link| link.href.clone());
         match (gesture.kind, self.selection) {
             (GestureKind::Tap, None)
                 if env.settings.bool(crate::settings::CORNER_BOOKMARK.as_str())
@@ -1371,6 +1514,19 @@ impl Screen for ReaderScreen {
             {
                 self.toggle_bookmark(cx);
                 Handled::Yes
+            }
+            (GestureKind::Tap, None)
+                if book
+                    .back_area(&env)
+                    .is_some_and(|area| area.contains(gesture.start)) =>
+            {
+                if let Ok(book) = &mut self.book {
+                    book.go_back(cx);
+                }
+                Handled::Yes
+            }
+            (GestureKind::Tap, None) if link.is_some() => {
+                self.follow(link.as_deref().unwrap_or_default(), cx)
             }
             (GestureKind::LongPress, _) => match at(gesture.start) {
                 Some(word) => {
