@@ -10,6 +10,8 @@
 //! | `long-tap:240:400` | long press on the touch screen |
 //! | `swipe:400:400:100:400` | swipe from one point to another |
 //! | `wait:500` | let 500 ms pass |
+//! | `serve:20` | answer plugins' servers in real time for 20 s |
+//! | `shot:out/a.png` | save a screenshot now (the last one comes with `--screenshot`) |
 
 use std::fs::File;
 use std::io::BufWriter;
@@ -52,6 +54,21 @@ fn run_step(device: &mut Device, step: &str) -> Result<(), String> {
         ["wait", ms] => {
             let ms: u64 = ms.parse().map_err(|_| format!("`{ms}` is not a number"))?;
             hold(device, ms);
+        }
+        ["shot", path @ ..] if !path.is_empty() => {
+            // Paths may hold `:` (`C:/…`).
+            let path = path.join(":");
+            screenshot(device, Path::new(&path))?;
+        }
+        ["serve", seconds] => {
+            let seconds: u64 = seconds
+                .parse()
+                .map_err(|_| format!("`{seconds}` is not a number"))?;
+            let end = std::time::Instant::now() + std::time::Duration::from_secs(seconds);
+            while std::time::Instant::now() < end {
+                device.poll_servers();
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
         }
         ["long", name] => press(device, button(device, name)?, LONG_MS),
         ["tap", x, y] => touch(device, Point::new(number(x)?, number(y)?), None, 60),

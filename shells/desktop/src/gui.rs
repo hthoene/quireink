@@ -337,8 +337,9 @@ impl ApplicationHandler for App {
         if animating {
             deadline = Some(StdInstant::now() + ANIMATION_FRAME);
         }
-        // Answers to HTTP requests are looked for regularly.
-        if self.device.http.in_flight > 0 {
+        // Answers to HTTP requests and servers' requests are looked for
+        // regularly.
+        if self.device.http.in_flight > 0 || self.device.servers.any() {
             let at = StdInstant::now() + Duration::from_millis(100);
             deadline = Some(deadline.map_or(at, |d| d.min(at)));
         }

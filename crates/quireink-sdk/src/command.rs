@@ -39,6 +39,54 @@ impl HttpRequest {
     }
 }
 
+/// The answer to a request a plugin's server received (see
+/// [`Command::Serve`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServerResponse {
+    /// The request's number ([`server_params::REQUEST`]).
+    pub request: u32,
+    pub status: u16,
+    pub content_type: alloc::string::String,
+    pub headers: alloc::vec::Vec<(alloc::string::String, alloc::string::String)>,
+    pub body: alloc::vec::Vec<u8>,
+    /// A file in storage to send as the body instead.
+    pub body_from: Option<alloc::string::String>,
+}
+
+impl ServerResponse {
+    /// An answer with `body` of `content_type`.
+    pub fn new(request: u32, status: u16, content_type: &str, body: alloc::vec::Vec<u8>) -> Self {
+        Self {
+            request,
+            status,
+            content_type: alloc::string::String::from(content_type),
+            headers: alloc::vec::Vec::new(),
+            body,
+            body_from: None,
+        }
+    }
+}
+
+/// Parameters of a server's events (see [`Command::Serve`]).
+pub mod server_params {
+    /// What happened: [`STARTED`], [`REQUEST`], [`FAILED`] or [`STOPPED`].
+    pub const KIND: &str = "kind";
+    pub const STARTED: &str = "started";
+    pub const REQUEST: &str = "request";
+    pub const FAILED: &str = "failed";
+    pub const STOPPED: &str = "stopped";
+    /// Where the server is reached, e.g. `192.168.1.20:8080`.
+    pub const ADDRESS: &str = "address";
+    /// Why it failed.
+    pub const REASON: &str = "reason";
+    /// A request's method (`GET`, `PUT`, …) and target (path and query).
+    pub const METHOD: &str = "method";
+    pub const TARGET: &str = "target";
+    /// Where a request's body was saved, if it had one; it is removed
+    /// once the request is answered, unless moved.
+    pub const BODY_FILE: &str = "body-file";
+}
+
 /// Parameters of an HTTP reply event (see [`HttpRequest`]).
 pub mod http_params {
     pub const STATUS: &str = "status";
@@ -91,6 +139,17 @@ pub enum Command {
     /// Puts text on the clipboard, on devices with one also the system's,
     /// for other apps. Long text is cut at [`MAX_CLIPBOARD`] bytes.
     SetClipboard(alloc::string::String),
+    /// Serves HTTP to the local network on `port` (shells that cannot say
+    /// so with a failure). Everything about the server comes as the event
+    /// `events`: that it started (with its address), each request (answer
+    /// with [`Command::Respond`]), that it failed or stopped; see
+    /// [`server_params`]. Serve only while the user wants it: a server
+    /// also stops when the screen showing as it started is closed.
+    Serve { server: Id, port: u16, events: Id },
+    /// Stops serving.
+    StopServing(Id),
+    /// Answers a request of a server.
+    Respond(ServerResponse),
     /// Asks for the text on the clipboard (see
     /// [`Env::clipboard`](crate::Env)). It comes as the event `.0` with
     /// the parameters `.1` plus `text` ([`params::TEXT`](crate::builtin::params::TEXT)),

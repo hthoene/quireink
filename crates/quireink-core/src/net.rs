@@ -29,6 +29,71 @@ pub struct HttpResponse {
     pub etag: Option<String>,
 }
 
+/// What a shell does for plugins' servers (see `Kernel::take_server_calls`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ServerCall {
+    /// Listen on `port` in the local network.
+    Listen {
+        server: u32,
+        port: u16,
+    },
+    Stop {
+        server: u32,
+    },
+    /// Answer request `request` with `body`, or with `file`.
+    Respond {
+        request: u32,
+        status: u16,
+        content_type: String,
+        headers: Vec<(String, String)>,
+        body: Vec<u8>,
+        file: Option<ServedFile>,
+    },
+}
+
+/// A file sent as an answer: the shell reads it in parts with
+/// `Kernel::read_served`, so it never needs to fit in memory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServedFile {
+    pub path: String,
+    pub size: u64,
+}
+
+/// What a shell tells about servers (see `Kernel::server_event`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ServerEvent {
+    /// Listening; reached at `address` (e.g. `192.168.1.20:8080`).
+    Started {
+        server: u32,
+        address: String,
+    },
+    Failed {
+        server: u32,
+        reason: String,
+    },
+    /// A request; answer it with the same `request`. With a `body`, its
+    /// parts follow as [`ServerEvent::Body`]; the plugin hears of the
+    /// request once the last part came.
+    Request {
+        server: u32,
+        request: u32,
+        method: String,
+        target: String,
+        body: bool,
+    },
+    /// Part of a request's body, saved as it comes (so it never needs to
+    /// fit in memory); `last` with the final part.
+    Body {
+        request: u32,
+        data: Vec<u8>,
+        last: bool,
+    },
+    /// The connection of a request was lost.
+    Closed {
+        request: u32,
+    },
+}
+
 /// Longest response body passed on to plugins.
 pub const MAX_RESPONSE: usize = 1 << 20;
 /// Longest response body saved to a file, and longest file sent.

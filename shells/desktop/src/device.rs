@@ -30,6 +30,8 @@ pub struct Device {
     clock: Clock,
     /// HTTP requests in flight.
     pub http: crate::http::Http,
+    /// Plugins' servers.
+    pub servers: quireink_serve::Servers,
 }
 
 /// Either real time (interactive) or simulated time (headless, tests).
@@ -61,6 +63,7 @@ impl Device {
             panel: Panel::new(display.width, display.height, display.color),
             wake_at: None,
             http: crate::http::Http::new(),
+            servers: quireink_serve::Servers::new(|| {}),
             clock: if simulated_time {
                 Clock::Simulated(0)
             } else {
@@ -142,9 +145,22 @@ impl Device {
         }
     }
 
+    /// Passes requests to plugins' servers on.
+    pub fn poll_servers(&mut self) {
+        while let Some(event) = self.servers.next() {
+            let now = self.now();
+            let effects = budget::track(|| self.kernel.server_event(now, event));
+            self.execute(effects);
+        }
+        let kernel = &self.kernel;
+        self.servers
+            .pump(|path, at, buffer| budget::track(|| kernel.read_served(path, at, buffer).ok()));
+    }
+
     /// Ticks the kernel if a requested wake-up is due.
     pub fn tick_if_due(&mut self) {
         self.poll_http(None);
+        self.poll_servers();
         let now = self.now();
         if self.wake_at.is_some_and(|at| at <= now) {
             let effects = budget::track(|| self.kernel.tick(now));
@@ -169,6 +185,9 @@ impl Device {
         self.wake_at = effects.wake_at();
         for call in self.kernel.take_requests() {
             self.http.start(call);
+        }
+        for call in self.kernel.take_server_calls() {
+            self.servers.apply(call);
         }
         self.report_warnings();
     }

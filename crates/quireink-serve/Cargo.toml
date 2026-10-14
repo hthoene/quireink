@@ -1,0 +1,16 @@
+[package]
+name = "quireink-serve"
+description = "Serves HTTP for QuireInk plugins in shells with the standard library (emulator, Android)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+
+[dependencies]
+quireink-core.workspace = true
+
+[lints]
+workspace = true

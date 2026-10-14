@@ -16,7 +16,6 @@
 extern crate alloc;
 
 mod choice;
-mod ops;
 
 use alloc::borrow::Cow;
 use alloc::boxed::Box;
@@ -32,7 +31,7 @@ use quireink_sdk::{
     ScreenSpec, SettingKind, SettingSpec, SettingValue, Version,
 };
 
-use ops::Entry;
+use quireink_sdk::files::{self as ops, Entry};
 
 pub const PLUGIN: Id = Id::new_static("file-manager");
 /// Opens the file manager.

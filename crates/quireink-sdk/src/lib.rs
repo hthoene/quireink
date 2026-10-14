@@ -34,12 +34,14 @@ pub mod collections;
 mod command;
 mod env;
 mod event;
+pub mod files;
 mod fonts;
 mod formats;
 mod gesture;
 mod hyphenation;
 mod id;
 pub mod md5;
+pub mod qr;
 /// Reading and writing SQLite database files.
 pub mod sqlite {
     pub use quireink_sqlite::*;
@@ -57,7 +59,9 @@ pub mod ui;
 mod version;
 
 pub use action::{ActionHandler, ActionSpec, Actions};
-pub use command::{Command, HttpRequest, MAX_CLIPBOARD, http_params};
+pub use command::{
+    Command, HttpRequest, MAX_CLIPBOARD, ServerResponse, http_params, server_params,
+};
 pub use env::{Env, Metrics};
 pub use event::EventHandler;
 pub use fonts::{FontHandle, FontSet, FontSpec, Fonts};

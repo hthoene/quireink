@@ -6,6 +6,7 @@ members = [
     "crates/quireink-platform",
     "crates/quireink-config",
     "crates/quireink-sqlite",
+    "crates/quireink-serve",
     "crates/quireink-i18n",
     "crates/quireink-graphics",
     "crates/quireink-text",
@@ -32,6 +33,7 @@ members = [
     "plugins/kosync",
     "plugins/stats",
     "plugins/file-manager",
+    "plugins/transfer",
     "plugins/plugin-manager",
     "plugins/settings",
     "plugins/home",
@@ -55,6 +57,7 @@ authors = ["The QuireInk Authors"]
 quireink-platform = { path = "crates/quireink-platform", version = "0.1.0" }
 quireink-config = { path = "crates/quireink-config", version = "0.1.0" }
 quireink-sqlite = { path = "crates/quireink-sqlite", version = "0.1.0" }
+quireink-serve = { path = "crates/quireink-serve", version = "0.1.0" }
 quireink-i18n = { path = "crates/quireink-i18n", version = "0.1.0" }
 quireink-graphics = { path = "crates/quireink-graphics", version = "0.1.0" }
 quireink-text = { path = "crates/quireink-text", version = "0.1.0" }
@@ -76,6 +79,7 @@ quireink-plugin-menu-editor = { path = "plugins/menu-editor", version = "0.1.0" 
 quireink-plugin-kosync = { path = "plugins/kosync", version = "0.1.0" }
 quireink-plugin-stats = { path = "plugins/stats", version = "0.1.0" }
 quireink-plugin-file-manager = { path = "plugins/file-manager", version = "0.1.0" }
+quireink-plugin-transfer = { path = "plugins/transfer", version = "0.1.0" }
 quireink-plugin-keyboard = { path = "plugins/keyboard", version = "0.1.0" }
 quireink-plugin-plugin-manager = { path = "plugins/plugin-manager", version = "0.1.0" }
 quireink-plugin-hyphenation = { path = "plugins/hyphenation", version = "0.1.0" }

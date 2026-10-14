@@ -54,6 +54,8 @@ struct Running {
     net: crate::net::Net,
     /// For the system's clipboard.
     app: AndroidApp,
+    /// Plugins' servers.
+    servers: quireink_serve::Servers,
 }
 
 /// How often the battery and time zone are read again.
@@ -177,6 +179,14 @@ fn android_main(app: AndroidApp) {
             let effects = state.kernel.http_response(now(), response);
             changed |= apply(state, effects);
         }
+        while let Some(event) = state.servers.next() {
+            let effects = state.kernel.server_event(now(), event);
+            changed |= apply(state, effects);
+        }
+        let kernel = &state.kernel;
+        state
+            .servers
+            .pump(|path, at, buffer| kernel.read_served(path, at, buffer).ok());
         if state.kernel.wants_clipboard() {
             let text = crate::clipboard::read(&app);
             let effects = state.kernel.clipboard_text(now(), text);
@@ -330,6 +340,10 @@ fn start_kernel(
         status_read: now,
         net: crate::net::Net::new(app),
         app: app.clone(),
+        servers: {
+            let waker = app.create_waker();
+            quireink_serve::Servers::new(move || waker.wake())
+        },
     };
     apply(&mut running, effects);
     Some(running)
@@ -378,6 +392,9 @@ fn apply(state: &mut Running, effects: Effects) -> bool {
     }
     if let Some(text) = state.kernel.take_clipboard() {
         crate::clipboard::write(&state.app, &text);
+    }
+    for call in state.kernel.take_server_calls() {
+        state.servers.apply(call);
     }
     state.restart |= effects.restart();
     if let Some((_, mode)) = effects.refresh() {

@@ -1,0 +1,20 @@
+[package]
+name = "quireink-plugin-transfer"
+description = "QuireInk transfer by browser: put files on the device from a phone or computer in the same network"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+categories = ["no-std"]
+
+[dependencies]
+quireink-sdk.workspace = true
+
+[dev-dependencies]
+quireink-i18n.workspace = true
+
+[lints]
+workspace = true

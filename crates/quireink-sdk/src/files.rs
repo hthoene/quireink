@@ -1,22 +1,24 @@
-//! What the file manager does to files: list, copy, move, rename, delete.
+//! Working with files and folders of a storage: listing, copying,
+//! moving and deleting them, free names, sizes as people read them. Used
+//! by file managers and transfers alike.
 
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
 
-use quireink_sdk::{Storage, StorageError};
+use quireink_platform::{Storage, StorageError};
 
 /// An entry of a folder.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Entry {
+pub struct Entry {
     pub name: String,
     pub is_dir: bool,
     pub size: u64,
 }
 
 /// `dir/name`, or `name` at the top.
-pub(crate) fn join(dir: &str, name: &str) -> String {
+pub fn join(dir: &str, name: &str) -> String {
     if dir.is_empty() {
         name.to_string()
     } else {
@@ -25,22 +27,18 @@ pub(crate) fn join(dir: &str, name: &str) -> String {
 }
 
 /// The folder a path is in.
-pub(crate) fn parent(path: &str) -> &str {
+pub fn parent(path: &str) -> &str {
     path.rsplit_once('/').map_or("", |(dir, _)| dir)
 }
 
 /// The last part of a path.
-pub(crate) fn name(path: &str) -> &str {
+pub fn name(path: &str) -> &str {
     path.rsplit_once('/').map_or(path, |(_, name)| name)
 }
 
 /// A folder's entries: folders first, then by name (case ignored);
 /// names starting with `.` only with `hidden`.
-pub(crate) fn list(
-    storage: &dyn Storage,
-    dir: &str,
-    hidden: bool,
-) -> Result<Vec<Entry>, StorageError> {
+pub fn list(storage: &dyn Storage, dir: &str, hidden: bool) -> Result<Vec<Entry>, StorageError> {
     let mut entries = Vec::new();
     storage.list(dir, &mut |e| {
         if hidden || !e.name.starts_with('.') {
@@ -60,13 +58,13 @@ pub(crate) fn list(
 }
 
 /// Whether `path` is a folder.
-pub(crate) fn is_dir(storage: &dyn Storage, path: &str) -> bool {
+pub fn is_dir(storage: &dyn Storage, path: &str) -> bool {
     !storage.exists(path) && storage.list(path, &mut |_| {}).is_ok()
 }
 
 /// A free path for `name` in `dir`: `name`, else `name (2)`, `name (3)`, …
 /// (before the extension).
-pub(crate) fn free_path(storage: &dyn Storage, dir: &str, name: &str) -> String {
+pub fn free_path(storage: &dyn Storage, dir: &str, name: &str) -> String {
     let taken = |path: &str| storage.exists(path) || is_dir(storage, path);
     let first = join(dir, name);
     if !taken(&first) {
@@ -83,7 +81,7 @@ pub(crate) fn free_path(storage: &dyn Storage, dir: &str, name: &str) -> String 
 }
 
 /// Copies a file or a folder with everything in it.
-pub(crate) fn copy(storage: &dyn Storage, from: &str, to: &str) -> Result<(), StorageError> {
+pub fn copy(storage: &dyn Storage, from: &str, to: &str) -> Result<(), StorageError> {
     if is_dir(storage, from) {
         if to.starts_with(&format!("{from}/")) {
             // Into itself: it would never end.
@@ -110,7 +108,7 @@ pub(crate) fn copy(storage: &dyn Storage, from: &str, to: &str) -> Result<(), St
 
 /// Moves a file or folder; between storages that cannot rename across
 /// (e.g. a memory card and the device), by copying and deleting.
-pub(crate) fn move_to(storage: &dyn Storage, from: &str, to: &str) -> Result<(), StorageError> {
+pub fn move_to(storage: &dyn Storage, from: &str, to: &str) -> Result<(), StorageError> {
     if to.starts_with(&format!("{from}/")) {
         return Err(StorageError::InvalidPath);
     }
@@ -124,7 +122,7 @@ pub(crate) fn move_to(storage: &dyn Storage, from: &str, to: &str) -> Result<(),
 }
 
 /// Deletes a file or a folder with everything in it.
-pub(crate) fn delete(storage: &dyn Storage, path: &str) -> Result<(), StorageError> {
+pub fn delete(storage: &dyn Storage, path: &str) -> Result<(), StorageError> {
     if is_dir(storage, path) {
         storage.remove_dir_all(path)
     } else {
@@ -134,7 +132,7 @@ pub(crate) fn delete(storage: &dyn Storage, path: &str) -> Result<(), StorageErr
 
 /// A size as people read it: `820 B`, `14 KB`, `2,3 MB` (with the
 /// language's decimal mark).
-pub(crate) fn size(bytes: u64, decimal: &str) -> String {
+pub fn size(bytes: u64, decimal: &str) -> String {
     const UNITS: [&str; 4] = ["B", "KB", "MB", "GB"];
     let mut value = bytes as f64;
     let mut unit = 0;
@@ -153,7 +151,7 @@ pub(crate) fn size(bytes: u64, decimal: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use quireink_sdk::MemoryStorage;
+    use crate::MemoryStorage;
 
     fn storage() -> MemoryStorage {
         MemoryStorage::new()

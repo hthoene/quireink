@@ -74,7 +74,9 @@ use quireink_sdk::{
 use crate::core_plugin::{CORE, CorePlugin};
 use crate::input::{Recognized, Recognizer, Thresholds};
 use crate::keymap::{InputKey, Keymap, Origin, Zone};
-pub use crate::net::{HttpCall, HttpResponse, MAX_FILE, MAX_RESPONSE};
+pub use crate::net::{
+    HttpCall, HttpResponse, MAX_FILE, MAX_RESPONSE, ServedFile, ServerCall, ServerEvent,
+};
 use crate::refresh::RefreshPolicy;
 use crate::registry::{PluginRegistrar, Registry, Staging};
 
@@ -336,6 +338,11 @@ impl KernelBuilder {
             requests: Vec::new(),
             copied: None,
             clipboard_reads: Vec::new(),
+            server_calls: Vec::new(),
+            servers: Vec::new(),
+            next_server: 0,
+            request_bodies: Vec::new(),
+            incoming: Vec::new(),
             reads_clipboard: self.system_clipboard,
             awaiting: Vec::new(),
             next_request: 0,
@@ -463,6 +470,16 @@ impl KernelBuilder {
 }
 
 /// A screen on the navigation stack.
+/// A request to a plugin's server whose body is still coming.
+struct Incoming {
+    request: u32,
+    server: u32,
+    method: String,
+    target: String,
+    /// Where the body goes.
+    path: String,
+}
+
 struct ActiveScreen {
     id: Id,
     /// The slot it was opened for, if any.
@@ -503,6 +520,16 @@ pub struct Kernel {
     requests: Vec<HttpCall>,
     /// Text copied, for the shell to put on the system's clipboard.
     copied: Option<String>,
+    /// What the shell is to do for plugins' servers.
+    server_calls: Vec<ServerCall>,
+    /// Servers running: number for the shell, id, event, and how many
+    /// screens were open when it started (it stops once fewer are).
+    servers: Vec<(u32, Id, Id, usize)>,
+    next_server: u32,
+    /// Bodies of requests not answered yet: request, file.
+    request_bodies: Vec<(u32, String)>,
+    /// Requests whose body is still coming.
+    incoming: Vec<Incoming>,
     /// Requests for the clipboard's text, waiting for the shell: reply
     /// event and parameters.
     clipboard_reads: Vec<(Id, Params)>,
@@ -735,6 +762,155 @@ impl Kernel {
         self.finish()
     }
 
+    /// Stops server `at` and tells its plugin.
+    fn stop_server(&mut self, at: usize) {
+        let (number, id, events, _) = self.servers.remove(at);
+        self.server_calls.push(ServerCall::Stop { server: number });
+        let params = Params::new()
+            .with(quireink_sdk::builtin::params::ID, id.as_str().to_string())
+            .with(
+                quireink_sdk::server_params::KIND,
+                quireink_sdk::server_params::STOPPED,
+            );
+        self.output.commands.push(Command::Emit(events, params));
+    }
+
+    /// Stops the servers of screens that were closed.
+    fn stop_servers_of_closed_screens(&mut self) {
+        while let Some(at) = self
+            .servers
+            .iter()
+            .position(|(.., screens)| *screens > self.stack.len())
+        {
+            self.stop_server(at);
+        }
+    }
+
+    /// Starts serving for a plugin, or tells it why not.
+    fn serve(&mut self, server: Id, port: u16, events: Id) {
+        if let Some(at) = self.servers.iter().position(|(_, id, ..)| *id == server) {
+            let (number, ..) = self.servers.remove(at);
+            self.server_calls.push(ServerCall::Stop { server: number });
+        }
+        if !self.shared.network {
+            let params = Params::new()
+                .with(
+                    quireink_sdk::builtin::params::ID,
+                    server.as_str().to_string(),
+                )
+                .with(
+                    quireink_sdk::server_params::KIND,
+                    quireink_sdk::server_params::FAILED,
+                )
+                .with(quireink_sdk::server_params::REASON, "no network");
+            self.output.commands.push(Command::Emit(events, params));
+            return;
+        }
+        self.next_server = self.next_server.wrapping_add(1);
+        let number = self.next_server;
+        self.servers
+            .push((number, server, events, self.stack.len()));
+        self.server_calls.push(ServerCall::Listen {
+            server: number,
+            port,
+        });
+    }
+
+    /// Passes a plugin's answer to the shell; a file to send goes in
+    /// parts (see [`Kernel::read_served`]).
+    fn respond(&mut self, response: quireink_sdk::ServerResponse) {
+        let mut status = response.status;
+        let mut body = response.body;
+        let mut file = None;
+        if let Some(path) = response.body_from {
+            match self.shared.storage.size(&path) {
+                Ok(size) => file = Some(ServedFile { path, size }),
+                Err(_) => {
+                    status = 404;
+                    body = b"not found".to_vec();
+                }
+            }
+        }
+        // The request's body is done with, unless the plugin moved it.
+        if let Some(at) = self
+            .request_bodies
+            .iter()
+            .position(|(r, _)| *r == response.request)
+        {
+            let (_, path) = self.request_bodies.remove(at);
+            let _ = self.shared.storage.remove(&path);
+        }
+        self.server_calls.push(ServerCall::Respond {
+            request: response.request,
+            status,
+            content_type: response.content_type,
+            headers: response.headers,
+            body,
+            file,
+        });
+    }
+
+    /// Reads part of a file being sent as an answer
+    /// ([`ServerCall::Respond`] with a `file`), from `at` into `buffer`;
+    /// returns how much was read, 0 at the end.
+    pub fn read_served(
+        &self,
+        path: &str,
+        at: u64,
+        buffer: &mut [u8],
+    ) -> Result<usize, quireink_platform::StorageError> {
+        self.shared.storage.read_at(path, at, buffer)
+    }
+
+    /// Tells the plugin of server `server` about a complete request.
+    fn pass_request(
+        &mut self,
+        server: u32,
+        request: u32,
+        method: String,
+        target: String,
+        body: Option<String>,
+    ) {
+        use quireink_sdk::server_params as p;
+        let Some((_, id, events, _)) = self.servers.iter().find(|(n, ..)| *n == server) else {
+            if let Some(path) = body {
+                self.forget_body(request, &path);
+            }
+            return;
+        };
+        let mut params = Params::new()
+            .with(quireink_sdk::builtin::params::ID, id.as_str().to_string())
+            .with(p::KIND, p::REQUEST)
+            .with(p::REQUEST, format!("{request}"))
+            .with(p::METHOD, method)
+            .with(p::TARGET, target);
+        if let Some(path) = body {
+            params = params.with(p::BODY_FILE, path);
+        }
+        self.output
+            .commands
+            .push(Command::Emit(events.clone(), params));
+    }
+
+    /// Removes the body of `request`, e.g. after the connection was lost.
+    fn forget_body(&mut self, request: u32, path: &str) {
+        self.request_bodies.retain(|(r, _)| *r != request);
+        let _ = self.shared.storage.remove(path);
+    }
+
+    /// Answers a request without its plugin, e.g. when its body could not
+    /// be saved.
+    fn refuse(&mut self, request: u32, status: u16, reason: &str) {
+        self.server_calls.push(ServerCall::Respond {
+            request,
+            status,
+            content_type: String::from("text/plain"),
+            headers: Vec::new(),
+            body: reason.as_bytes().to_vec(),
+            file: None,
+        });
+    }
+
     /// Answers a [`Command::ReadClipboard`] with the text known here.
     fn reply_clipboard(&mut self, reply: Id, params: Params) {
         let text = self.shared.clipboard.clone();
@@ -742,6 +918,111 @@ impl Kernel {
             reply,
             params.with(quireink_sdk::builtin::params::TEXT, text),
         ));
+    }
+
+    /// What to do for plugins' servers: listen, stop, answer requests
+    /// (report with [`Kernel::server_event`]). Check after every kernel
+    /// call.
+    pub fn take_server_calls(&mut self) -> Vec<ServerCall> {
+        mem::take(&mut self.server_calls)
+    }
+
+    /// Whether plugins serve, e.g. to keep polling for requests.
+    pub fn serving(&self) -> bool {
+        !self.servers.is_empty()
+    }
+
+    /// What happened with a server: started, failed, a request.
+    pub fn server_event(&mut self, now: Instant, event: ServerEvent) -> Effects {
+        use quireink_sdk::server_params as p;
+        self.now = now;
+        let events_of = |servers: &[(u32, Id, Id, usize)], number: u32| {
+            servers
+                .iter()
+                .find(|(n, ..)| *n == number)
+                .map(|(_, server, events, _)| (server.clone(), events.clone()))
+        };
+        match event {
+            ServerEvent::Started { server, address } => {
+                if let Some((id, events)) = events_of(&self.servers, server) {
+                    let params = Params::new()
+                        .with(quireink_sdk::builtin::params::ID, id.as_str().to_string())
+                        .with(p::KIND, p::STARTED)
+                        .with(p::ADDRESS, address);
+                    self.output.commands.push(Command::Emit(events, params));
+                }
+            }
+            ServerEvent::Failed { server, reason } => {
+                if let Some((id, events)) = events_of(&self.servers, server) {
+                    self.servers.retain(|(n, ..)| *n != server);
+                    let params = Params::new()
+                        .with(quireink_sdk::builtin::params::ID, id.as_str().to_string())
+                        .with(p::KIND, p::FAILED)
+                        .with(p::REASON, reason);
+                    self.output.commands.push(Command::Emit(events, params));
+                }
+            }
+            ServerEvent::Request {
+                server,
+                request,
+                method,
+                target,
+                body: false,
+            } => self.pass_request(server, request, method, target, None),
+            ServerEvent::Request {
+                server,
+                request,
+                method,
+                target,
+                body: true,
+            } => {
+                // The body is saved as it comes, then the plugin is told.
+                let path = format!(".quireink/tmp/request-{request}");
+                let _ = self.shared.storage.create_dir(".quireink/tmp");
+                if self.shared.storage.write(&path, &[]).is_ok() {
+                    self.request_bodies.push((request, path.clone()));
+                    self.incoming.push(Incoming {
+                        request,
+                        server,
+                        method,
+                        target,
+                        path,
+                    });
+                } else {
+                    self.refuse(request, 507, "cannot save the body");
+                }
+            }
+            ServerEvent::Body {
+                request,
+                data,
+                last,
+            } => {
+                let Some(at) = self.incoming.iter().position(|i| i.request == request) else {
+                    return self.finish();
+                };
+                if self
+                    .shared
+                    .storage
+                    .append(&self.incoming[at].path, &data)
+                    .is_err()
+                {
+                    let incoming = self.incoming.remove(at);
+                    self.forget_body(request, &incoming.path);
+                    self.refuse(request, 507, "the storage is full");
+                } else if last {
+                    let i = self.incoming.remove(at);
+                    self.pass_request(i.server, request, i.method, i.target, Some(i.path));
+                }
+            }
+            ServerEvent::Closed { request } => {
+                self.incoming.retain(|i| i.request != request);
+                let body = self.request_bodies.iter().find(|(r, _)| *r == request);
+                if let Some(path) = body.map(|(_, path)| path.clone()) {
+                    self.forget_body(request, &path);
+                }
+            }
+        }
+        self.finish()
     }
 
     /// Returns the HTTP requests to make; answer each with
@@ -1340,6 +1621,7 @@ impl Kernel {
                     // The slot for something else (e.g. another book):
                     // opened anew in place of the old screen.
                     self.stack.truncate(index);
+                    self.stop_servers_of_closed_screens();
                 }
                 match self.registry.resolve_slot(slot.as_str()).cloned() {
                     Some(screen) => self.open(screen, Some(slot), &params),
@@ -1374,6 +1656,17 @@ impl Kernel {
                 self.clipboard_reads.push((reply, params));
             }
             Command::ReadClipboard(reply, params) => self.reply_clipboard(reply, params),
+            Command::Serve {
+                server,
+                port,
+                events,
+            } => self.serve(server, port, events),
+            Command::StopServing(server) => {
+                if let Some(at) = self.servers.iter().position(|(_, id, ..)| *id == server) {
+                    self.stop_server(at);
+                }
+            }
+            Command::Respond(response) => self.respond(response),
             Command::Back => {
                 if self.stack.len() > 1 {
                     self.close_above(self.stack.len() - 2);
@@ -1437,6 +1730,7 @@ impl Kernel {
             region = Some(region.map_or(r, |u: Rect| u.union(&r)));
         }
         self.stack.truncate(index + 1);
+        self.stop_servers_of_closed_screens();
         if let Some(region) = region {
             self.screen_changed(region, overlays_only);
         }

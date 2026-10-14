@@ -18,6 +18,7 @@ path = "src/main.rs"
 quireink-app = { workspace = true, features = ["outline", "packs"] }
 quireink-core = { workspace = true, features = ["color", "outline"] }
 quireink-fs.workspace = true
+quireink-serve.workspace = true
 quireink-graphics = { workspace = true, features = ["color"] }
 quireink-platform.workspace = true
 # The computer's time zone for the emulated clock.

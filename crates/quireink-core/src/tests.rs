@@ -891,6 +891,131 @@ fn http_requests_go_to_the_shell_and_answers_come_back() {
 }
 
 #[test]
+fn plugins_serve_through_the_shell() {
+    use quireink_sdk::server_params as p;
+    let log = log();
+    let mut kernel = Kernel::builder(DEVICE)
+        .plugin(OverlayPlugin { log: log.clone() })
+        .storage(quireink_sdk::MemoryStorage::new())
+        .network(true)
+        .build()
+        .unwrap();
+    kernel.start(Instant(0));
+    let events = Id::new_static("ov.reply");
+    kernel.output.commands.push(Command::Serve {
+        server: Id::new_static("ov.server"),
+        port: 8080,
+        events: events.clone(),
+    });
+    kernel.run_commands();
+    assert!(kernel.serving());
+    let calls = kernel.take_server_calls();
+    let crate::ServerCall::Listen { server, port } = calls[0] else {
+        panic!("{calls:?}");
+    };
+    assert_eq!(port, 8080);
+    kernel.server_event(
+        Instant(1),
+        crate::ServerEvent::Request {
+            server,
+            request: 7,
+            method: String::from("PUT"),
+            target: String::from("/up?name=a"),
+            body: true,
+        },
+    );
+    // The plugin hears of it once the body is complete.
+    let told = |log: &Log| log.borrow().iter().any(|l| l.starts_with("event ov.reply"));
+    assert!(!told(&log));
+    for (data, last) in [(&b"da"[..], false), (&b"ta"[..], true)] {
+        kernel.server_event(
+            Instant(1),
+            crate::ServerEvent::Body {
+                request: 7,
+                data: data.to_vec(),
+                last,
+            },
+        );
+    }
+    assert!(told(&log));
+    let path = String::from(".quireink/tmp/request-7");
+    let storage = kernel.shared.storage.as_ref();
+    assert_eq!(
+        quireink_sdk::read_file(storage, &path, 64).unwrap(),
+        b"data"
+    );
+    kernel
+        .output
+        .commands
+        .push(Command::Respond(quireink_sdk::ServerResponse::new(
+            7,
+            200,
+            "text/plain",
+            b"ok".to_vec(),
+        )));
+    // A file goes in parts, read by the shell.
+    let mut response = quireink_sdk::ServerResponse::new(8, 200, "text/plain", Vec::new());
+    response.body_from = Some(String::from("served.txt"));
+    kernel
+        .shared
+        .storage
+        .write("served.txt", b"0123456789")
+        .unwrap();
+    kernel.output.commands.push(Command::Respond(response));
+    kernel.run_commands();
+    let calls = kernel.take_server_calls();
+    assert!(
+        matches!(&calls[0], crate::ServerCall::Respond { request: 7, status: 200, body, .. } if body == b"ok")
+    );
+    let crate::ServerCall::Respond {
+        file: Some(file), ..
+    } = &calls[1]
+    else {
+        panic!("{calls:?}");
+    };
+    assert_eq!(file.size, 10);
+    let mut part = [0u8; 4];
+    assert_eq!(kernel.read_served(&file.path, 8, &mut part).unwrap(), 2);
+    assert_eq!(&part[..2], b"89");
+    assert!(
+        !kernel.shared.storage.exists(&path),
+        "the body is cleaned up"
+    );
+    kernel
+        .output
+        .commands
+        .push(Command::StopServing(Id::new_static("ov.server")));
+    kernel.run_commands();
+    assert!(!kernel.serving());
+    assert!(matches!(
+        kernel.take_server_calls()[0],
+        crate::ServerCall::Stop { .. }
+    ));
+    // A server stops with the screen it was started on.
+    kernel.output.commands.push(Command::OpenScreen(
+        Id::new_static("ov.base"),
+        quireink_sdk::Params::new(),
+    ));
+    kernel.run_commands();
+    kernel.output.commands.push(Command::Serve {
+        server: Id::new_static("ov.server"),
+        port: 8080,
+        events: events.clone(),
+    });
+    kernel.run_commands();
+    assert!(kernel.serving());
+    kernel.take_server_calls();
+    kernel.output.commands.push(Command::Back);
+    kernel.run_commands();
+    assert!(!kernel.serving());
+    assert!(matches!(
+        kernel.take_server_calls()[0],
+        crate::ServerCall::Stop { .. }
+    ));
+    let _ = p::KIND;
+}
+
+#[test]
 fn files_go_up_and_come_down() {
     let storage = quireink_sdk::MemoryStorage::new().with("up.bin", b" data".to_vec());
     let mut kernel = Kernel::builder(DEVICE)

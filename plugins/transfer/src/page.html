@@ -1,0 +1,156 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>QuireInk</title>
+<style>
+:root{color-scheme:light dark;--fg:#111;--bg:#fff;--line:#ddd;--mute:#666}
+@media (prefers-color-scheme:dark){:root{--fg:#eee;--bg:#161616;--line:#333;--mute:#999}}
+body{margin:0;font:16px/1.4 system-ui,sans-serif;color:var(--fg);background:var(--bg)}
+main{max-width:720px;margin:0 auto;padding:16px}
+h1{font-size:20px;margin:0 0 8px}
+nav{margin-bottom:12px;color:var(--mute);overflow-wrap:anywhere}
+nav a{color:inherit}
+.bar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+button,.btn{font:inherit;padding:8px 14px;border:1px solid var(--fg);background:var(--bg);color:var(--fg);border-radius:6px;cursor:pointer}
+#drop{border:2px dashed var(--line);border-radius:8px;padding:16px;text-align:center;color:var(--mute);margin-bottom:12px}
+#drop.over{border-color:var(--fg)}
+#status{min-height:1.4em;color:var(--mute);margin-bottom:8px}
+ul{list-style:none;margin:0;padding:0;border-top:1px solid var(--line)}
+li{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}
+li a{flex:1;min-width:0;color:var(--fg);text-decoration:none;overflow-wrap:anywhere}
+li .size{color:var(--mute);white-space:nowrap}
+li button{padding:4px 10px}
+</style>
+</head>
+<body>
+<main>
+<h1 id="title"></h1>
+<nav id="path"></nav>
+<div class="bar">
+<label class="btn"><input type="file" id="files" multiple hidden><span id="upload"></span></label>
+<button id="mkdir"></button>
+</div>
+<div id="drop"></div>
+<div id="status"></div>
+<ul id="list"></ul>
+</main>
+<script>
+const T = /*STRINGS*/{};
+const key = new URLSearchParams(location.search).get('k') || '';
+const $ = id => document.getElementById(id);
+const join = (dir, name) => dir ? dir + '/' + name : name;
+const query = path => 'k=' + encodeURIComponent(key) + '&path=' + encodeURIComponent(path);
+const named = (text, name) => text.replace('{name}', name);
+const dir = () => decodeURIComponent(location.hash.slice(1));
+const say = text => $('status').textContent = text;
+
+function size(bytes) {
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let i = 0;
+  while (bytes >= 1024 && i < 3) { bytes /= 1024; i++; }
+  return (i ? bytes.toLocaleString(undefined, {maximumFractionDigits: 1}) : bytes) + ' ' + units[i];
+}
+
+function open(path) { location.hash = encodeURIComponent(path); }
+
+async function load() {
+  const here = dir();
+  const nav = $('path');
+  nav.textContent = '';
+  const crumb = (label, path) => {
+    const a = document.createElement('a');
+    a.href = '#'; a.textContent = label;
+    a.onclick = e => { e.preventDefault(); open(path); };
+    nav.append(a);
+  };
+  crumb(T.device, '');
+  let path = '';
+  for (const part of here ? here.split('/') : []) {
+    path = join(path, part);
+    nav.append(' / ');
+    crumb(part, path);
+  }
+  const answer = await fetch('/api/list?' + query(here));
+  const list = $('list');
+  list.textContent = '';
+  if (!answer.ok) { say(T.failed); return; }
+  const entries = await answer.json();
+  if (!entries.length) {
+    const li = document.createElement('li');
+    li.textContent = T.empty;
+    list.append(li);
+  }
+  for (const entry of entries) {
+    const path = join(here, entry.name);
+    const li = document.createElement('li');
+    const a = document.createElement('a');
+    if (entry.dir) {
+      a.href = '#'; a.textContent = entry.name + '/';
+      a.onclick = e => { e.preventDefault(); open(path); };
+    } else {
+      a.href = '/api/file?' + query(path); a.download = entry.name;
+      a.textContent = entry.name;
+    }
+    li.append(a);
+    if (!entry.dir) {
+      const s = document.createElement('span');
+      s.className = 'size'; s.textContent = size(entry.size);
+      li.append(s);
+    }
+    const remove = document.createElement('button');
+    remove.textContent = T.delete;
+    remove.onclick = async () => {
+      if (!confirm(named(T.deleteQuestion, entry.name))) return;
+      const answer = await fetch('/api/delete?' + query(path), {method: 'POST'});
+      say(answer.ok ? T.done : T.failed);
+      load();
+    };
+    li.append(remove);
+    list.append(li);
+  }
+}
+
+function put(file) {
+  return new Promise((done, fail) => {
+    const request = new XMLHttpRequest();
+    request.open('PUT', '/api/file?' + query(join(dir(), file.name)));
+    request.upload.onprogress = e => {
+      if (e.lengthComputable) say(named(T.uploading, file.name) + ' ' + Math.round(e.loaded * 100 / e.total) + ' %');
+    };
+    request.onload = () => request.status == 200 ? done() : fail();
+    request.onerror = fail;
+    request.send(file);
+  });
+}
+
+async function upload(files) {
+  for (const file of files) {
+    try { await put(file); } catch (e) { say(T.failed + ' (' + file.name + ')'); load(); return; }
+  }
+  say(T.done);
+  load();
+}
+
+$('title').textContent = T.title;
+$('upload').textContent = T.upload;
+$('mkdir').textContent = T.newFolder;
+$('drop').textContent = T.drop;
+$('files').onchange = e => { upload([...e.target.files]); e.target.value = ''; };
+$('mkdir').onclick = async () => {
+  const name = prompt(T.folderName);
+  if (!name) return;
+  const answer = await fetch('/api/mkdir?' + query(join(dir(), name)), {method: 'POST'});
+  say(answer.ok ? T.done : T.failed);
+  load();
+};
+const drop = $('drop');
+drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
+drop.ondragleave = () => drop.classList.remove('over');
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); upload([...e.dataTransfer.files]); };
+window.onhashchange = load;
+load();
+</script>
+</body>
+</html>

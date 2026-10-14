@@ -1235,6 +1235,7 @@ dependencies = [
  "quireink-graphics",
  "quireink-platform",
  "quireink-sdk",
+ "quireink-serve",
 ]
 
 [[package]]
@@ -1259,6 +1260,7 @@ dependencies = [
  "quireink-plugin-reader",
  "quireink-plugin-settings",
  "quireink-plugin-stats",
+ "quireink-plugin-transfer",
 ]
 
 [[package]]
@@ -1295,6 +1297,7 @@ dependencies = [
  "quireink-fs",
  "quireink-graphics",
  "quireink-platform",
+ "quireink-serve",
  "softbuffer",
  "winit",
 ]
@@ -1492,6 +1495,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "quireink-plugin-transfer"
+version = "0.1.0"
+dependencies = [
+ "quireink-i18n",
+ "quireink-sdk",
+]
+
+[[package]]
 name = "quireink-sdk"
 version = "0.1.0"
 dependencies = [
@@ -1507,6 +1518,13 @@ dependencies = [
  "quireink-text",
  "quireink-xml",
  "quireink-zip",
+]
+
+[[package]]
+name = "quireink-serve"
+version = "0.1.0"
+dependencies = [
+ "quireink-core",
 ]
 
 [[package]]
