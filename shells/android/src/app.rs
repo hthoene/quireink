@@ -25,6 +25,8 @@ struct Running {
     /// The whole screen, as the window shows it.
     frame: Framebuffer,
     wake_at: Option<Instant>,
+    /// The kernel asked to be built again (e.g. plugins were switched).
+    restart: bool,
 }
 
 #[unsafe(no_mangle)]
@@ -104,6 +106,16 @@ fn android_main(app: AndroidApp) {
         for warning in state.kernel.take_warnings() {
             log::warn!("{warning}");
         }
+        if state.restart
+            && let Some(window) = &window
+        {
+            log::info!("restarting");
+            running = None;
+            running = start_kernel(&app, window, now());
+            if let Some(running) = &running {
+                present(window, &running.frame);
+            }
+        }
     }
 }
 
@@ -163,6 +175,7 @@ fn start_kernel(app: &AndroidApp, window: &NativeWindow, now: Instant) -> Option
         kernel,
         frame,
         wake_at: None,
+        restart: false,
     };
     apply(&mut running, effects);
     Some(running)
@@ -206,6 +219,7 @@ fn install_samples(app: &AndroidApp, root: &Path) {
 /// Executes the effects of a kernel call; `true` if the screen changed.
 fn apply(state: &mut Running, effects: Effects) -> bool {
     state.wake_at = effects.wake_at();
+    state.restart |= effects.restart();
     if effects.refresh().is_none() {
         return false;
     }

@@ -25,6 +25,13 @@ pub enum Command {
     Emit(Id, Params),
     /// Runs an action as if the user had triggered it (e.g. from a menu).
     RunAction(Id),
+    /// Switches a plugin on or off in `quireink.ini`; applies after a
+    /// restart. The kernel refuses plugins that cannot be switched off
+    /// (see [`PluginInfo::can_switch_off`](crate::PluginInfo)).
+    SetPluginEnabled(Id, bool),
+    /// Restarts QuireInk, e.g. to apply switched plugins. The shell builds
+    /// a new kernel; the reading position is already saved.
+    Restart,
 }
 
 impl Command {

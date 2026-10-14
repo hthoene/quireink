@@ -50,7 +50,7 @@ swipe.up = core.menu
 reader.menu = reader.font-larger, reader.font-smaller, core.toggle-night-mode, core.home
 
 [plugins]
-# Switch any plugin off by its id.
+# Switch any plugin off by its id (or use Settings → Plugins).
 some-plugin = off
 ```
 
@@ -120,7 +120,7 @@ cargo run -p quireink-emulator -- --headless --profile boox-go-7 --set core.lang
 | `crates/quireink-core` | The kernel: plugin host, registries, input routing, refresh policy |
 | `crates/quireink-app` | The standard app: the first-party plugin set shells install |
 | `crates/quireink-fs` | Storage in a host directory, for shells with an operating system |
-| `plugins/` | First-party plugins: home screen, reader, file browser, menu, settings, EPUB and TXT formats, default fonts, diagnostics |
+| `plugins/` | First-party plugins: home screen, reader, file browser, menu, settings, plugin manager, EPUB and TXT formats, hyphenation, default fonts, diagnostics |
 | `tools/fontgen` | Converts fonts into bitmap font packs for small devices |
 | `shells/desktop` | Desktop emulator with device profiles |
 | `shells/android` | Android app for e-readers such as Boox ([build and install](shells/android/README.md)) |

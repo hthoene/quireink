@@ -73,6 +73,7 @@ impl Plugin for TestPlugin {
         Manifest {
             id: Id::parse(self.id).unwrap(),
             name: Cow::Borrowed("Test"),
+            description: Cow::Borrowed(""),
             version: Version::new(1, 0, 0),
             sdk: self.sdk,
         }
@@ -284,7 +285,8 @@ fn failing_plugin_leaves_no_traces() {
     kernel.start(Instant(0));
     assert_eq!(kernel.active_screen(), Some(&screens::PLACEHOLDER));
     assert!(kernel.settings().get("bad.level").is_none());
-    assert_eq!(kernel.plugins().len(), 1);
+    let bad = kernel.plugins().get("bad").unwrap();
+    assert_eq!(bad.state, quireink_sdk::PluginState::Failed);
 
     let warnings = kernel.take_warnings();
     assert_eq!(warnings.len(), 1);
@@ -400,6 +402,7 @@ impl Plugin for FontPlugin {
         Manifest {
             id: Id::new_static("fonts"),
             name: Cow::Borrowed("Fonts"),
+            description: Cow::Borrowed(""),
             version: Version::new(1, 0, 0),
             sdk: SDK_VERSION,
         }
@@ -509,6 +512,7 @@ impl Plugin for LifecyclePlugin {
         Manifest {
             id: Id::new_static("life"),
             name: Cow::Borrowed("Lifecycle"),
+            description: Cow::Borrowed(""),
             version: Version::new(1, 0, 0),
             sdk: SDK_VERSION,
         }
@@ -622,6 +626,7 @@ impl Plugin for OverlayPlugin {
         Manifest {
             id: Id::new_static("ov"),
             name: Cow::Borrowed("Overlay"),
+            description: Cow::Borrowed(""),
             version: Version::new(1, 0, 0),
             sdk: SDK_VERSION,
         }
@@ -787,6 +792,72 @@ fn changed_settings_are_saved_and_announced() {
         core::str::from_utf8(&buf[..n]).unwrap(),
         "# my settings\n[core]\nui-size = 12\nnight-mode = on\n"
     );
+}
+
+#[test]
+fn plugins_switch_on_and_off_for_the_next_start() {
+    use quireink_sdk::PluginState::{Off, Running};
+
+    let log = log();
+    let storage = quireink_sdk::MemoryStorage::new().with(
+        "quireink.ini",
+        "[plugins]
+b = off
+",
+    );
+    let mut kernel = Kernel::builder(DEVICE)
+        .storage(storage)
+        .plugin(OverlayPlugin { log: log.clone() })
+        .plugin(TestPlugin::new("a", &log))
+        .plugin(TestPlugin::new("b", &log))
+        .build()
+        .unwrap();
+    let states: Vec<(&str, quireink_sdk::PluginState)> = kernel
+        .plugins()
+        .iter()
+        .map(|p| (p.manifest.id.as_str(), p.state))
+        .collect();
+    assert_eq!(
+        states,
+        [
+            ("core", Running),
+            ("ov", Running),
+            ("a", Running),
+            ("b", Off)
+        ]
+    );
+    assert!(kernel.settings().get("b.level").is_none());
+    // "ov" alone provides the menu; the home screen has two providers.
+    let ov = kernel.plugins().get("ov").unwrap();
+    assert_eq!(ov.required_for.iter().collect::<Vec<_>>(), [&slots::MENU]);
+    assert!(!kernel.plugins().restart_needed());
+
+    kernel.apply(Command::SetPluginEnabled(Id::new_static("a"), false));
+    kernel.apply(Command::SetPluginEnabled(Id::new_static("b"), true));
+    // The kernel and plugins that alone provide a slot stay on.
+    kernel.apply(Command::SetPluginEnabled(Id::new_static("core"), false));
+    kernel.apply(Command::SetPluginEnabled(Id::new_static("ov"), false));
+    assert_eq!(kernel.take_warnings().len(), 2);
+    assert!(kernel.plugins().get("ov").unwrap().enabled);
+    assert!(kernel.plugins().get("a").unwrap().restart_needed());
+    assert!(kernel.plugins().restart_needed());
+
+    let mut buf = [0u8; 64];
+    let n = kernel
+        .shared
+        .storage
+        .read_at("quireink.ini", 0, &mut buf)
+        .unwrap();
+    assert_eq!(
+        core::str::from_utf8(&buf[..n]).unwrap(),
+        "[plugins]
+b = on
+a = off
+"
+    );
+
+    kernel.apply(Command::Restart);
+    assert!(kernel.finish().restart());
 }
 
 #[test]

@@ -43,6 +43,7 @@ mod memory_storage;
 mod menus;
 mod params;
 mod plugin;
+mod plugins;
 mod screen;
 mod settings;
 pub mod ui;
@@ -61,6 +62,7 @@ pub use memory_storage::{MemoryStorage, read_file};
 pub use menus::{MenuEntry, MenuItem, Menus};
 pub use params::Params;
 pub use plugin::{Manifest, Plugin, Priority, RegisterError, Registrar, SlotSpec};
+pub use plugins::{PluginInfo, PluginState, Plugins, RequiredFor};
 pub use screen::{Cx, Handled, Output, Screen, ScreenFactory, ScreenSpec};
 pub use settings::{
     Level, SettingError, SettingGroupSpec, SettingKind, SettingSpec, SettingValue, Settings,

@@ -44,6 +44,9 @@ impl Plugin for EpubFormat {
         Manifest {
             id: PLUGIN,
             name: Cow::Borrowed("EPUB"),
+            description: Cow::Borrowed(
+                "Opens EPUB books with their styles, table of contents and images.",
+            ),
             version: Version::new(0, 1, 0),
             sdk: SDK_VERSION,
         }

@@ -120,12 +120,14 @@ fn manifest() -> Manifest {
     Manifest {
         id: PLUGIN,
         name: Cow::Borrowed("Default fonts"),
+        description: Cow::Borrowed("Literata for reading and Atkinson Hyperlegible for menus."),
         version: Version::new(0, 1, 0),
         sdk: SDK_VERSION,
     }
 }
 
 fn register(r: &mut dyn Registrar, faces: Faces) -> Result<(), RegisterError> {
+    r.add_translations(Cow::Borrowed(include_str!("../i18n/de.ini")))?;
     for (id, role, data, weight) in faces {
         let font =
             Font::from_data(data, &[("wght", weight)]).map_err(|e| RegisterError::Invalid {

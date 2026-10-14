@@ -39,6 +39,9 @@ impl Plugin for Diagnostics {
         Manifest {
             id: PLUGIN,
             name: Cow::Borrowed("Diagnostics"),
+            description: Cow::Borrowed(
+                "A test screen for gray levels, buttons, touch and refresh modes.",
+            ),
             version: Version::new(0, 1, 0),
             sdk: SDK_VERSION,
         }

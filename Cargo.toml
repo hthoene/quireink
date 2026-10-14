@@ -25,6 +25,7 @@ members = [
     "plugins/reader",
     "plugins/files",
     "plugins/menu",
+    "plugins/plugin-manager",
     "plugins/settings",
     "plugins/home",
     "plugins/hyphenation",
@@ -60,6 +61,7 @@ quireink-app = { path = "crates/quireink-app", version = "0.1.0" }
 quireink-fs = { path = "crates/quireink-fs", version = "0.1.0" }
 quireink-plugin-diagnostics = { path = "plugins/diagnostics", version = "0.1.0" }
 quireink-plugin-menu = { path = "plugins/menu", version = "0.1.0" }
+quireink-plugin-plugin-manager = { path = "plugins/plugin-manager", version = "0.1.0" }
 quireink-plugin-hyphenation = { path = "plugins/hyphenation", version = "0.1.0" }
 quireink-plugin-home = { path = "plugins/home", version = "0.1.0" }
 quireink-plugin-settings = { path = "plugins/settings", version = "0.1.0" }

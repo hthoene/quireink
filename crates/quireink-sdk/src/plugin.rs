@@ -17,8 +17,12 @@ use crate::version::Version;
 pub struct Manifest {
     /// Plugin id; also the namespace of all its contributions.
     pub id: Id,
-    /// Human-readable name.
+    /// Human-readable name in English. Plugins translate it with the key
+    /// `<id>.plugin.name`.
     pub name: Cow<'static, str>,
+    /// What the plugin does, one English sentence for plugin managers.
+    /// Plugins translate it with the key `<id>.plugin.description`.
+    pub description: Cow<'static, str>,
     pub version: Version,
     /// The SDK version the plugin was built against.
     pub sdk: Version,

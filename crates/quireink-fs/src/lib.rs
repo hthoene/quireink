@@ -18,6 +18,11 @@ pub struct DirStorage {
 }
 
 impl DirStorage {
+    /// The directory the storage is rooted at.
+    pub fn root(&self) -> &std::path::Path {
+        &self.root
+    }
+
     pub fn new(root: impl Into<PathBuf>) -> io::Result<Self> {
         let root = root.into();
         fs::create_dir_all(&root)?;

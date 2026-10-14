@@ -81,6 +81,50 @@ pub fn draw_label(
     font.draw(canvas, size, x, baseline, text, color)
 }
 
+/// Small gray text wrapped below a list, at most `lines` lines, e.g. the
+/// description of the focused item. `top` is the y of the first line box.
+pub fn draw_footer(
+    canvas: &mut Canvas<'_>,
+    env: &Env<'_>,
+    style: &UiStyle,
+    top: f32,
+    lines: u32,
+    text: &str,
+) {
+    let Some(font) = style.font(env) else {
+        return;
+    };
+    let margin = style.margin as f32;
+    let width = f32::from(env.device.display.width) - 2.0 * margin;
+    let line = style.small * 1.5;
+    for (n, range) in font
+        .wrap(style.small, text, width)
+        .into_iter()
+        .take(lines as usize)
+        .enumerate()
+    {
+        let baseline = top + line * (n as f32 + 0.8);
+        font.draw(
+            canvas,
+            style.small,
+            margin,
+            baseline as i32,
+            &text[range],
+            Color::gray(80),
+        );
+    }
+}
+
+/// The height of [`draw_footer`] with `lines` lines, including the gap
+/// above it.
+pub fn footer_height(style: &UiStyle, lines: u32) -> u16 {
+    if lines == 0 {
+        0
+    } else {
+        (lines as f32 * style.small * 1.5) as u16 + style.gap as u16
+    }
+}
+
 /// A black header bar with a title and an optional right-aligned note.
 pub fn draw_header(
     canvas: &mut Canvas<'_>,

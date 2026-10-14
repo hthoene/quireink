@@ -43,6 +43,7 @@ impl Plugin for Files {
         Manifest {
             id: PLUGIN,
             name: Cow::Borrowed("File browser"),
+            description: Cow::Borrowed("Lists the books and folders on the device and opens them."),
             version: Version::new(0, 1, 0),
             sdk: SDK_VERSION,
         }

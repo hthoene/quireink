@@ -57,6 +57,14 @@ impl Registry {
             .map(|c| &c.screen)
     }
 
+    /// Every screen offered for `slot`.
+    pub(crate) fn slot_screens<'a>(&'a self, slot: &'a Id) -> impl Iterator<Item = &'a Id> {
+        self.candidates
+            .iter()
+            .filter(move |c| c.slot == *slot && self.screens.contains_key(&c.screen))
+            .map(|c| &c.screen)
+    }
+
     pub(crate) fn bind_user(&mut self, slot: Id, screen: Id) {
         self.user_bindings.insert(slot, screen);
     }

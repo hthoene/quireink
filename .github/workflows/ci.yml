@@ -47,6 +47,7 @@ jobs:
           -p quireink-plugin-format-txt -p quireink-plugin-format-epub -p quireink-plugin-hyphenation
           -p quireink-image -p quireink-plugin-settings
           -p quireink-plugin-reader -p quireink-plugin-files
+          -p quireink-plugin-menu -p quireink-plugin-home -p quireink-plugin-plugin-manager
           -p quireink-plugin-fonts-default --no-default-features
 
   architecture:

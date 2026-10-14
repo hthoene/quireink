@@ -42,6 +42,9 @@ impl Plugin for Menu {
         Manifest {
             id: PLUGIN,
             name: Cow::Borrowed("Menu"),
+            description: Cow::Borrowed(
+                "The menu at the bottom of the screen, with actions and settings.",
+            ),
             version: Version::new(0, 1, 0),
             sdk: SDK_VERSION,
         }

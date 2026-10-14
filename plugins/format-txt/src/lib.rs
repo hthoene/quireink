@@ -38,6 +38,7 @@ impl Plugin for TxtFormat {
         Manifest {
             id: PLUGIN,
             name: Cow::Borrowed("Plain text"),
+            description: Cow::Borrowed("Opens plain text files (.txt)."),
             version: Version::new(0, 1, 0),
             sdk: SDK_VERSION,
         }

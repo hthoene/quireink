@@ -65,7 +65,8 @@ use quireink_sdk::builtin::{
 };
 use quireink_sdk::{
     Command, Cx, Env, EventHandler, Fonts, Formats, GestureKind, Handled, Hyphenation, Id,
-    Manifest, Menus, Metrics, Output, Params, Plugin, RegisterError, SDK_VERSION, Screen, Settings,
+    Manifest, Menus, Metrics, Output, Params, Plugin, PluginInfo, PluginState, Plugins,
+    RegisterError, RequiredFor, SDK_VERSION, Screen, Settings,
 };
 
 use crate::core_plugin::{CORE, CorePlugin};
@@ -89,6 +90,8 @@ pub enum Effect {
     Refresh { region: Rect, mode: RefreshMode },
     /// Call [`Kernel::tick`] at (or soon after) this time.
     WakeAt(Instant),
+    /// Build a new kernel, e.g. to apply switched plugins.
+    Restart,
 }
 
 /// The effects of one kernel call. Refreshes are already coalesced: there
@@ -97,6 +100,7 @@ pub enum Effect {
 pub struct Effects {
     refresh: Option<(Rect, RefreshMode)>,
     wake_at: Option<Instant>,
+    restart: bool,
 }
 
 impl Effects {
@@ -108,15 +112,23 @@ impl Effects {
         self.wake_at
     }
 
+    /// Whether the shell should build a new kernel (see [`Effect::Restart`]).
+    pub fn restart(&self) -> bool {
+        self.restart
+    }
+
     pub fn is_empty(&self) -> bool {
-        self.refresh.is_none() && self.wake_at.is_none()
+        self.refresh.is_none() && self.wake_at.is_none() && !self.restart
     }
 
     pub fn iter(&self) -> impl Iterator<Item = Effect> {
         let refresh = self
             .refresh
             .map(|(region, mode)| Effect::Refresh { region, mode });
-        refresh.into_iter().chain(self.wake_at.map(Effect::WakeAt))
+        refresh
+            .into_iter()
+            .chain(self.wake_at.map(Effect::WakeAt))
+            .chain(self.restart.then_some(Effect::Restart))
     }
 }
 
@@ -258,6 +270,7 @@ impl KernelBuilder {
                 formats: Formats::new(),
                 hyphenation: Hyphenation::new(),
                 menus: Menus::new(),
+                plugins: Plugins::new(),
                 storage: self.storage.unwrap_or_else(|| Box::new(NoStorage)),
             },
             pending: None,
@@ -275,7 +288,7 @@ impl KernelBuilder {
             refresh: RefreshPolicy::default(),
             output: Output::default(),
             warnings: Vec::new(),
-            plugins: Vec::new(),
+            restart: false,
             now: Instant::default(),
         };
 
@@ -290,10 +303,12 @@ impl KernelBuilder {
         for plugin in core::iter::once(core).chain(self.plugins) {
             let manifest = plugin.manifest();
             if manifest.id != CORE && disabled.iter().any(|id| id == manifest.id.as_str()) {
-                continue;
+                kernel.register_off(plugin.as_ref(), manifest);
+            } else {
+                kernel.register_plugin(plugin.as_ref(), manifest);
             }
-            kernel.register_plugin(plugin.as_ref(), manifest);
         }
+        kernel.find_required_plugins();
 
         if let Some(source) = self.device_keymap {
             for problem in kernel.keymap.load(&source, Origin::Device, true) {
@@ -326,25 +341,10 @@ impl KernelBuilder {
                 );
             }
         }
-        for (id, spec) in &kernel.registry.actions {
-            kernel
-                .shared
-                .menus
-                .set_title(id.clone(), spec.title.clone());
-        }
-        // Settings can be menu entries too.
-        let titles: Vec<(Id, Cow<'static, str>)> = kernel
-            .shared
-            .settings
-            .specs()
-            .map(|spec| (spec.id.clone(), spec.title.clone()))
-            .collect();
-        for (id, title) in titles {
-            kernel.shared.menus.set_title(id, title);
-        }
         for source in &configs {
             kernel.apply_user_config(source);
         }
+        kernel.set_menu_titles();
         kernel.validate();
         kernel.rebuild_keymap();
         let shared = &mut kernel.shared;
@@ -393,7 +393,8 @@ pub struct Kernel {
     refresh: RefreshPolicy,
     output: Output,
     warnings: Vec<Warning>,
-    plugins: Vec<Manifest>,
+    /// A restart was requested (see [`Command::Restart`]).
+    restart: bool,
     now: Instant,
 }
 
@@ -401,7 +402,7 @@ impl fmt::Debug for Kernel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Kernel")
             .field("device", &self.shared.device.id)
-            .field("plugins", &self.plugins)
+            .field("plugins", &self.shared.plugins.len())
             .field(
                 "stack",
                 &self.stack.iter().map(|s| &s.id).collect::<Vec<_>>(),
@@ -474,7 +475,7 @@ impl Kernel {
         self.keymap_sources.shrink_to_fit();
         self.keymap_presets.shrink_to_fit();
         self.subscriptions.shrink_to_fit();
-        self.plugins.shrink_to_fit();
+        self.shared.plugins.shrink_to_fit();
         self.warnings.shrink_to_fit();
         let shared = &mut self.shared;
         shared.settings.shrink_to_fit();
@@ -536,9 +537,9 @@ impl Kernel {
         &self.shared.formats
     }
 
-    /// Manifests of all successfully registered plugins, `core` first.
-    pub fn plugins(&self) -> &[Manifest] {
-        &self.plugins
+    /// Every plugin with its state, `core` first.
+    pub fn plugins(&self) -> &Plugins {
+        &self.shared.plugins
     }
 
     /// The id of the screen currently shown.
@@ -559,7 +560,7 @@ impl Kernel {
         if id.as_str() != id.namespace() {
             return self.warn(source(), None, "plugin ids must not contain '.'".into());
         }
-        if self.plugins.iter().any(|m| m.id == id) {
+        if self.shared.plugins.get(id.as_str()).is_some() {
             return self.warn(
                 source(),
                 None,
@@ -568,7 +569,8 @@ impl Kernel {
         }
         if !SDK_VERSION.satisfies(&manifest.sdk) {
             let message = format!("requires SDK {}, this is {}", manifest.sdk, SDK_VERSION);
-            return self.warn(source(), None, message);
+            self.warn(source(), None, message);
+            return self.add_plugin_info(manifest, PluginState::Failed, true);
         }
 
         let mut staging = Staging::default();
@@ -576,14 +578,103 @@ impl Kernel {
             .register(&mut PluginRegistrar::new(id.clone(), &mut staging))
             .and_then(|()| self.merge(staging));
         match result {
-            Ok(()) => self.plugins.push(manifest),
+            Ok(()) => self.add_plugin_info(manifest, PluginState::Running, true),
             Err(error) => {
                 let line = match error {
                     RegisterError::Parse { line, .. } => Some(line),
                     _ => None,
                 };
                 self.warn(source(), line, format!("not loaded: {error}"));
+                self.add_plugin_info(manifest, PluginState::Failed, true);
             }
+        }
+    }
+
+    /// Lists a plugin the user switched off. Only its translations are
+    /// loaded, so plugin managers can show its name and description in the
+    /// user's language.
+    fn register_off(&mut self, plugin: &dyn Plugin, manifest: Manifest) {
+        let id = manifest.id.clone();
+        if id.as_str() != id.namespace() || self.shared.plugins.get(id.as_str()).is_some() {
+            return;
+        }
+        let mut staging = Staging::default();
+        if SDK_VERSION.satisfies(&manifest.sdk)
+            && plugin
+                .register(&mut PluginRegistrar::new(id, &mut staging))
+                .is_ok()
+        {
+            for catalog in staging.catalogs.drain(..) {
+                self.shared.translator.add(catalog);
+            }
+        }
+        self.add_plugin_info(manifest, PluginState::Off, false);
+    }
+
+    fn add_plugin_info(&mut self, manifest: Manifest, state: PluginState, enabled: bool) {
+        self.shared.plugins.push(PluginInfo {
+            manifest,
+            state,
+            enabled,
+            required_for: RequiredFor::default(),
+        });
+    }
+
+    /// Gives the menus the labels of the actions and settings they list,
+    /// and only those: every label costs memory.
+    fn set_menu_titles(&mut self) {
+        let referenced: Vec<Id> = self.shared.menus.referenced_items().cloned().collect();
+        for id in referenced {
+            let title = match self.registry.actions.get(&id) {
+                Some(action) => Some(action.title.clone()),
+                None => self
+                    .shared
+                    .settings
+                    .specs()
+                    .find(|spec| spec.id == id)
+                    .map(|spec| spec.title.clone()),
+            };
+            if let Some(title) = title {
+                self.shared.menus.set_title(id, title);
+            }
+        }
+    }
+
+    /// Marks plugins that alone fill a standard slot or provide all fonts:
+    /// switching one of them off would leave the user without e.g.
+    /// settings, a menu or text, and no way back.
+    fn find_required_plugins(&mut self) {
+        for slot in [
+            slots::HOME,
+            slots::READER,
+            slots::LIBRARY,
+            slots::MENU,
+            slots::SETTINGS,
+        ] {
+            let sole = {
+                let mut providers = self
+                    .registry
+                    .slot_screens(&slot)
+                    .map(Id::namespace)
+                    .filter(|plugin| *plugin != CORE.as_str());
+                match providers.next() {
+                    Some(first) if providers.all(|plugin| plugin == first) => first.to_string(),
+                    _ => continue,
+                }
+            };
+            if let Some(info) = self.shared.plugins.get_mut(&sole) {
+                info.required_for.insert(&slot);
+            }
+        }
+        // Any font can stand in for any role, but without fonts no text
+        // is shown at all.
+        let mut owners = self.shared.fonts.ids().map(Id::namespace);
+        let sole = match owners.next() {
+            Some(first) if owners.all(|plugin| plugin == first) => first.to_string(),
+            _ => return,
+        };
+        if let Some(info) = self.shared.plugins.get_mut(&sole) {
+            info.required_for.insert(&quireink_sdk::builtin::fonts::UI);
         }
     }
 
@@ -915,7 +1006,10 @@ impl Kernel {
             self.invalidate(area);
         }
         let requested = self.output.refresh.take();
-        let mut effects = Effects::default();
+        let mut effects = Effects {
+            restart: mem::take(&mut self.restart),
+            ..Effects::default()
+        };
         if let Some(dirty) = self.pending.take() {
             self.unrendered = Some(self.unrendered.map_or(dirty, |u| u.union(&dirty)));
             let interval = self
@@ -994,6 +1088,8 @@ impl Kernel {
                 }
             }
             Command::RunAction(action) => self.dispatch(action),
+            Command::SetPluginEnabled(id, enabled) => self.set_plugin_enabled(&id, enabled),
+            Command::Restart => self.restart = true,
             Command::Back => {
                 if self.stack.len() > 1 {
                     self.close_above(self.stack.len() - 2);
@@ -1156,15 +1252,46 @@ impl Kernel {
         let Some((section, key)) = id.as_str().split_once('.') else {
             return;
         };
+        let value = value.to_config_text();
+        self.save_config(section, key, &value);
+    }
+
+    /// Sets `key` in `section` of the configuration file on the device.
+    fn save_config(&mut self, section: &str, key: &str, value: &str) {
         let storage = self.shared.storage.as_ref();
         let source = read_config(storage).unwrap_or_default();
-        let updated = quireink_config::set(&source, section, key, &value.to_config_text());
+        let updated = quireink_config::set(&source, section, key, value);
         if storage.write(CONFIG_FILE, updated.as_bytes()).is_err() {
             self.warn(
                 WarningSource::Runtime,
                 None,
-                format!("could not save `{id}` to {CONFIG_FILE}"),
+                format!("could not save `{section}.{key}` to {CONFIG_FILE}"),
             );
+        }
+    }
+
+    /// Switches a plugin for the next start (see [`Command::SetPluginEnabled`]).
+    fn set_plugin_enabled(&mut self, id: &Id, enabled: bool) {
+        let Some(info) = self.shared.plugins.get(id.as_str()) else {
+            return self.warn(
+                WarningSource::Runtime,
+                None,
+                format!("unknown plugin `{id}`"),
+            );
+        };
+        if !enabled && !info.can_switch_off() {
+            return self.warn(
+                WarningSource::Runtime,
+                None,
+                format!("plugin `{id}` cannot be switched off"),
+            );
+        }
+        if info.enabled == enabled {
+            return;
+        }
+        self.save_config("plugins", id.as_str(), if enabled { "on" } else { "off" });
+        if let Some(info) = self.shared.plugins.get_mut(id.as_str()) {
+            info.enabled = enabled;
         }
     }
 
@@ -1238,6 +1365,7 @@ struct Shared {
     formats: Formats,
     hyphenation: Hyphenation,
     menus: Menus,
+    plugins: Plugins,
     storage: Box<dyn Storage>,
 }
 
@@ -1253,6 +1381,7 @@ impl Shared {
             formats: &self.formats,
             hyphenation: &self.hyphenation,
             menus: &self.menus,
+            plugins: &self.plugins,
             storage: self.storage.as_ref(),
         }
     }

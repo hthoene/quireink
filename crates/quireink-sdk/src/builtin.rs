@@ -3,6 +3,9 @@
 //! Plugins use these to bind screens to the standard slots, to handle the
 //! standard navigation actions and to read the global settings.
 
+/// The kernel's own plugin id; it cannot be switched off.
+pub const CORE_PLUGIN: crate::Id = crate::Id::new_static("core");
+
 /// Standard actions. Navigation actions have no global handler; screens
 /// interpret them. `back`, `home` and `toggle-night-mode` have global
 /// handlers, which screens may still override by handling the action.
@@ -58,6 +61,9 @@ pub mod menus {
 
     /// The menu shown when a screen has no menu of its own.
     pub const MAIN: Id = Id::new_static("core.main");
+    /// Extra pages on the main settings page, below the setting groups
+    /// (e.g. the plugin manager). Entries are actions.
+    pub const SETTINGS: Id = Id::new_static("core.settings-pages");
 }
 
 /// Standard parameter names.

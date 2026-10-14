@@ -1167,6 +1167,7 @@ dependencies = [
  "quireink-plugin-home",
  "quireink-plugin-hyphenation",
  "quireink-plugin-menu",
+ "quireink-plugin-plugin-manager",
  "quireink-plugin-reader",
  "quireink-plugin-settings",
 ]
@@ -1321,6 +1322,14 @@ dependencies = [
 
 [[package]]
 name = "quireink-plugin-menu"
+version = "0.1.0"
+dependencies = [
+ "quireink-i18n",
+ "quireink-sdk",
+]
+
+[[package]]
+name = "quireink-plugin-plugin-manager"
 version = "0.1.0"
 dependencies = [
  "quireink-i18n",

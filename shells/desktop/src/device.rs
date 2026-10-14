@@ -17,6 +17,9 @@ use quireink_fs::DirStorage;
 pub struct Device {
     pub profile: &'static Profile,
     pub kernel: Kernel,
+    /// What a restart needs to build the kernel again.
+    user_config: Option<String>,
+    root: std::path::PathBuf,
     /// The panel controller's frame memory: the kernel writes changed rows
     /// into it, possibly band by band. Not part of the heap budget, as on
     /// the device.
@@ -42,35 +45,16 @@ impl Device {
         simulated_time: bool,
     ) -> Result<Self, KernelError> {
         budget::set_limit(profile.heap_budget);
-        let kernel = budget::track(|| {
-            let fonts = if profile.font_packs {
-                quireink_app::Fonts::Packs
-            } else {
-                quireink_app::Fonts::Outline
-            };
-            let builder = Kernel::builder(profile.device)
-                .storage(storage)
-                .glyph_cache(profile.glyph_cache);
-            let mut builder = quireink_app::install(builder, fonts);
-            if let Some(rows) = profile.frame_rows {
-                builder = builder.frame_rows(rows);
-            }
-            for (id, value) in profile.settings {
-                builder = builder.setting_default(id, value);
-            }
-            // Copy the configuration inside the tracked scope so that its
-            // allocation and release are both accounted for.
-            if let Some(config) = user_config.as_deref() {
-                builder = builder.user_config(config);
-            }
-            builder.build()
-        })?;
+        let root = storage.root().to_path_buf();
+        let kernel = build_kernel(profile, user_config.as_deref(), storage)?;
         let display = profile.device.display;
         let controller = Framebuffer::new(display.width, display.height, display.format)
             .map_err(KernelError::Graphics)?;
         let mut device = Self {
             profile,
             kernel,
+            user_config,
+            root,
             controller,
             panel: Panel::new(display.width, display.height, display.color),
             wake_at: None,
@@ -125,6 +109,9 @@ impl Device {
     }
 
     fn execute(&mut self, effects: Effects) {
+        if effects.restart() {
+            return self.restart();
+        }
         if let Some((region, mode)) = effects.refresh() {
             let (kernel, controller) = (&mut self.kernel, &mut self.controller);
             budget::track(|| kernel.render(&mut |top, rows| controller.write_rows(top, rows)));
@@ -134,6 +121,35 @@ impl Device {
         self.report_warnings();
     }
 
+    /// Builds a new kernel, as the device would after a reboot.
+    fn restart(&mut self) {
+        let storage = match DirStorage::new(&self.root) {
+            Ok(storage) => storage,
+            Err(e) => return eprintln!("restart: {}: {e}", self.root.display()),
+        };
+        // The old kernel goes first, as on the device: a minimal one (one
+        // frame row, no plugins) holds its place meanwhile.
+        let profile = self.profile;
+        let kernel = &mut self.kernel;
+        let swapped = budget::track(|| {
+            let placeholder = Kernel::builder(profile.device).frame_rows(1).build()?;
+            drop(std::mem::replace(kernel, placeholder));
+            Ok::<(), KernelError>(())
+        });
+        if let Err(e) = swapped {
+            return eprintln!("restart: {e}");
+        }
+        match build_kernel(self.profile, self.user_config.as_deref(), storage) {
+            Ok(new) => {
+                let kernel = &mut self.kernel;
+                budget::track(|| drop(std::mem::replace(kernel, new)));
+                self.report_warnings();
+                self.start();
+            }
+            Err(e) => eprintln!("restart: {e}"),
+        }
+    }
+
     fn report_warnings(&mut self) {
         budget::track(|| {
             for warning in self.kernel.take_warnings() {
@@ -141,4 +157,33 @@ impl Device {
             }
         });
     }
+}
+
+/// The standard app for `profile`, counted against its heap budget.
+fn build_kernel(
+    profile: &'static Profile,
+    user_config: Option<&str>,
+    storage: DirStorage,
+) -> Result<Kernel, KernelError> {
+    budget::track(|| {
+        let fonts = if profile.font_packs {
+            quireink_app::Fonts::Packs
+        } else {
+            quireink_app::Fonts::Outline
+        };
+        let builder = Kernel::builder(profile.device)
+            .storage(storage)
+            .glyph_cache(profile.glyph_cache);
+        let mut builder = quireink_app::install(builder, fonts);
+        if let Some(rows) = profile.frame_rows {
+            builder = builder.frame_rows(rows);
+        }
+        for (id, value) in profile.settings {
+            builder = builder.setting_default(id, value);
+        }
+        if let Some(config) = user_config {
+            builder = builder.user_config(config);
+        }
+        builder.build()
+    })
 }

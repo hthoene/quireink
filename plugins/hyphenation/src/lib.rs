@@ -32,12 +32,16 @@ impl Plugin for Hyphenation {
         Manifest {
             id: PLUGIN,
             name: Cow::Borrowed("Hyphenation (German, English)"),
+            description: Cow::Borrowed(
+                "Hyphenation patterns for German and English, for evenly set text.",
+            ),
             version: Version::new(0, 1, 0),
             sdk: SDK_VERSION,
         }
     }
 
     fn register(&self, r: &mut dyn Registrar) -> Result<(), RegisterError> {
+        r.add_translations(Cow::Borrowed(include_str!("../i18n/de.ini")))?;
         for (id, language, patterns) in [(GERMAN, "de", DE), (ENGLISH, "en", EN)] {
             r.add_hyphenation(HyphenationSpec {
                 id,

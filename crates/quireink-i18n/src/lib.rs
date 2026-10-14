@@ -95,6 +95,11 @@ impl Translator {
         languages
     }
 
+    /// The message for `key`, if a catalog has it.
+    pub fn get(&self, key: &str) -> Option<&str> {
+        self.ordered().find_map(|catalog| catalog.get(key))
+    }
+
     /// The message for `key`, or `key` itself if no catalog has it.
     pub fn tr<'a>(&'a self, key: &'a str) -> &'a str {
         self.ordered()

@@ -300,9 +300,10 @@ while active):
 | XML tokenizer | ≤ 4 KiB | Text emitted early, overlong markup skipped |
 | Wi-Fi + TLS | on demand only | Freed when sync is done |
 
-Totals (X4 profile, heap budget 192 KiB): home screen 28 KiB, reading TXT
-or EPUB 31 KiB, peak 83 KiB while converting an EPUB chapter for the first
-time (was 132 / 155 / over budget before the optimizations of 2026-10-14).
+Totals (X4 profile, heap budget 192 KiB): home screen 34 KiB, reading TXT
+or EPUB 38 KiB, peak 91 KiB while converting an EPUB chapter with images
+for the first time (was 132 / 155 / over budget before the optimizations of
+2026-10-14; images, setting groups and the plugin manager added since).
 
 Rules:
 
@@ -604,7 +605,7 @@ architecture (G1–G12 below).
 | G6 | Shells pre-interpreted input | **Raw input**: shells send button down/up and pointer samples; the kernel recognizes long presses and gestures; screens can capture pointers (done in M0). Gesture recognizers become contributions. | M0 ✅ / M5 |
 | G7 | Display and power were static | **Lifecycle events**: rotation/resolution changes, suspend/resume, low battery, charging, USB. | M4 |
 | G8 | Reader was one monolith | Reader split into a **layout engine** (`quireink-layout`, usable by every reader plugin) and interchangeable reader screens. | M1 ✅ |
-| G9 | Plugins could not be managed at runtime | **Plugin management service** (list, enable, disable, install, update) and config write-back. | Config write-back ✅ M2 / rest M5 |
+| G9 | Plugins could not be managed at runtime | **Plugin management service** (list, enable, disable, install, update) and config write-back. | Config write-back ✅ M2 / list, enable, disable, restart ✅ M5 / install, update M5 |
 | G10 | Fixed library schema | Library service with **plugin-defined metadata fields** and metadata providers; the library service itself is replaceable. | M2–M5 |
 | G11 | Widgets were pixels only | **Widget semantics** (role, label, state) for accessibility, automation and tests. | M2 |
 | G12 | Only the kernel could define extension points | **Plugin-defined extension points**: a plugin publishes a service through which others contribute; a second init phase (`activate`) runs after all plugins registered. | M5 |
@@ -758,7 +759,7 @@ If the X4 has not arrived by the end of M3, M6 (Boox) is done before M4.
 | **M2 UI** 🔶 | ✅ home screen (continue reading, recently read, shortcuts as menu `home.actions`), standard reading events `core.book-opened`/`core.page-turned`, key map presets (two-button layout), device setting defaults, `core.next`/`core.previous`, overlays, menus as contributions (+ `[menus]`), generated settings screen, settings saved to `quireink.ini`, screen events, `ui` building blocks, `core.ui-size`, reader menu with live re-layout · ✅ settings structure (§6.7: groups, levels, descriptions, units, choosers) · ⬜ themes beyond `core.ui-size`, layout files for dashboards, library service, widget semantics, on-screen keyboard, snapshot tests | Full button-only flow ✅ (also with two buttons); home screen replaceable by config ✅; snapshot tests ⬜ |
 | **M3 EPUB** 🔶 | ✅ streaming ZIP (`quireink-zip`), incremental XML tokenizer (`quireink-xml`), EPUB 2/3 package, spine, metadata, TOC (nav + NCX) with anchors, chapter conversion into a block cache (ADR 0011), TOC screen + `reader.goto`, `DocumentError::OutOfMemory`, hyphenation (Liang patterns read in place, `quireink-hyphen`; German and English as the `hyphenation` plugin; contribution `add_hyphenation`; setting `reader.hyphenate`), styled text: bold/italic runs (`<b>`, `<i>`, `<em>`, `<strong>`, inline `style`), alignment (`<center>`, `align`, `text-align`), headings in a larger bold face that never end a page, Literata bold/italic faces, CSS subset (element and class selectors from the book's stylesheets and `<style>`: `text-align`, `font-weight`, `font-style`, `display: none`; parsed once into the cache) , images (`quireink-image`: streaming baseline JPEG and PNG decoded to gray, cached, scaled and ordered-dithered when drawn), mutation tests and cargo-fuzz targets for every parser · ⬜ progressive JPEG, GIF, more CSS (margins, font sizes, small caps), covers in the library and home screen | Standard Ebooks / Gutenberg test corpus renders correctly; Gutenberg EPUBs within the X4 budget (✅ peak 115 of 192 KiB with banded rendering, ADR 0012) |
 | **M4 Xteink X4** | ESP32 shell: display, buttons, SD, sleep, firmware backup/restore | Read an EPUB on real hardware; battery measurement |
-| **M5 Plugins v1** | SDK 0.1 published + docs, plugin manager screen (installed plugins with version and description, switch them on and off), plugin manifests loaded from storage, events/filters/services complete, kosync, OPDS | Progress syncs with KOReader; a sample community plugin lives outside the repo |
+| **M5 Plugins v1** 🔶 | ✅ plugin manager (`plugin-manager` plugin: every plugin with translated name, description, version and state; switches saved to `[plugins]`, applied by `Command::Restart`; plugins that alone provide a standard slot or all fonts stay on) · ⬜ SDK 0.1 published + docs, plugin manifests and data plugins loaded from storage, events/filters/services complete, kosync, OPDS, web firmware builder (X4) | Progress syncs with KOReader; a sample community plugin lives outside the repo |
 | **M6 Boox** 🔶 | ✅ native activity in Rust without Java or Gradle (`shells/android`, `build-apk.sh`, APK as CI artifact), touch, page/volume keys, sample books, system language, shared `quireink-app` plugin set and `quireink-fs` storage · ⬜ Onyx SDK for e-ink refresh modes, colour rendering path, frontlight, access to the shared storage's book folders, app icon | APK runs on Go 7 (mono) ✅ (2026-10-14: library, EPUB, page keys, swipes, reopening the last book) and Air 6C (colour) ⬜ |
 | **M7 Kobo** | linux-fb shell, device DB, touch, frontlight, suspend | Daily-driver usable on one Kobo |
 | **M8 Expansion** | Runtime WASM plugins, PDF/CBZ/…, Kindle, PocketBook, reMarkable, web demo | — |

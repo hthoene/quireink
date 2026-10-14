@@ -47,6 +47,9 @@ impl Plugin for Home {
         Manifest {
             id: PLUGIN,
             name: Cow::Borrowed("Home screen"),
+            description: Cow::Borrowed(
+                "The start page: continue reading, recent books and shortcuts.",
+            ),
             version: Version::new(0, 1, 0),
             sdk: SDK_VERSION,
         }

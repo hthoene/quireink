@@ -7,6 +7,7 @@ use crate::fonts::Fonts;
 use crate::formats::Formats;
 use crate::hyphenation::Hyphenation;
 use crate::menus::Menus;
+use crate::plugins::Plugins;
 use crate::settings::Settings;
 
 /// Read-only view of the environment a plugin runs in.
@@ -23,6 +24,8 @@ pub struct Env<'a> {
     /// Hyphenation patterns by language.
     pub hyphenation: &'a Hyphenation,
     pub menus: &'a Menus,
+    /// Every plugin with its state, for plugin managers.
+    pub plugins: &'a Plugins,
     /// The device's storage. Plugins keep their own files below
     /// [`Env::plugin_dir`].
     pub storage: &'a dyn Storage,

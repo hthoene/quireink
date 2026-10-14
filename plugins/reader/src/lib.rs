@@ -85,6 +85,9 @@ impl Plugin for Reader {
         Manifest {
             id: PLUGIN,
             name: Cow::Borrowed("Reader"),
+            description: Cow::Borrowed(
+                "Shows books page by page, with table of contents and reading settings.",
+            ),
             version: Version::new(0, 1, 0),
             sdk: SDK_VERSION,
         }

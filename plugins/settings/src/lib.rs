@@ -1,8 +1,9 @@
 //! The settings screens, generated from the settings every plugin declares
 //! (`Registrar::add_setting`) — no plugin needs its own settings UI.
 //!
-//! - The main page lists the setting groups, and a switch for advanced
-//!   settings.
+//! - The main page lists the setting groups, pages other plugins add to
+//!   the `core.settings-pages` menu (e.g. the plugin manager), and a
+//!   switch for advanced settings.
 //! - A group page lists its settings with their values and units; the
 //!   focused setting's description is shown below the list.
 //! - Choices and languages open a list to pick from.
@@ -27,12 +28,12 @@ use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use quireink_sdk::builtin::{actions, events, groups, slots};
+use quireink_sdk::builtin::{actions, events, groups, menus, slots};
 use quireink_sdk::ui::{self, ListChange, ListView, UiStyle};
 use quireink_sdk::{
-    Arg, Canvas, Color, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Level, Manifest,
-    Params, Plugin, Priority, Rect, RefreshMode, RegisterError, Registrar, SDK_VERSION, Screen,
-    ScreenSpec, SettingKind, SettingSpec, SettingValue, Version,
+    Arg, Canvas, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Level, Manifest, Params,
+    Plugin, Priority, Rect, RefreshMode, RegisterError, Registrar, SDK_VERSION, Screen, ScreenSpec,
+    SettingKind, SettingSpec, SettingValue, Version,
 };
 
 pub const PLUGIN: Id = Id::new_static("settings");
@@ -56,6 +57,9 @@ impl Plugin for SettingsPlugin {
         Manifest {
             id: PLUGIN,
             name: Cow::Borrowed("Settings"),
+            description: Cow::Borrowed(
+                "The settings pages, built from the settings of every plugin.",
+            ),
             version: Version::new(0, 1, 0),
             sdk: SDK_VERSION,
         }
@@ -113,11 +117,7 @@ fn frame(env: &Env<'_>, footer: u32) -> (UiStyle, Rect, ListView) {
     let header = Rect::new(0, 0, display.width, style.header as u16);
     let top = header.height + style.gap as u16;
     // Room for `footer` lines of small text below the list.
-    let footer = if footer == 0 {
-        0
-    } else {
-        (footer as f32 * style.small * 1.5) as u16 + style.gap as u16
-    };
+    let footer = ui::footer_height(&style, footer);
     let height = display.height.saturating_sub(top).saturating_sub(footer);
     let area = Rect::new(0, top, display.width, height);
     (style, header, ListView::new(area, style.row))
@@ -171,6 +171,8 @@ fn page_note(env: &Env<'_>, list: &ListView, len: usize) -> Option<String> {
 struct GroupList {
     /// Groups with visible settings, by order.
     groups: Vec<(Id, String)>,
+    /// Pages of other plugins: `(action, title)`.
+    pages: Vec<(Id, String)>,
     style: UiStyle,
     header: Rect,
     list: ListView,
@@ -189,29 +191,44 @@ impl GroupList {
             })
             .map(|group| (group.id.clone(), env.i18n.tr(&group.title).to_string()))
             .collect();
+        let pages = env
+            .menus
+            .items(menus::SETTINGS.as_str())
+            .iter()
+            .map(|item| (item.id.clone(), env.i18n.tr(item.title).to_string()))
+            .collect();
         Self {
             groups,
+            pages,
             style,
             header,
             list,
         }
     }
 
-    /// Groups, then the switch for advanced settings.
+    /// Groups, pages, then the switch for advanced settings.
     fn len(&self) -> usize {
-        self.groups.len() + 1
+        self.groups.len() + self.pages.len() + 1
+    }
+
+    /// The group or page at `index`; `None` for the advanced switch.
+    fn link(&self, index: usize) -> Option<&(Id, String)> {
+        self.groups
+            .get(index)
+            .or_else(|| self.pages.get(index - self.groups.len()))
     }
 
     fn choose(&self, index: usize, cx: &mut Cx<'_, '_>) {
-        match self.groups.get(index) {
-            Some((id, _)) => cx.command(Command::OpenScreen(
+        if let Some((id, _)) = self.groups.get(index) {
+            cx.command(Command::OpenScreen(
                 GROUP_SCREEN,
                 Params::new().with(ID, id.as_str().to_string()),
-            )),
-            None => {
-                let advanced = cx.env().settings.bool(ADVANCED.as_str());
-                cx.command(Command::SetSetting(ADVANCED, SettingValue::Bool(!advanced)));
-            }
+            ));
+        } else if let Some((action, _)) = self.link(index) {
+            cx.command(Command::RunAction(action.clone()));
+        } else {
+            let advanced = cx.env().settings.bool(ADVANCED.as_str());
+            cx.command(Command::SetSetting(ADVANCED, SettingValue::Bool(!advanced)));
         }
     }
 }
@@ -229,17 +246,22 @@ impl Screen for GroupList {
             env.i18n.tr("settings.title"),
             note.as_deref(),
         );
-        let groups = &self.groups;
         let advanced = if env.settings.bool(ADVANCED.as_str()) {
             env.i18n.tr("settings.on")
         } else {
             env.i18n.tr("settings.off")
         };
+        let (groups, pages) = (&self.groups, &self.pages);
+        let link = |index: usize| {
+            groups
+                .get(index)
+                .or_else(|| pages.get(index - groups.len()))
+        };
         self.list.draw(
             canvas,
             &style,
             len,
-            |canvas, index, rect, focused| match groups.get(index) {
+            |canvas, index, rect, focused| match link(index) {
                 Some((_, title)) => {
                     ui::draw_value_row(canvas, env, &style, rect, focused, title, "›");
                 }
@@ -419,31 +441,8 @@ impl Screen for GroupPage {
         let Some(help) = self.focused().and_then(|s| s.description.as_deref()) else {
             return;
         };
-        let Some(font) = style.font(env) else {
-            return;
-        };
-        let margin = style.margin as f32;
-        let display = env.device.display;
-        let width = f32::from(display.width) - 2.0 * margin;
-        let line = style.small * 1.5;
         let top = f32::from(self.list.area.y) + f32::from(self.list.area.height);
-        for (n, range) in font
-            .wrap(style.small, env.i18n.tr(help), width)
-            .into_iter()
-            .take(FOOTER_LINES as usize)
-            .enumerate()
-        {
-            let text = &env.i18n.tr(help)[range];
-            let baseline = top + line * (n as f32 + 0.8);
-            font.draw(
-                canvas,
-                style.small,
-                margin,
-                baseline as i32,
-                text,
-                Color::gray(80),
-            );
-        }
+        ui::draw_footer(canvas, env, &style, top, FOOTER_LINES, env.i18n.tr(help));
     }
 
     fn on_action(&mut self, action: &Id, cx: &mut Cx<'_, '_>) -> Handled {

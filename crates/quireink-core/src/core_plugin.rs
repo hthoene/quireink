@@ -25,6 +25,7 @@ impl Plugin for CorePlugin {
         Manifest {
             id: CORE,
             name: Cow::Borrowed("QuireInk kernel"),
+            description: Cow::Borrowed("Runs screens, input, settings and plugins."),
             version: SDK_VERSION,
             sdk: SDK_VERSION,
         }
