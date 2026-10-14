@@ -92,6 +92,9 @@ pub struct SettingSpec {
     /// Translation key that formats a number with its unit, with plural
     /// forms, e.g. `core.unit.pt.other = {count} pt`.
     pub unit: Option<Cow<'static, str>>,
+    /// A screen that edits the value, opened with the parameter `id` (the
+    /// setting's id), e.g. a folder chooser for a path.
+    pub editor: Option<Id>,
 }
 
 impl SettingSpec {
@@ -112,6 +115,7 @@ impl SettingSpec {
             level: Level::Basic,
             description: None,
             unit: None,
+            editor: None,
         }
     }
 
@@ -133,6 +137,12 @@ impl SettingSpec {
 
     pub fn unit(mut self, key: impl Into<Cow<'static, str>>) -> Self {
         self.unit = Some(key.into());
+        self
+    }
+
+    /// Edited on its own screen (see [`SettingSpec::editor`]).
+    pub fn editor(mut self, screen: Id) -> Self {
+        self.editor = Some(screen);
         self
     }
 }

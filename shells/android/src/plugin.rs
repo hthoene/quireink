@@ -10,16 +10,16 @@ use quireink_sdk::{
 };
 
 pub const PLUGIN: Id = Id::new_static("android");
-/// Asks for access to the shared `Books` folder.
-pub const USE_BOOKS_FOLDER: Id = Id::new_static("android.use-books-folder");
+/// Asks for access to the shared storage, where the books are.
+pub const ALLOW_STORAGE: Id = Id::new_static("android.allow-storage");
 /// The home screen's shortcuts (see the `home` plugin).
 const HOME_ACTIONS: Id = Id::new_static("home.actions");
 
 /// The Android plugin.
 pub struct AndroidPlugin {
     pub app: AndroidApp,
-    /// QuireInk can already read the `Books` folder.
-    pub books_folder: bool,
+    /// QuireInk can already read the shared storage.
+    pub shared_storage: bool,
 }
 
 impl Plugin for AndroidPlugin {
@@ -27,7 +27,7 @@ impl Plugin for AndroidPlugin {
         Manifest {
             id: PLUGIN,
             name: Cow::Borrowed("Android"),
-            description: Cow::Borrowed("Connects QuireInk to Android, e.g. to the Books folder."),
+            description: Cow::Borrowed("Connects QuireInk to Android, e.g. to your book folders."),
             version: Version::new(0, 1, 0),
             sdk: SDK_VERSION,
         }
@@ -36,17 +36,17 @@ impl Plugin for AndroidPlugin {
     fn register(&self, r: &mut dyn Registrar) -> Result<(), RegisterError> {
         let app = self.app.clone();
         r.add_action(ActionSpec {
-            id: USE_BOOKS_FOLDER,
-            title: Cow::Borrowed("android.use-books-folder"),
+            id: ALLOW_STORAGE,
+            title: Cow::Borrowed("android.allow-storage"),
             handler: Some(Box::new(move |_: &Env<'_>, _: &mut Vec<Command>| {
                 crate::access::request(&app);
             })),
         })?;
-        if !self.books_folder {
+        if !self.shared_storage {
             // First on the home screen until access is granted.
             r.add_menu_entry(MenuEntry {
                 menu: HOME_ACTIONS,
-                item: USE_BOOKS_FOLDER,
+                item: ALLOW_STORAGE,
                 order: 0,
             })?;
         }

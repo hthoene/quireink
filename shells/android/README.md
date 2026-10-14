@@ -32,12 +32,13 @@ USB debugging*.
 
 ## Using it
 
-- **Books:** the shared `Books` folder, where Boox and most e-readers
-  keep books. Choose *Use the Books folder* on the home screen and allow
-  *All files access* (Android 11+) or the storage permission (older
-  versions); QuireInk restarts with the folder. Until then the library is
-  `Android/data/io.github.hthoene.quireink/files/books` with the sample
-  books. `quireink.ini` and all caches stay in
+- **Books:** choose *Allow access to your books* on the home screen and
+  allow *All files access* (Android 11+) or the storage permission (older
+  versions); QuireInk restarts and shows the shared `Books` folder, where
+  Boox and most e-readers keep books. Any other folder can be chosen under
+  *Settings → Library → Library folder*. Until access is allowed, the
+  library is `Android/data/io.github.hthoene.quireink/files/books` with the
+  sample books. `quireink.ini` and all caches stay in
   `Android/data/io.github.hthoene.quireink/files`.
 - **Touch:** tap the left or right side to turn pages, the middle for the
   menu, or swipe. Long-press for more options.

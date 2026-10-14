@@ -21,6 +21,9 @@ use crate::epd::Epd;
 use crate::plugin::AndroidPlugin;
 use crate::{access, keys, pixels};
 
+/// Where the device's shared storage appears in QuireInk's storage.
+const SHARED: &str = "storage";
+
 /// The running app once the window size is known.
 struct Running {
     kernel: Kernel,
@@ -29,8 +32,8 @@ struct Running {
     wake_at: Option<Instant>,
     /// The kernel asked to be built again (e.g. plugins were switched).
     restart: bool,
-    /// The library is the shared `Books` folder.
-    books_folder: bool,
+    /// The shared storage is mounted as `storage`.
+    shared_storage: bool,
     /// The strongest refresh requested since the last frame was shown.
     refresh: Option<RefreshMode>,
 }
@@ -81,9 +84,9 @@ fn android_main(app: AndroidApp) {
                 }
                 MainEvent::Resume { .. } => {
                     // Back from the settings page that grants storage
-                    // access: restart with the `Books` folder.
+                    // access: restart with the shared storage.
                     if let Some(running) = running.as_mut()
-                        && !running.books_folder
+                        && !running.shared_storage
                         && access::granted(&app)
                     {
                         running.restart = true;
@@ -187,21 +190,24 @@ fn start_kernel(app: &AndroidApp, window: &NativeWindow, now: Instant) -> Option
             return None;
         }
     };
-    // The shared `Books` folder as `books`, if the user allowed access.
-    let books = access::granted(app)
-        .then(|| access::books_dir(app))
+    // The shared storage as `storage`, if the user allowed access; the
+    // library is then its `Books` folder unless the user chose another.
+    let shared = access::granted(app)
+        .then(|| access::storage_dir(app))
         .flatten()
         .and_then(|dir| match DirStorage::new(&dir) {
-            Ok(books) => Some(books),
+            Ok(shared) => Some(shared),
             Err(e) => {
                 log::warn!("{}: {e}", dir.display());
                 None
             }
         });
-    let books_folder = books.is_some();
+    let shared_storage = shared.is_some();
     let mut builder = Kernel::builder(device);
-    builder = match books {
-        Some(books) => builder.storage(Mounted::new(storage, "books", books)),
+    builder = match shared {
+        Some(shared) => builder
+            .storage(Mounted::new(storage, SHARED, shared))
+            .setting_default("files.root", &format!("{SHARED}/Books")),
         None => builder.storage(storage),
     };
     // The system language, unless the user chose another one.
@@ -211,7 +217,7 @@ fn start_kernel(app: &AndroidApp, window: &NativeWindow, now: Instant) -> Option
     let builder =
         quireink_app::install(builder, quireink_app::Fonts::Outline).plugin(AndroidPlugin {
             app: app.clone(),
-            books_folder,
+            shared_storage,
         });
     let mut kernel = match builder.build() {
         Ok(kernel) => kernel,
@@ -232,7 +238,7 @@ fn start_kernel(app: &AndroidApp, window: &NativeWindow, now: Instant) -> Option
         frame,
         wake_at: None,
         restart: false,
-        books_folder,
+        shared_storage,
         refresh: None,
     };
     apply(&mut running, effects);

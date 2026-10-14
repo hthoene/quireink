@@ -166,6 +166,16 @@ impl<B: Storage, M: Storage> Storage for Mounted<B, M> {
     }
 
     fn list(&self, dir: &str, visit: &mut dyn FnMut(DirEntry<'_>)) -> Result<(), StorageError> {
+        if dir.is_empty() {
+            // The root lists the mount point next to the base's entries.
+            let base = self.base.list(dir, visit);
+            visit(DirEntry {
+                name: self.at,
+                is_dir: true,
+                size: 0,
+            });
+            return base.or(Ok(()));
+        }
         let (storage, dir) = self.route(dir);
         storage.list(dir, visit)
     }
@@ -249,6 +259,14 @@ mod tests {
             .list("books", &mut |entry| size = entry.size)
             .unwrap();
         assert_eq!(size, 2, "lists the mounted folder");
+        let mut root = (0, false);
+        storage
+            .list("", &mut |entry| {
+                root.0 += 1;
+                root.1 |= entry.is_dir && entry.name == "books";
+            })
+            .unwrap();
+        assert_eq!(root, (2, true), "the root shows the mount point");
     }
 
     #[test]

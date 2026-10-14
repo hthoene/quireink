@@ -1,11 +1,12 @@
-//! Access to the shared `Books` folder, where Boox and other e-readers keep
-//! books.
+//! Access to the device's shared storage, where books live (by default in
+//! `Books`, where Boox and most e-readers keep them; any folder can be
+//! chosen as the library).
 //!
 //! Android 11 and later need "All files access" for that
 //! (`MANAGE_EXTERNAL_STORAGE`, granted on a system settings page); older
 //! versions need the storage permission. QuireInk never asks on its own: the
-//! home screen offers it ("Use the Books folder"), and the app restarts
-//! with the folder when the user comes back with access granted.
+//! home screen offers it, and the app restarts with the shared storage when
+//! the user comes back with access granted.
 
 use std::path::PathBuf;
 
@@ -70,8 +71,8 @@ pub fn granted(app: &AndroidApp) -> bool {
     .unwrap_or(false)
 }
 
-/// The shared `Books` folder, e.g. `/storage/emulated/0/Books`.
-pub fn books_dir(app: &AndroidApp) -> Option<PathBuf> {
+/// The shared storage, e.g. `/storage/emulated/0`.
+pub fn storage_dir(app: &AndroidApp) -> Option<PathBuf> {
     with_activity(app, |env, _| {
         let dir = env
             .call_static_method(
@@ -85,7 +86,7 @@ pub fn books_dir(app: &AndroidApp) -> Option<PathBuf> {
             .call_method(&dir, "getAbsolutePath", "()Ljava/lang/String;", &[])?
             .l()?;
         let path: String = env.get_string(&path.into())?.into();
-        Ok(PathBuf::from(path).join("Books"))
+        Ok(PathBuf::from(path))
     })
 }
 

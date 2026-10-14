@@ -4,6 +4,9 @@
 //! in the `core.reader` slot. It is bound to `core.library`, and to
 //! `core.home` only as a fallback when no home screen plugin is installed.
 //!
+//! The library folder is a setting; its editor (`files.choose-folder`)
+//! browses the device's folders, so no path has to be typed.
+//!
 //! Works with buttons only (up/down or left/right move the selection,
 //! page buttons scroll, confirm opens, back goes to the parent folder) and
 //! with touch (tap a row). Only the visible page of a folder is held in
@@ -13,6 +16,7 @@
 
 extern crate alloc;
 
+mod folders;
 mod listing;
 
 use alloc::borrow::Cow;
@@ -33,6 +37,8 @@ pub const PLUGIN: Id = Id::new_static("files");
 pub const SCREEN: Id = Id::new_static("files.browser");
 /// The library folder, relative to the storage root.
 pub const ROOT: Id = Id::new_static("files.root");
+/// Chooses a folder for the setting named by the parameter `id`.
+pub const CHOOSE_FOLDER: Id = Id::new_static("files.choose-folder");
 
 /// The file browser plugin.
 #[derive(Debug, Default)]
@@ -57,6 +63,11 @@ impl Plugin for Files {
         })?;
         // The library; also the start screen when no home screen plugin
         // is installed.
+        r.add_screen(ScreenSpec {
+            id: CHOOSE_FOLDER,
+            title: Cow::Borrowed("files.choose.title"),
+            factory: Box::new(|env, params| Box::new(folders::FolderChooser::new(env, params))),
+        })?;
         r.bind_slot(slots::HOME, SCREEN, Priority::FALLBACK)?;
         r.bind_slot(slots::LIBRARY, SCREEN, Priority::DEFAULT)?;
         r.add_setting(
@@ -67,7 +78,7 @@ impl Plugin for Files {
                 SettingValue::Text(Cow::Borrowed("books")),
             )
             .group(groups::LIBRARY)
-            .advanced()
+            .editor(CHOOSE_FOLDER)
             .description("files.setting.root.help"),
         )?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/en.ini")))?;
@@ -123,6 +134,7 @@ impl Browser {
             storage: env.storage,
             formats: env.formats,
             dir,
+            folders_only: false,
         }
     }
 
@@ -345,9 +357,15 @@ impl Screen for Browser {
 
     fn on_event(&mut self, event: &Id, _: &Params, cx: &mut Cx<'_, '_>) {
         if *event == events::SETTING_CHANGED {
-            // The UI size or the library folder may have changed.
+            // The UI size or the library folder may have changed; a new
+            // library folder is shown from its top.
             let env = *cx.env();
-            let dir = self.dir.clone();
+            let root = env.settings.text(ROOT.as_str()).trim_matches('/');
+            let dir = if root == self.root {
+                self.dir.clone()
+            } else {
+                root.to_string()
+            };
             let focus = self.list.focus;
             *self = Self::new(&env, &Params::new().with(params::PATH, dir));
             self.list.focus = focus.min(self.len.saturating_sub(1));

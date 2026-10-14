@@ -39,20 +39,40 @@ impl Entry {
 }
 
 /// The visible entries of a directory: folders and files a format plugin
-/// can open; hidden names (starting with `.`) are skipped.
+/// can open (or only folders); hidden names (starting with `.`) are
+/// skipped.
 pub(crate) struct Listing<'a> {
     pub storage: &'a dyn Storage,
     pub formats: &'a Formats,
     pub dir: &'a str,
+    pub folders_only: bool,
 }
 
 impl Listing<'_> {
     fn each(&self, f: &mut dyn FnMut(bool, &str)) {
         let _ = self.storage.list(self.dir, &mut |entry| {
-            if !entry.name.starts_with('.') && (entry.is_dir || self.formats.supports(entry.name)) {
+            let shown = entry.is_dir || (!self.folders_only && self.formats.supports(entry.name));
+            if shown && !entry.name.starts_with('.') {
                 f(entry.is_dir, entry.name);
             }
         });
+    }
+
+    /// `n` entries from index `start` on, holding at most `n` entries at a
+    /// time while skipping to `start`.
+    pub fn range(&self, start: usize, n: usize) -> Vec<Entry> {
+        let mut last: Option<Entry> = None;
+        let mut skip = start;
+        while skip > 0 {
+            let step = skip.min(n.max(1));
+            let chunk = self.after(last.as_ref(), step);
+            if chunk.len() < step {
+                return Vec::new();
+            }
+            last = chunk.into_iter().last();
+            skip -= step;
+        }
+        self.after(last.as_ref(), n)
     }
 
     pub fn count(&self) -> usize {
@@ -199,9 +219,23 @@ mod tests {
             storage: &storage,
             formats: &formats,
             dir: "books",
+            folders_only: false,
         };
         let len = listing.count();
         assert_eq!(len, expected.len());
+        assert_eq!(
+            names(&listing.range(5, 3)),
+            expected[5..8]
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(names(&listing.range(24, 3)), [expected[24].as_str()]);
+        let folders = Listing {
+            folders_only: true,
+            ..listing
+        };
+        assert_eq!(names(&folders.after(None, 9)), ["Archiv", "neu"]);
 
         let rows = 4;
         let pages = len.div_ceil(rows);

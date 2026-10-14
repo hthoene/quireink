@@ -397,6 +397,13 @@ impl GroupPage {
         let Some(spec) = self.focused() else {
             return;
         };
+        if let Some(editor) = &spec.editor {
+            cx.command(Command::OpenScreen(
+                editor.clone(),
+                Params::new().with(ID, spec.id.as_str().to_string()),
+            ));
+            return;
+        }
         match spec.kind {
             SettingKind::Bool => self.change(env, 1, cx),
             SettingKind::Int { .. } if self.editing => self.change(env, step, cx),
@@ -451,7 +458,9 @@ impl Screen for GroupPage {
                     }
                     return;
                 }
-                if matches!(spec.kind, SettingKind::Choice(_) | SettingKind::Language) {
+                if spec.editor.is_some()
+                    || matches!(spec.kind, SettingKind::Choice(_) | SettingKind::Language)
+                {
                     value.push_str(" ›");
                 }
                 ui::draw_noted_row(canvas, env, &style, rect, focused, title, &value, note);
