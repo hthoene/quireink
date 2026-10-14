@@ -73,6 +73,40 @@ pub const PROFILES: &[Profile] = &[
     },
     Profile {
         device: DeviceInfo {
+            id: "xteink-x4-pro",
+            name: "Xteink X4 Pro",
+            display: DisplayInfo {
+                // Unverified: 4.3" at 219 ppi suggests the X4's 800x480 panel.
+                width: 480,
+                height: 800,
+                dpi: 219,
+                format: PixelFormat::Gray2,
+                rotation: Rotation::Deg90,
+                color: None,
+            },
+            input: InputCaps {
+                buttons: true,
+                touch: true,
+                pen: false,
+            },
+        },
+        // Previous/next, a touch home key and power (reset is hardware).
+        buttons: &[
+            buttons::PAGE_BACK,
+            buttons::PAGE_FORWARD,
+            buttons::HOME,
+            buttons::POWER,
+        ],
+        // Unverified: ESP32-S3 (512 KB SRAM) assumed without PSRAM.
+        heap_budget: Some(256 * KIB),
+        glyph_cache: 0,
+        font_packs: true,
+        frame_rows: Some(100),
+        settings: &[],
+        summary: "ESP32-S3 (unverified), 4.3\" 800x480, touch + buttons, 256 KiB heap budget",
+    },
+    Profile {
+        device: DeviceInfo {
             id: "boox-go-7",
             name: "Boox Go 7",
             display: DisplayInfo {

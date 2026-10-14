@@ -48,7 +48,7 @@ devices are not limited by small ones.
 | Tier | Devices | CPU / RAM | Shell | Notes |
 |------|---------|-----------|-------|-------|
 | **S** (small) | Xteink X4, X3 | ESP32-C3, ~380 KB SRAM, no PSRAM, 16 MB flash | `esp32` (bare metal) | Buttons only. microSD **[VERIFY]**. Display 800×480 **[VERIFY: controller, grayscale capability]**. |
-| **M** (medium) | Xteink X4 Pro **[VERIFY: exists / specs]** | ESP32-S3, PSRAM **[VERIFY]** | `esp32` | Touch. Xtensa toolchain via `espup`. |
+| **M** (medium) | Xteink X4 Pro | ESP32-S3 **[VERIFY]**, 512 KB SRAM, PSRAM **[VERIFY]** | `esp32` | 4.3″, 219 ppi (800×480 **[VERIFY]**), touch, previous/next buttons, touch home key, power, reset; warm/cool frontlight, Wi-Fi 2.4 GHz, Bluetooth, microSD (16 GB included), 1,100 mAh, pogo-pin charging (no USB port). Third-party firmware allowed for devices bought from Xteink. Xtensa toolchain via `espup`. Emulator profile `xteink-x4-pro` assumes no PSRAM (256 KiB heap). |
 | **L** (large) | Kobo, Kindle (jailbroken), PocketBook, reMarkable | ARM Linux, ≥ 256 MB RAM | `linux-fb` | Touch, frontlight, Wi-Fi, vendor-specific e-ink refresh. Colour models exist (Kobo Libra/Clara Colour, Kindle Colorsoft, PocketBook Era Color, reMarkable Paper Pro). |
 | **L** | Boox & other Android e-readers | Android, ≥ 1 GB RAM | `android` | Thin Java/Kotlin shim only where vendor SDKs require it. Monochrome and colour models. |
 | **Dev** | Desktop Linux, Windows, macOS | — | `desktop` (= emulator) | Primary development environment. |
@@ -61,6 +61,7 @@ Hardware on hand:
 - **Boox Go 7** — monochrome, Android **[VERIFY version]**
 - **Boox Air 6C** — colour, Android 16 **[VERIFY]**
 - **Xteink X4** — on order
+- **Xteink X4 Pro** — to be supported (not on hand)
 
 1. **Desktop emulator** — everything starts here (see §9).
 2. **Xteink X4** — the hardest constraint; proves the architecture.
@@ -696,6 +697,14 @@ Pages ("try QuireInk in your browser"), also handy for UI reviews.
   battery ADC, deep/light sleep between interactions.
 - Wi-Fi via `esp-wifi`/`esp-radio` **[VERIFY current crate]**, only on demand.
 - Flashing: `espflash`; OTA updates later.
+- One shell for the X4 (ESP32-C3, RISC-V, upstream Rust target) and the X4
+  Pro (ESP32-S3, Xtensa, `esp` toolchain via `espup`): chip-specific code
+  (display, touch, frontlight, pogo-pin charging) behind features. CI builds
+  the S3 variant once the toolchain is set up there.
+- The X4 Pro adds touch (I²C controller **[VERIFY]**) and a frontlight
+  (PWM, warm/cool), both offered to plugins as platform services. With
+  PSRAM, scalable fonts and larger caches become possible; without it, the
+  X4's memory techniques apply unchanged.
 - QuireInk **replaces** the stock firmware (like CrossPoint); flashing tools
   must back up the original firmware and allow restoring it.
 

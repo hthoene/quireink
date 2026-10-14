@@ -20,7 +20,7 @@
   Anything can be added, replaced, reconfigured or removed.
 - **Simple by default.** Turn it on and keep reading. Every function is at
   most two steps away, and it works with buttons only or with touch.
-- **One codebase, many devices.** Xteink X4/X3, Kobo, Kindle (jailbroken),
+- **One codebase, many devices.** Xteink X4/X3/X4 Pro, Kobo, Kindle (jailbroken),
   PocketBook, reMarkable, Boox and other Android e-readers, desktop and web.
   Grayscale and colour e-ink.
 
