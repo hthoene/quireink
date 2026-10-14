@@ -5,7 +5,9 @@
 //! `Registrar::add_menu_entry`) or from the user's `[menus]` definitions.
 //! Choosing an action closes the menu and runs it. Settings show their
 //! current value and change in place, so the menu stays open: switches
-//! toggle, numbers have − and + buttons, choices open a list.
+//! toggle, numbers have − and + buttons, choices open a list. An entry
+//! whose action is named like a menu with entries opens that menu as a
+//! submenu above this one.
 //!
 //! Bound to the `core.menu` slot — replace it to get a different menu style
 //! (radial, side bar, …) for every menu at once.
@@ -74,7 +76,12 @@ struct MenuScreen {
     pager: Option<ui::Pager>,
     /// The focused number is being changed with buttons.
     editing: bool,
+    /// How many menus are open below this one (submenus).
+    depth: usize,
 }
+
+/// Parameter: the depth of a submenu.
+const DEPTH: &str = "depth";
 
 /// The settings plugin's list for choosing a value.
 const CHOOSE_SCREEN: Id = Id::new_static("settings.choose");
@@ -117,6 +124,7 @@ impl MenuScreen {
             pager,
             style,
             editing: false,
+            depth: params.get(DEPTH).and_then(|d| d.parse().ok()).unwrap_or(0),
         }
     }
 
@@ -149,8 +157,21 @@ impl MenuScreen {
         let Some((id, _)) = self.items.get(index) else {
             return;
         };
+        if is_menu(&env, id) {
+            cx.command(Command::OpenScreen(
+                SCREEN,
+                Params::new()
+                    .with(params::MENU, id.as_str().to_string())
+                    .with(DEPTH, alloc::format!("{}", self.depth + 1)),
+            ));
+            return;
+        }
         let Some(spec) = Self::setting(&env, id) else {
-            cx.command(Command::Back);
+            // Closes this menu and those below it, so the action reaches
+            // the screen the menu was opened on.
+            for _ in 0..=self.depth {
+                cx.command(Command::Back);
+            }
             cx.command(Command::RunAction(id.clone()));
             return;
         };
@@ -177,6 +198,11 @@ impl MenuScreen {
             _ => self.step(&env, spec, 1, cx),
         }
     }
+}
+
+/// Whether `id` names a menu with entries (a submenu).
+fn is_menu(env: &Env<'_>, id: &Id) -> bool {
+    !env.menus.items(id.as_str()).is_empty()
 }
 
 impl Screen for MenuScreen {
@@ -229,6 +255,9 @@ impl Screen for MenuScreen {
                             value.push_str(" ›");
                         }
                         ui::draw_value_row(canvas, env, &style, rect, focused, label, &value);
+                    }
+                    None if is_menu(env, id) => {
+                        ui::draw_value_row(canvas, env, &style, rect, focused, label, "›");
                     }
                     None => {
                         let color = if focused { Color::WHITE } else { Color::BLACK };

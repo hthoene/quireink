@@ -190,6 +190,8 @@ struct Book {
     indexing: Option<Locator>,
     /// Where the bookmarks and highlights are.
     marks: Vec<Mark>,
+    /// Text to point out on this page, e.g. a search hit.
+    found: Option<(Locator, Locator)>,
 }
 
 /// A word on the page, with its box on the screen and its place in the
@@ -223,6 +225,8 @@ pub(crate) struct ReaderScreen {
     book: Result<Book, String>,
     /// Text chosen on the page (see `selection`).
     selection: Option<Selection>,
+    /// The last search, offered again.
+    last_search: String,
 }
 
 impl ReaderScreen {
@@ -230,6 +234,7 @@ impl ReaderScreen {
         Self {
             book: Book::open(env, params),
             selection: None,
+            last_search: String::new(),
         }
     }
 
@@ -444,6 +449,42 @@ impl ReaderScreen {
         Handled::Yes
     }
 
+    /// Asks on the keyboard what to search for, or which page to go to.
+    fn ask(&mut self, action: &Id, cx: &mut Cx<'_, '_>) {
+        let env = *cx.env();
+        let Ok(book) = &self.book else {
+            return;
+        };
+        let request = Params::new().with(params::PATH, book.path.clone());
+        let request = if *action == crate::actions::SEARCH {
+            request
+                .with(
+                    params::TITLE,
+                    env.i18n.tr("reader.search.prompt").to_string(),
+                )
+                .with(params::TEXT, self.last_search.clone())
+                .with(params::REPLY, crate::SEARCH_ENTERED.as_str())
+        } else {
+            let (pages, complete) = book
+                .index
+                .as_ref()
+                .map_or((0, false), |i| (i.pages(), i.is_complete()));
+            let key = if complete {
+                "reader.go-to-page.prompt"
+            } else {
+                "reader.go-to-page.counting"
+            };
+            let title = env
+                .i18n
+                .format(key, &[("pages", Arg::Int(i64::from(pages)))]);
+            request
+                .with(params::TITLE, title)
+                .with(params::MODE, "number")
+                .with(params::REPLY, crate::PAGE_ENTERED.as_str())
+        };
+        cx.command(Command::OpenSlot(slots::KEYBOARD, request));
+    }
+
     /// Sets or removes the bookmark of the page.
     fn toggle_bookmark(&mut self, cx: &mut Cx<'_, '_>) {
         let env = *cx.env();
@@ -513,6 +554,7 @@ impl Book {
             language,
             typography,
             marks,
+            found: None,
         };
         let start = book.saved_position(env).unwrap_or(Locator::START);
         book.page = match book.layout(env, start).map_err(error)? {
@@ -642,6 +684,7 @@ impl Book {
         if page.is_past_end() || page.start == self.page.start {
             return false;
         }
+        self.found = None;
         if forward {
             if self.history.len() == HISTORY {
                 self.history.remove(0);
@@ -823,6 +866,28 @@ impl Book {
     }
 
     /// Where the bookmark ribbon is: in the top margin, on the right.
+    /// The start of the page that contains `at`, as the page index has it
+    /// (so pages look the same as when paging there); `at` itself where
+    /// the index does not reach yet.
+    fn page_start(&self, env: &Env<'_>, at: Locator) -> Locator {
+        let Some(index) = &self.index else {
+            return at;
+        };
+        match index.locate(env.storage, at) {
+            Some((page, _)) if index.is_complete() || page + 1 < index.pages() => {
+                index.entry(env.storage, page).unwrap_or(at)
+            }
+            _ => at,
+        }
+    }
+
+    /// Where a tap sets or removes a bookmark: the top right corner.
+    fn corner_area(&self, env: &Env<'_>) -> Rect {
+        let display = env.device.display;
+        let size = (env.metrics.mm(12) as u16).min(display.width / 4);
+        Rect::new(display.width - size, 0, size, size)
+    }
+
     fn ribbon_area(&self, env: &Env<'_>) -> Rect {
         let t = &self.typography;
         let width = env.metrics.mm(3) as u16;
@@ -920,7 +985,7 @@ impl Screen for ReaderScreen {
         };
         // Word boxes are measured only when something is drawn on words.
         let has_highlights = book.marks.iter().any(|m| m.kind == Kind::Highlight);
-        let words = if has_highlights || self.selection.is_some() {
+        let words = if has_highlights || self.selection.is_some() || book.found.is_some() {
             book.words(env)
         } else {
             Vec::new()
@@ -930,6 +995,20 @@ impl Screen for ReaderScreen {
         book.draw_status(canvas, env);
         if book.bookmarked() {
             book.draw_ribbon(canvas, env);
+        }
+        if let Some((start, end)) = book.found {
+            // Underlined, so it stays visible under a highlight.
+            let line = env.metrics.tenth_mm(5).max(2);
+            let found = |i: usize| words[i].end > start && words[i].start < end;
+            for b in selection::line_boxes(&words, found) {
+                canvas.fill_rect(
+                    i32::from(b.x),
+                    b.bottom() as i32 + 1,
+                    u32::from(b.width),
+                    line,
+                    Color::BLACK,
+                );
+            }
         }
         let Some(selection) = self.selection else {
             return;
@@ -992,6 +1071,10 @@ impl Screen for ReaderScreen {
             self.toggle_bookmark(cx);
             return Handled::Yes;
         }
+        if *action == crate::actions::SEARCH || *action == crate::actions::GO_TO_PAGE {
+            self.ask(action, cx);
+            return Handled::Yes;
+        }
         let Ok(book) = &mut self.book else {
             return Handled::No;
         };
@@ -1048,6 +1131,13 @@ impl Screen for ReaderScreen {
             })
         };
         match (gesture.kind, self.selection) {
+            (GestureKind::Tap, None)
+                if env.settings.bool(crate::settings::CORNER_BOOKMARK.as_str())
+                    && book.corner_area(&env).contains(gesture.start) =>
+            {
+                self.toggle_bookmark(cx);
+                Handled::Yes
+            }
             (GestureKind::LongPress, _) => match at(gesture.start) {
                 Some(word) => {
                     self.set_selection(Some(Selection::touched(word)), cx);
@@ -1079,13 +1169,53 @@ impl Screen for ReaderScreen {
         let Ok(book) = &mut self.book else {
             return;
         };
+        let this_book = params.get(params::PATH) == Some(book.path.as_str());
         if *event == crate::GOTO
-            && params.get(params::PATH) == Some(book.path.as_str())
+            && this_book
             && let Some(at) = crate::toc::locator_of(params)
         {
             // Another page: no text stays selected.
             self.selection = None;
-            book.show(cx, at, true);
+            let env = *cx.env();
+            let start = book.page_start(&env, at);
+            book.show(cx, start, true);
+            let end = params
+                .get(crate::END_SECTION)
+                .zip(params.get(crate::END_OFFSET))
+                .and_then(|(s, o)| Some(Locator::new(s.parse().ok()?, o.parse().ok()?)));
+            if let Some(end) = end {
+                book.found = Some((at, end));
+                cx.request_redraw();
+            }
+            return;
+        }
+        if *event == crate::SEARCH_ENTERED && this_book {
+            let text = params.get(params::TEXT).unwrap_or_default().trim();
+            if !text.is_empty() {
+                self.last_search = text.to_string();
+                cx.command(Command::OpenScreen(
+                    crate::SEARCH_SCREEN,
+                    Params::new()
+                        .with(params::PATH, book.path.clone())
+                        .with(params::TEXT, text.to_string()),
+                ));
+            }
+            return;
+        }
+        if *event == crate::PAGE_ENTERED && this_book {
+            let env = *cx.env();
+            let number = params
+                .get(params::TEXT)
+                .and_then(|t| t.trim().parse::<u32>().ok());
+            if let (Some(number), Some(index)) = (number, &book.index)
+                && index.pages() > 0
+            {
+                let page = number.clamp(1, index.pages()) - 1;
+                if let Some(start) = index.entry(env.storage, page) {
+                    self.selection = None;
+                    book.show(cx, start, true);
+                }
+            }
             return;
         }
         let id = params.get(params::ID).unwrap_or_default();

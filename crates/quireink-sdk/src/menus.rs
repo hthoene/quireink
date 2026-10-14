@@ -11,7 +11,9 @@ pub struct MenuEntry {
     /// or `reader.menu`.
     pub menu: Id,
     /// An action, run when the entry is chosen, or a setting, shown with
-    /// its current value and changed in place. Its title is the label.
+    /// its current value and changed in place. Its title is the label. An
+    /// action named like a menu with entries is shown as that submenu. An
+    /// action named like a menu with entries is shown as that submenu.
     pub item: Id,
     /// Position; lower comes first.
     pub order: i16,

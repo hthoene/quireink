@@ -19,6 +19,7 @@ extern crate alloc;
 mod annotations;
 mod index;
 mod screen;
+mod search;
 mod selection;
 mod toc;
 
@@ -56,8 +57,18 @@ pub const ACTION: &str = "action";
 pub const TEXT: &str = "text";
 pub const END_SECTION: &str = "end-section";
 pub const END_OFFSET: &str = "end-offset";
+/// Search results for a book; parameters `path` and `text`.
+pub const SEARCH_SCREEN: Id = Id::new_static("reader.search-results");
+/// The keyboard's replies: what to search for, which page to go to.
+const SEARCH_ENTERED: Id = Id::new_static("reader.search-entered");
+const PAGE_ENTERED: Id = Id::new_static("reader.page-entered");
+/// Submenus of [`MENU`]: menus like any other, so plugins add entries and
+/// users redefine them in `[menus]`.
+pub const LAYOUT_MENU: Id = Id::new_static("reader.layout");
+pub const MORE_MENU: Id = Id::new_static("reader.more");
 /// Asks the reader to show a position. Parameters: `path` (the book),
-/// `section` and `offset`. Emitted by the table of contents; bookmark or
+/// `section` and `offset`; with `end-section` and `end-offset` the text up
+/// to there is marked (e.g. a search hit). Emitted by the table of contents; bookmark or
 /// search plugins can use it too.
 pub const GOTO: Id = Id::new_static("reader.goto");
 
@@ -78,6 +89,8 @@ pub mod settings {
     pub const OPEN_LAST: Id = Id::new_static("reader.open-last");
     /// Hyphenate words at line ends, in the book's language.
     pub const HYPHENATE: Id = Id::new_static("reader.hyphenate");
+    /// A tap on the top right corner sets or removes a bookmark.
+    pub const CORNER_BOOKMARK: Id = Id::new_static("reader.corner-bookmark");
 }
 
 /// The reader's menu (`core.menu` on the reader screen). Any plugin can
@@ -100,6 +113,10 @@ pub mod actions {
     pub const TOGGLE_BOOKMARK: Id = Id::new_static("reader.toggle-bookmark");
     /// Lists the book's bookmarks and highlights.
     pub const ANNOTATIONS: Id = Id::new_static("reader.show-annotations");
+    /// Searches the book (asks for the text on the keyboard).
+    pub const SEARCH: Id = Id::new_static("reader.search");
+    /// Goes to a page number (asks for it on the keyboard).
+    pub const GO_TO_PAGE: Id = Id::new_static("reader.go-to-page");
     /// Items of the selection menu that the reader handles itself.
     pub const LOOK_UP: Id = Id::new_static("reader.selection.look-up");
     /// Highlights the selected text, or removes highlights in it.
@@ -153,7 +170,14 @@ impl Plugin for Reader {
                 Box::new(annotations::AnnotationsScreen::open(env, params))
             }),
         })?;
+        r.add_screen(ScreenSpec {
+            id: SEARCH_SCREEN,
+            title: Cow::Borrowed("reader.search"),
+            factory: Box::new(|env, params| Box::new(search::SearchScreen::open(env, params))),
+        })?;
         for (id, title) in [
+            (actions::SEARCH, "reader.search"),
+            (actions::GO_TO_PAGE, "reader.go-to-page"),
             (actions::SELECT, "reader.select"),
             (actions::TOGGLE_BOOKMARK, "reader.toggle-bookmark"),
             (actions::ANNOTATIONS, "reader.annotations"),
@@ -228,6 +252,13 @@ impl Plugin for Reader {
                 .description("reader.setting.indent.help"),
             flag(settings::OPEN_LAST, "reader.setting.open-last", true)
                 .description("reader.setting.open-last.help"),
+            flag(
+                settings::CORNER_BOOKMARK,
+                "reader.setting.corner-bookmark",
+                true,
+            )
+            .group(groups::CONTROLS)
+            .description("reader.setting.corner-bookmark.help"),
         ] {
             r.add_setting(setting)?;
         }
@@ -271,24 +302,44 @@ impl Plugin for Reader {
                 handler: Some(handler),
             })?;
         }
-        // Settings in the menu show their state and change in place.
-        for (item, order) in [
-            (actions::TOC, 5),
-            (actions::TOGGLE_BOOKMARK, 6),
-            (actions::ANNOTATIONS, 7),
-            (actions::SELECT, 8),
-            (settings::FONT_SIZE, 10),
-            (settings::JUSTIFY, 30),
-            (core_settings::NIGHT_MODE, 40),
-            (core_actions::LIBRARY, 50),
-            (core_actions::SETTINGS, 60),
-            (core_actions::HOME, 70),
-        ] {
-            r.add_menu_entry(quireink_sdk::MenuEntry {
-                menu: MENU,
-                item,
-                order,
+        // Submenus are actions named like their menu: the menu shows them
+        // as submenus, and bound to a key they open the menu.
+        for (menu, title) in [(LAYOUT_MENU, "reader.layout"), (MORE_MENU, "reader.more")] {
+            let open = menu.clone();
+            r.add_action(quireink_sdk::ActionSpec {
+                id: menu,
+                title: Cow::Borrowed(title),
+                handler: Some(Box::new(move |_: &Env<'_>, out: &mut Vec<Command>| {
+                    out.push(Command::OpenSlot(
+                        slots::MENU,
+                        Params::new().with(params::MENU, String::from(open.as_str())),
+                    ));
+                })),
             })?;
+        }
+        // A short menu; settings in it show their state and change in
+        // place.
+        let entries = [
+            (MENU, actions::TOC, 10),
+            (MENU, actions::SEARCH, 20),
+            (MENU, actions::GO_TO_PAGE, 30),
+            (MENU, actions::ANNOTATIONS, 40),
+            (MENU, LAYOUT_MENU, 50),
+            (MENU, core_settings::NIGHT_MODE, 60),
+            (MENU, MORE_MENU, 70),
+            (LAYOUT_MENU, settings::FONT_SIZE, 10),
+            (LAYOUT_MENU, settings::LINE_SPACING, 20),
+            (LAYOUT_MENU, settings::MARGIN, 30),
+            (LAYOUT_MENU, settings::JUSTIFY, 40),
+            (LAYOUT_MENU, settings::HYPHENATE, 50),
+            (MORE_MENU, actions::TOGGLE_BOOKMARK, 10),
+            (MORE_MENU, actions::SELECT, 20),
+            (MORE_MENU, core_actions::LIBRARY, 30),
+            (MORE_MENU, core_actions::HOME, 40),
+            (MORE_MENU, core_actions::SETTINGS, 50),
+        ];
+        for (menu, item, order) in entries {
+            r.add_menu_entry(quireink_sdk::MenuEntry { menu, item, order })?;
         }
 
         r.subscribe(events::STARTED, Box::new(reopen_last_book))?;

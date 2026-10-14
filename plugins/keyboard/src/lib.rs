@@ -388,15 +388,9 @@ impl KeyboardScreen {
             start += self.text[start..].chars().next().map_or(1, char::len_utf8);
         }
         let x = f32::from(box_area.x) + margin / 2.0;
-        let end = ui::draw_label(
-            canvas,
-            &font,
-            style.text,
-            x,
-            box_area,
-            &self.text[start..],
-            Color::BLACK,
-        );
+        let shown = &self.text[start..];
+        ui::draw_label(canvas, &font, style.text, x, box_area, shown, Color::BLACK);
+        let end = x + font.measure(style.text, shown);
         let cursor = style.text as u32;
         canvas.fill_rect(
             end as i32 + 2,
