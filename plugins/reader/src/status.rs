@@ -27,6 +27,9 @@ pub const GROUP: Id = Id::new_static("reader.group.status");
 /// part's setting).
 pub const ITEMS_SCREEN: Id = Id::new_static("reader.status-items");
 
+/// The battery's charge in percent beside its symbol.
+pub const PERCENT: Id = Id::new_static("reader.status.battery-percent");
+
 /// The parts: top left, centre, right, then bottom left, centre, right.
 pub const PARTS: [Id; 6] = [
     Id::new_static("reader.status.top-left"),
@@ -84,6 +87,16 @@ pub(crate) fn register(r: &mut dyn Registrar) -> Result<(), RegisterError> {
         .editor(ITEMS_SCREEN);
         r.add_setting(spec)?;
     }
+    r.add_setting(
+        SettingSpec::new(
+            PERCENT,
+            "reader.status.battery-percent",
+            SettingKind::Bool,
+            SettingValue::Bool(true),
+        )
+        .group(GROUP)
+        .description("reader.status.battery-percent.help"),
+    )?;
     r.add_screen(ScreenSpec {
         id: ITEMS_SCREEN,
         title: Cow::Borrowed("reader.group.status"),
@@ -132,6 +145,7 @@ pub(crate) fn line<'e>(env: &Env<'e>, area: Rect, top: bool) -> StatusLine<'e> {
         lists: lists(env, top),
         size: env.metrics.pt(8.0),
         color: quireink_sdk::Color::gray(80),
+        percent: env.settings.bool(PERCENT.as_str()),
     }
 }
 

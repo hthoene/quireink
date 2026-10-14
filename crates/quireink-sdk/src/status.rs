@@ -119,6 +119,9 @@ pub struct StatusLine<'a> {
     pub lists: [&'a str; 3],
     pub size: f32,
     pub color: Color,
+    /// Levels (the battery) with their percentage beside the symbol, or
+    /// the symbol alone.
+    pub percent: bool,
 }
 
 impl StatusLine<'_> {
@@ -140,7 +143,7 @@ impl StatusLine<'_> {
         font: &FontHandle<'_>,
         context: &Params,
     ) {
-        let (area, size) = (self.area, self.size);
+        let (area, size, percent) = (self.area, self.size, self.percent);
         let gap = size;
         let values = |list: &str| -> Vec<StatusValue> {
             item_ids(list)
@@ -151,7 +154,7 @@ impl StatusLine<'_> {
         let width = |values: &[StatusValue]| -> f32 {
             values
                 .iter()
-                .map(|v| value_width(font, size, v))
+                .map(|v| value_width(font, size, v, percent))
                 .sum::<f32>()
                 + gap * values.len().saturating_sub(1) as f32
         };
@@ -171,7 +174,15 @@ impl StatusLine<'_> {
             .max(x0 + left_room);
         let left_end = if center.is_empty() { right_x } else { center_x } - gap;
         let mut draw = |values: &[StatusValue], x: f32, end: f32| {
-            draw_values(canvas, font, area, values, (x, end), size, self.color);
+            draw_values(
+                canvas,
+                font,
+                area,
+                values,
+                (x, end),
+                (size, percent),
+                self.color,
+            );
         };
         draw(&center, center_x, right_x - gap);
         draw(&right, right_x, x1);
@@ -179,12 +190,13 @@ impl StatusLine<'_> {
     }
 }
 
-fn value_width(font: &FontHandle<'_>, size: f32, value: &StatusValue) -> f32 {
+fn value_width(font: &FontHandle<'_>, size: f32, value: &StatusValue, with_percent: bool) -> f32 {
     match value {
         StatusValue::Text(text) => font.measure(size, text),
-        StatusValue::Level { percent, .. } => {
+        StatusValue::Level { percent, .. } if with_percent => {
             battery_width(size) + size * 0.3 + font.measure(size, &level_text(*percent))
         }
+        StatusValue::Level { .. } => battery_width(size),
     }
 }
 
@@ -202,14 +214,17 @@ fn draw_values(
     area: Rect,
     values: &[StatusValue],
     (mut x, end): (f32, f32),
-    size: f32,
+    (size, with_percent): (f32, bool),
     color: Color,
 ) {
     let gap = size;
     let metrics = font.line_metrics(size);
     let baseline = i32::from(area.y)
         + ((f32::from(area.height) + metrics.ascent - metrics.descent) / 2.0) as i32;
-    let widths: Vec<f32> = values.iter().map(|v| value_width(font, size, v)).collect();
+    let widths: Vec<f32> = values
+        .iter()
+        .map(|v| value_width(font, size, v, with_percent))
+        .collect();
     let texts: Vec<bool> = values
         .iter()
         .map(|v| matches!(v, StatusValue::Text(_)))
@@ -240,8 +255,11 @@ fn draw_values(
                     height as u16,
                 );
                 draw_battery(canvas, battery, size, *percent, *charging, color);
-                x += battery_width(size) + size * 0.3;
-                x += font.draw(canvas, size, x, baseline, &level_text(*percent), color);
+                x += battery_width(size);
+                if with_percent {
+                    x += size * 0.3;
+                    x += font.draw(canvas, size, x, baseline, &level_text(*percent), color);
+                }
             }
         }
         x += gap;
