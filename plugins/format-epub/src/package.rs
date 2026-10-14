@@ -10,6 +10,7 @@
 //! - `toc.dat`: table of contents records (level u8, section u32, fragment
 //!   length u16, title length u16, fragment, title); `toc.idx` holds the
 //!   offset of each record as u32.
+//! - `styles.txt`: the rules of all the book's stylesheets (see `css`).
 //! - `package.ini`: cache version, book size, metadata and counts. Written
 //!   last, so its presence marks a complete package cache.
 
@@ -23,8 +24,10 @@ use quireink_sdk::document::{DocumentError, Metadata};
 use quireink_sdk::xml::{Token, Tokenizer, decode, local_name};
 use quireink_sdk::zip::ZipArchive;
 
+use crate::css;
+
 /// Bump when the cache format or the conversion changes.
-pub(crate) const CACHE_VERSION: u32 = 5;
+pub(crate) const CACHE_VERSION: u32 = 6;
 
 /// A chapter: where it is in the archive and its uncompressed size.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -209,6 +212,15 @@ pub(crate) fn load(storage: &dyn Storage, cache: &str, book_size: u64) -> Option
         spine,
         toc_len: toc_len?,
     })
+}
+
+/// The book's stylesheet rules from the cache.
+pub(crate) fn styles(storage: &dyn Storage, cache: &str) -> css::Rules {
+    quireink_sdk::read_file(storage, &path(cache, "styles.txt"), 64 * 1024)
+        .ok()
+        .and_then(|data| String::from_utf8(data).ok())
+        .map(|text| css::Rules::decode(&text))
+        .unwrap_or_default()
 }
 
 /// Removes the files that mark a complete cache, so it is rebuilt.
@@ -421,6 +433,7 @@ pub(crate) fn build(
     let mut nav: Option<String> = None;
     let mut ncx: Option<String> = None;
     let mut ncx_by_type: Option<String> = None;
+    let mut stylesheets: Vec<String> = Vec::new();
     let mut failed = None;
     tokenize(storage, archive, &opf_path, &mut |token| {
         let Token::Start { name, attrs, .. } = token else {
@@ -435,12 +448,17 @@ pub(crate) fn build(
         let positions = spine_ids[first..].iter().take_while(|&&(h, _)| h == id);
         let is_nav = get("properties").split_whitespace().any(|p| p == "nav");
         let is_ncx = ncx_id == Some(id);
-        let is_ncx_type = get("media-type") == "application/x-dtbncx+xml";
+        let media_type = get("media-type");
+        let is_ncx_type = media_type == "application/x-dtbncx+xml";
+        let is_css = media_type == "text/css";
         let mut positions = positions.peekable();
-        if positions.peek().is_none() && !is_nav && !is_ncx && !is_ncx_type {
+        if positions.peek().is_none() && !is_nav && !is_ncx && !is_ncx_type && !is_css {
             return;
         }
         let (path, _) = resolve(&opf_dir, &get("href"));
+        if is_css {
+            stylesheets.push(path.clone());
+        }
         for &(_, position) in positions {
             match archive.entry(storage, &path) {
                 Ok(Some(entry)) => {
@@ -506,6 +524,31 @@ pub(crate) fn build(
     }
     storage.write(&path(cache, "spine.bin"), &spine_data)?;
     drop(spine_data);
+
+    // Stylesheets, one at a time; a damaged one is skipped.
+    let mut rules = css::Rules::default();
+    for path in &stylesheets {
+        let mut parser = css::Parser::default();
+        let Ok(Some(entry)) = archive.entry(storage, path) else {
+            continue;
+        };
+        let mut pending: Vec<u8> = Vec::new();
+        let _ = archive.stream(storage, &entry, &mut |chunk| {
+            // Chunks may end inside a UTF-8 sequence.
+            pending.extend_from_slice(chunk);
+            let valid = match core::str::from_utf8(&pending) {
+                Ok(text) => text.len(),
+                Err(e) => e.valid_up_to(),
+            };
+            if let Ok(text) = core::str::from_utf8(&pending[..valid]) {
+                parser.feed(text, &mut rules);
+            }
+            pending.drain(..valid);
+            true
+        });
+    }
+    storage.write(&path(cache, "styles.txt"), rules.encode().as_bytes())?;
+    drop(rules);
 
     let mut ini = String::new();
     let mut set = |section: &str, key: &str, value: &str| {

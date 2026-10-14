@@ -105,7 +105,8 @@ impl EpubDocument {
                     .archive
                     .entry_by_record(storage, self.spine[section as usize].record)
                     .map_err(package::error)?;
-                convert::convert(storage, &self.archive, &entry, &paths)?
+                let rules = package::styles(storage, &self.cache);
+                convert::convert(storage, &self.archive, &entry, &paths, rules)?
             }
         };
         if let Some(slot) = self.lengths.get(section as usize) {

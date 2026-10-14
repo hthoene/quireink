@@ -17,6 +17,7 @@
 extern crate alloc;
 
 mod convert;
+mod css;
 mod document;
 mod package;
 
@@ -130,6 +131,10 @@ mod tests {
             .deflated("OEBPS/nav.xhtml", NAV)
             .deflated("OEBPS/text/ch1.xhtml", CH1)
             .deflated("OEBPS/text/ch 2.xhtml", ch2)
+            .deflated(
+                "OEBPS/style.css",
+                "/* book styles */ .c { text-align: center } .hide { display: none }",
+            )
             .build();
         MemoryStorage::new().with("books/test.epub", zip)
     }
@@ -241,6 +246,29 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!((third.text.as_str(), third.align), ("Rechts", Align::End));
+    }
+
+    #[test]
+    fn applies_stylesheets() {
+        let ch2 = String::from(
+            "<html><head><style>p.b { font-weight: bold }</style></head><body>             <p class=\"c\">Mitte</p><p class=\"x hide\">weg <b>auch weg</b></p>             <p class=\"b\">Fett</p><p>Normal</p></body></html>",
+        );
+        let storage = epub(ch2);
+        let doc = EpubDocument::open(&storage, "books/test.epub").unwrap();
+        let mut at = Locator::new(1, 0);
+        let mut found = Vec::new();
+        while let Some(block) = doc.block_at(&storage, at).unwrap() {
+            at = Locator::new(1, block.end);
+            found.push((block.text.clone(), block.align, block.style_at(0)));
+        }
+        assert_eq!(
+            found,
+            [
+                (String::from("Mitte"), Align::Center, TextStyle::REGULAR),
+                (String::from("Fett"), Align::Auto, TextStyle::BOLD),
+                (String::from("Normal"), Align::Auto, TextStyle::REGULAR),
+            ]
+        );
     }
 
     #[test]

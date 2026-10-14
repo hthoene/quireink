@@ -61,6 +61,8 @@ page.
   of 115 of 192 KiB.
 - The first opening of a chapter costs one pass over it plus writes to
   the SD card; later page turns are cheap.
-- CSS, inline styles and images are not part of the block format yet.
-  They will extend the record header (inline runs, image references)
-  under a new cache version.
+- Blocks carry style runs and an alignment (cache version 5). The book's
+  stylesheets are parsed once into a compact rule list (`styles.txt`); a
+  small CSS subset (element and class selectors, alignment, weight, style,
+  `display: none`) is applied while converting. Images are not part of the
+  block format yet.

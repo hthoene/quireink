@@ -22,6 +22,7 @@ use quireink_sdk::document::{Align, BlockKind, DocumentError, Run, TextStyle};
 use quireink_sdk::xml::{Token, Tokenizer, decode, local_name};
 use quireink_sdk::zip::{Entry, ZipArchive};
 
+use crate::css::{self, Props, Rules, parse_align};
 use crate::package::error;
 
 /// Size of a record header.
@@ -71,60 +72,45 @@ struct Frame {
     tag: String,
     style: TextStyle,
     align: Align,
+    /// The element's content is not shown (`<head>`, `display: none`, …).
+    hides: bool,
 }
 
-/// Style and alignment set by an element's name and attributes.
-fn element_style(
-    tag: &str,
-    attrs: &quireink_sdk::xml::Attrs<'_>,
-) -> (Option<bool>, Option<bool>, Option<Align>) {
-    let (mut bold, mut italic, mut align) = match tag {
-        "b" | "strong" => (Some(true), None, None),
-        "i" | "em" | "cite" | "dfn" | "var" => (None, Some(true), None),
-        "center" => (None, None, Some(Align::Center)),
-        _ => (None, None, None),
-    };
-    let parse_align = |value: &str| match value.trim().to_ascii_lowercase().as_str() {
-        "center" => Some(Align::Center),
-        "right" | "end" => Some(Align::End),
-        "left" | "start" => Some(Align::Start),
-        "justify" => Some(Align::Justify),
-        _ => None,
-    };
+/// What an element sets: defaults for its name, then the stylesheet
+/// rules, then its own `align` and `style` attributes.
+fn element_props(tag: &str, attrs: &quireink_sdk::xml::Attrs<'_>, rules: &Rules) -> Props {
+    let mut props = Props::default();
+    match tag {
+        "b" | "strong" => props.bold = Some(true),
+        "i" | "em" | "cite" | "dfn" | "var" => props.italic = Some(true),
+        "center" => props.align = Some(Align::Center),
+        _ => {}
+    }
+    let classes = attrs.get("class").unwrap_or_default();
+    props.apply(&rules.props(tag, &classes));
     if let Some(value) = attrs.get("align") {
-        align = parse_align(&value).or(align);
+        props.align = parse_align(&value).or(props.align);
     }
     if let Some(css) = attrs.get("style") {
-        for declaration in css.split(';') {
-            let Some((property, value)) = declaration.split_once(':') else {
-                continue;
-            };
-            let value = value
-                .trim()
-                .trim_end_matches("!important")
-                .trim()
-                .to_ascii_lowercase();
-            match property.trim().to_ascii_lowercase().as_str() {
-                "text-align" => align = parse_align(&value).or(align),
-                "font-weight" => {
-                    bold = match value.as_str() {
-                        "bold" | "bolder" | "600" | "700" | "800" | "900" => Some(true),
-                        "normal" | "lighter" | "100" | "200" | "300" | "400" | "500" => Some(false),
-                        _ => bold,
-                    }
-                }
-                "font-style" => {
-                    italic = match value.as_str() {
-                        "italic" | "oblique" => Some(true),
-                        "normal" => Some(false),
-                        _ => italic,
-                    }
-                }
-                _ => {}
-            }
+        props.apply(&Props::parse(&css));
+    }
+    props
+}
+
+/// `style` with bold and italic as `props` sets them.
+fn styled(style: TextStyle, props: &Props) -> TextStyle {
+    let mut bits = style.bits();
+    for (flag, on) in [
+        (TextStyle::BOLD, props.bold),
+        (TextStyle::ITALIC, props.italic),
+    ] {
+        match on {
+            Some(true) => bits |= flag.bits(),
+            Some(false) => bits &= !flag.bits(),
+            None => {}
         }
     }
-    (bold, italic, align)
+    TextStyle::from_bits(bits)
 }
 
 struct Converter<'a> {
@@ -142,6 +128,9 @@ struct Converter<'a> {
     align: Option<Align>,
     /// Open elements.
     stack: Vec<Frame>,
+    /// The book's stylesheet rules, plus those of `<style>` elements.
+    rules: Rules,
+    css: css::Parser,
     kind: BlockKind,
     continues: bool,
     /// Depth inside elements whose content is not shown.
@@ -208,8 +197,15 @@ impl Converter<'_> {
     }
 
     fn start(&mut self, name: &str, attrs: quireink_sdk::xml::Attrs<'_>, self_closing: bool) {
+        let _ = self_closing;
         let tag = local_name(name).to_ascii_lowercase();
-        let hides = matches!(tag.as_str(), "head" | "script" | "style" | "title" | "svg");
+        let props = if self.hidden == 0 {
+            element_props(&tag, &attrs, &self.rules)
+        } else {
+            Props::default()
+        };
+        let hides = matches!(tag.as_str(), "head" | "script" | "style" | "title" | "svg")
+            || props.hidden == Some(true);
         // Block elements end the block before them (before their anchor is
         // placed, so it points at the new block), in the old style.
         if !hides
@@ -230,39 +226,20 @@ impl Converter<'_> {
                 self.write_anchors();
             }
         }
+        // Self-closing elements are ended right away by the caller.
+        let (style, align) = self.frame();
+        self.stack.push(Frame {
+            tag: tag.clone(),
+            style: styled(style, &props),
+            align: props.align.unwrap_or(align),
+            hides,
+        });
         if hides {
-            if !self_closing {
-                self.hidden += 1;
-            }
-            return;
+            self.hidden += 1;
         }
         if self.hidden > 0 {
             return;
         }
-        let (style, align) = self.frame();
-        let (bold, italic, own_align) = element_style(&tag, &attrs);
-        let mut style = style;
-        if let Some(bold) = bold {
-            style = TextStyle::from_bits(style.bits() & !TextStyle::BOLD.bits()).union(if bold {
-                TextStyle::BOLD
-            } else {
-                TextStyle::REGULAR
-            });
-        }
-        if let Some(italic) = italic {
-            style =
-                TextStyle::from_bits(style.bits() & !TextStyle::ITALIC.bits()).union(if italic {
-                    TextStyle::ITALIC
-                } else {
-                    TextStyle::REGULAR
-                });
-        }
-        // Self-closing elements are ended right away by the caller.
-        self.stack.push(Frame {
-            tag: tag.clone(),
-            style,
-            align: own_align.unwrap_or(align),
-        });
         match tag.as_str() {
             "br" => {
                 if !self.text.is_empty() {
@@ -294,26 +271,30 @@ impl Converter<'_> {
 
     fn end(&mut self, name: &str) {
         let tag = local_name(name).to_ascii_lowercase();
-        if matches!(tag.as_str(), "head" | "script" | "style" | "title" | "svg") {
-            self.hidden = self.hidden.saturating_sub(1);
+        let Some(open) = self.stack.iter().rposition(|f| f.tag == tag) else {
             return;
-        }
-        if self.hidden > 0 {
-            return;
-        }
-        if tag == "pre" {
-            self.flush();
-            self.pre = self.pre.saturating_sub(1);
-        } else if tag == "li" || is_block(&tag) {
-            self.flush();
+        };
+        if self.hidden == 0 {
+            if tag == "pre" {
+                self.flush();
+                self.pre = self.pre.saturating_sub(1);
+            } else if tag == "li" || is_block(&tag) {
+                self.flush();
+            }
         }
         // Close the element (and any left open inside it).
-        if let Some(open) = self.stack.iter().rposition(|f| f.tag == tag) {
-            self.stack.truncate(open);
+        for frame in self.stack.drain(open..) {
+            if frame.hides {
+                self.hidden = self.hidden.saturating_sub(1);
+            }
         }
     }
 
     fn characters(&mut self, text: &str) {
+        if self.stack.last().is_some_and(|f| f.tag == "style") {
+            self.css.feed(text, &mut self.rules);
+            return;
+        }
         if self.hidden > 0 {
             return;
         }
@@ -496,6 +477,7 @@ pub(crate) fn convert(
     archive: &ZipArchive,
     entry: &Entry,
     paths: &CachePaths,
+    rules: Rules,
 ) -> Result<u32, DocumentError> {
     let _ = storage.remove(&paths.end);
     for path in [&paths.text, &paths.index, &paths.anchors] {
@@ -513,6 +495,8 @@ pub(crate) fn convert(
         runs: Vec::new(),
         align: None,
         stack: Vec::new(),
+        rules,
+        css: css::Parser::default(),
         kind: BlockKind::Paragraph,
         continues: false,
         hidden: 0,
