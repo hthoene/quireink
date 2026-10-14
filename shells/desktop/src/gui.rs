@@ -49,6 +49,7 @@ pub fn run(device: Device, screenshot_dir: PathBuf) -> Result<(), String> {
         surface: None,
         cursor: PhysicalPosition::new(0.0, 0.0),
         pointer_down: false,
+        animating: false,
         error: None,
     };
     event_loop.run_app(&mut app).map_err(|e| e.to_string())?;
@@ -65,6 +66,9 @@ struct App {
     surface: Option<softbuffer::Surface<Rc<Window>, Rc<Window>>>,
     cursor: PhysicalPosition<f64>,
     pointer_down: bool,
+    /// Whether the last frame was part of an animation, so the frame after
+    /// its end is drawn too.
+    animating: bool,
     error: Option<String>,
 }
 
@@ -320,10 +324,16 @@ impl ApplicationHandler for App {
         }
 
         let mut deadline: Option<StdInstant> = None;
-        if self.device.panel.is_animating() {
-            if let Some(window) = &self.window {
-                window.request_redraw();
-            }
+        let animating = self.device.panel.is_animating();
+        // Keep drawing while the panel animates — and once more when it has
+        // finished, or the last flash phase (white) would stay visible.
+        if (animating || self.animating)
+            && let Some(window) = &self.window
+        {
+            window.request_redraw();
+        }
+        self.animating = animating;
+        if animating {
             deadline = Some(StdInstant::now() + ANIMATION_FRAME);
         }
         if let Some(wake) = self.device.wake_at {
