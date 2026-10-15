@@ -8,6 +8,7 @@ use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::String;
 use alloc::string::ToString;
+use alloc::vec::Vec;
 
 use quireink_sdk::ui::{self, UiStyle};
 use quireink_sdk::widgets::WidgetSpec;
@@ -19,6 +20,8 @@ use quireink_sdk::{
 use crate::{fmt, overview, store};
 
 pub(crate) const TODAY: Id = Id::new_static("stats.widget.today");
+/// The last seven days as bars.
+pub(crate) const WEEK: Id = Id::new_static("stats.widget.week");
 /// Setting: minutes a day to read, or none.
 pub(crate) const GOAL: Id = Id::new_static("stats.goal");
 /// Choices of [`GOAL`]: minutes, `off` for none.
@@ -182,7 +185,128 @@ pub(crate) fn register(r: &mut dyn Registrar) -> Result<(), RegisterError> {
             format!("{a}|{b}|{}", progress(env, &numbers))
         })),
         targets: None,
+    })?;
+    r.add_widget(WidgetSpec {
+        id: WEEK,
+        title: Cow::Borrowed("stats.widget.week"),
+        height: Box::new(|env, _| {
+            let style = UiStyle::new(env);
+            let Some(font) = style.font(env) else {
+                return 0;
+            };
+            let small = font.line_metrics(style.small).line_height;
+            (small * 2.0 + style.row as f32 * 1.4) as u16
+        }),
+        draw: Box::new(draw_week),
+        signature: Some(Box::new(|env| {
+            week(env).iter().map(|(_, s)| format!("{s},")).collect()
+        })),
+        targets: Some(Box::new(|_, area| {
+            alloc::vec![quireink_sdk::widgets::WidgetTarget {
+                area,
+                command: quireink_sdk::Command::RunAction(crate::OPEN),
+            }]
+        })),
     })
+}
+
+/// The last seven days, oldest first: each day's weekday and seconds read.
+fn week(env: &Env<'_>) -> Vec<(u8, u64)> {
+    let Some(today) = fmt::today(env) else {
+        return Vec::new();
+    };
+    let days = store::days(env.storage, |unix| fmt::day_of(env, unix));
+    (today - 6..=today)
+        .map(|day| {
+            let seconds = days
+                .iter()
+                .filter(|d| d.day == day)
+                .map(|d| u64::from(d.seconds))
+                .sum();
+            (fmt::date_of(day).weekday, seconds)
+        })
+        .collect()
+}
+
+/// "Last 7 days · 3 h 20 min", then a bar a day with its weekday below;
+/// the daily goal, if set, as a line across.
+fn draw_week(canvas: &mut Canvas<'_>, env: &Env<'_>, area: Rect) {
+    let style = UiStyle::new(env);
+    let Some(font) = style.font(env) else {
+        return;
+    };
+    let days = week(env);
+    if days.is_empty() {
+        return;
+    }
+    let small = font.line_metrics(style.small).line_height as u16;
+    let total: u64 = days.iter().map(|(_, s)| s).sum();
+    let label = env.i18n.format(
+        "stats.week-label",
+        &[("time", quireink_sdk::Arg::Str(&fmt::duration(env, total)))],
+    );
+    let gray = Color::gray(80);
+    let x = f32::from(area.x);
+    ui::draw_label(
+        canvas,
+        &font,
+        style.small,
+        x,
+        Rect::new(area.x, area.y, area.width, small),
+        &label,
+        gray,
+    );
+    let chart_top = area.y + small;
+    let chart_h = area.height.saturating_sub(small * 2);
+    let goal = goal(env).unwrap_or(0);
+    let most = days
+        .iter()
+        .map(|(_, s)| *s)
+        .max()
+        .unwrap_or(0)
+        .max(goal)
+        .max(1);
+    let column = area.width / 7;
+    let bar_w = (column * 3 / 5).max(2);
+    let line = style.line.max(1);
+    for (i, (weekday, seconds)) in days.iter().enumerate() {
+        let cx = area.x + column * i as u16 + column / 2;
+        let h = (u64::from(chart_h) * seconds / most) as u16;
+        let bx = i32::from(cx - bar_w / 2);
+        let base = i32::from(chart_top + chart_h);
+        if h > 0 {
+            canvas.fill_rect(
+                bx,
+                base - i32::from(h),
+                u32::from(bar_w),
+                u32::from(h),
+                Color::BLACK,
+            );
+        } else {
+            canvas.fill_rect(bx, base - line as i32, u32::from(bar_w), line, gray);
+        }
+        let name = fmt::weekday_short(env, *weekday);
+        let w = font.measure(style.small, name);
+        let row = Rect::new(area.x, chart_top + chart_h, area.width, small);
+        ui::draw_label(
+            canvas,
+            &font,
+            style.small,
+            f32::from(cx) - w / 2.0,
+            row,
+            name,
+            gray,
+        );
+    }
+    if goal > 0 {
+        let y = i32::from(chart_top + chart_h) - (u64::from(chart_h) * goal / most) as i32;
+        let mut gx = i32::from(area.x);
+        let end = i32::from(area.x + area.width);
+        while gx < end {
+            canvas.fill_rect(gx, y, 6.min((end - gx) as u32), line, Color::BLACK);
+            gx += 12;
+        }
+    }
 }
 
 /// How full the goal's bar is, in thousandths.

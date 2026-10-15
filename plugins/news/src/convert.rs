@@ -14,6 +14,8 @@ use quireink_sdk::{Storage, StorageError};
 
 /// Pieces the feed is read in.
 const CHUNK: usize = 2048;
+/// Headlines kept of a feed.
+const HEADLINES: usize = 5;
 /// Titles, dates and links are cut at this many bytes.
 const MAX_FIELD: usize = 400;
 
@@ -23,6 +25,8 @@ pub(crate) struct Converted {
     /// The feed's own title.
     pub title: String,
     pub articles: usize,
+    /// The first articles' titles.
+    pub headlines: Vec<String>,
 }
 
 /// One article being read.
@@ -280,6 +284,9 @@ impl Reader<'_> {
         if let Err(e) = self.storage.append(self.to, out.as_bytes()) {
             self.failed = Some(e);
             return;
+        }
+        if self.converted.headlines.len() < HEADLINES && !title.is_empty() {
+            self.converted.headlines.push(title);
         }
         self.converted.articles += 1;
     }

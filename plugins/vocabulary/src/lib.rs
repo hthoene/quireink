@@ -107,9 +107,95 @@ impl Plugin for Vocabulary {
             order: 36,
         })?;
         r.add_icon(OPEN, Cow::Borrowed("vocabulary"))?;
+        r.add_widget(quireink_sdk::widgets::WidgetSpec {
+            id: Id::new_static("vocabulary.widget.word"),
+            title: Cow::Borrowed("vocabulary.widget.word"),
+            height: Box::new(word_height),
+            draw: Box::new(draw_word),
+            signature: Some(Box::new(|env| {
+                word_of_the_day(env).map_or(String::new(), |w| w.word)
+            })),
+            targets: Some(Box::new(|_, area| {
+                alloc::vec![quireink_sdk::widgets::WidgetTarget {
+                    area,
+                    command: Command::RunAction(OPEN),
+                }]
+            })),
+        })?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/en.ini")))?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/de.ini")))?;
         Ok(())
+    }
+}
+
+/// A word to go over today: another one every day.
+fn word_of_the_day(env: &Env<'_>) -> Option<Word> {
+    let count = store::count(env.storage);
+    if count == 0 {
+        return None;
+    }
+    let day = quireink_sdk::time::unix_seconds(env).map_or(0, |s| s / 86_400) as usize;
+    store::range(env.storage, day % count, day % count + 1)
+        .into_iter()
+        .next()
+        .map(|(_, word)| word)
+}
+
+fn word_height(env: &Env<'_>, _: u16) -> u16 {
+    if store::count(env.storage) == 0 {
+        return 0;
+    }
+    let style = UiStyle::new(env);
+    let Some(font) = style.font(env) else {
+        return 0;
+    };
+    let small = font.line_metrics(style.small).line_height;
+    let title = font.line_metrics(style.title).line_height;
+    (small * 3.0 + title) as u16
+}
+
+/// "Word of the day", the word, and its sentence (two lines at most).
+fn draw_word(canvas: &mut Canvas<'_>, env: &Env<'_>, area: Rect) {
+    let style = UiStyle::new(env);
+    let (Some(font), Some(word)) = (style.font(env), word_of_the_day(env)) else {
+        return;
+    };
+    let small = font.line_metrics(style.small).line_height as u16;
+    let title = font.line_metrics(style.title).line_height as u16;
+    let x = f32::from(area.x);
+    let gray = quireink_sdk::Color::gray(80);
+    let row = |y: u16, h: u16| Rect::new(area.x, y, area.width, h);
+    ui::draw_label(
+        canvas,
+        &font,
+        style.small,
+        x,
+        row(area.y, small),
+        env.i18n.tr("vocabulary.widget.word"),
+        gray,
+    );
+    let shown = ui::fit(&font, style.title, &word.word, f32::from(area.width));
+    ui::draw_label(
+        canvas,
+        &font,
+        style.title,
+        x,
+        row(area.y + small, title),
+        &shown,
+        quireink_sdk::Color::BLACK,
+    );
+    let lines = font.wrap(style.small, &word.sentence, f32::from(area.width));
+    for (n, range) in lines.into_iter().take(2).enumerate() {
+        let y = area.y + small + title + n as u16 * small;
+        ui::draw_label(
+            canvas,
+            &font,
+            style.small,
+            x,
+            row(y, small),
+            &word.sentence[range],
+            gray,
+        );
     }
 }
 

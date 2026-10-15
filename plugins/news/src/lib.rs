@@ -194,6 +194,7 @@ fn fetched(env: &Env<'_>, params: &Params, out: &mut Vec<Command>) {
             feed.name = short_title(&converted.title);
         }
         env.storage.rename(&tmp, &feed.book(env)).ok()?;
+        keep_headlines(env, &feed.book(env), &converted.headlines);
         Some(feed)
     });
     match made {
@@ -223,6 +224,108 @@ fn fetched(env: &Env<'_>, params: &Params, out: &mut Vec<Command>) {
         )
     };
     out.push(Command::Notify(message));
+}
+
+/// Where the newest headlines are kept: `title<TAB>book` lines, the
+/// feed fetched last first.
+fn headlines_file() -> String {
+    data("headlines.txt")
+}
+
+/// Keeps `titles` as the headlines of `book`, before the others'.
+fn keep_headlines(env: &Env<'_>, book: &str, titles: &[String]) {
+    let mut lines: Vec<String> = titles
+        .iter()
+        .map(|t| format!("{}\t{book}", t.replace(['\t', '\n'], " ")))
+        .collect();
+    if let Ok(old) = quireink_sdk::read_file(env.storage, &headlines_file(), 32 * 1024) {
+        for line in String::from_utf8_lossy(&old).lines() {
+            if !line.ends_with(&format!("\t{book}")) && lines.len() < 40 {
+                lines.push(line.to_string());
+            }
+        }
+    }
+    let _ = env
+        .storage
+        .write(&headlines_file(), lines.join("\n").as_bytes());
+}
+
+/// The newest headlines and their books, at most `max`.
+fn headlines(env: &Env<'_>, max: usize) -> Vec<(String, String)> {
+    let Ok(data) = quireink_sdk::read_file(env.storage, &headlines_file(), 32 * 1024) else {
+        return Vec::new();
+    };
+    String::from_utf8_lossy(&data)
+        .lines()
+        .filter_map(|l| l.split_once('\t'))
+        .filter(|(_, book)| env.storage.exists(book))
+        .take(max)
+        .map(|(t, b)| (t.to_string(), b.to_string()))
+        .collect()
+}
+
+/// Headlines the widget shows.
+const SHOWN_HEADLINES: usize = 4;
+
+fn headlines_height(env: &Env<'_>, _: u16) -> u16 {
+    let count = headlines(env, SHOWN_HEADLINES).len();
+    if count == 0 {
+        return 0;
+    }
+    let style = UiStyle::new(env);
+    let Some(font) = style.font(env) else {
+        return 0;
+    };
+    let small = font.line_metrics(style.small).line_height;
+    let text = font.line_metrics(style.text).line_height;
+    (small + text * count as f32) as u16
+}
+
+/// The rows of the headlines below the label.
+fn headline_rows(env: &Env<'_>, area: Rect) -> Vec<(Rect, String, String)> {
+    let style = UiStyle::new(env);
+    let Some(font) = style.font(env) else {
+        return Vec::new();
+    };
+    let small = font.line_metrics(style.small).line_height as u16;
+    let text = font.line_metrics(style.text).line_height as u16;
+    headlines(env, SHOWN_HEADLINES)
+        .into_iter()
+        .enumerate()
+        .map(|(i, (title, book))| {
+            let y = area.y + small + i as u16 * text;
+            (Rect::new(area.x, y, area.width, text), title, book)
+        })
+        .collect()
+}
+
+fn draw_headlines(canvas: &mut Canvas<'_>, env: &Env<'_>, area: Rect) {
+    let style = UiStyle::new(env);
+    let Some(font) = style.font(env) else {
+        return;
+    };
+    let small = font.line_metrics(style.small).line_height as u16;
+    ui::draw_label(
+        canvas,
+        &font,
+        style.small,
+        f32::from(area.x),
+        Rect::new(area.x, area.y, area.width, small),
+        env.i18n.tr("news.title"),
+        quireink_sdk::Color::gray(80),
+    );
+    for (row, title, _) in headline_rows(env, area) {
+        let title = ui::fit(&font, style.text, &title, f32::from(row.width));
+        ui::draw_label(
+            canvas,
+            &font,
+            style.text,
+            f32::from(row.x),
+            row,
+            &title,
+            quireink_sdk::Color::BLACK,
+        );
+    }
 }
 
 /// The news plugin.
@@ -285,6 +388,31 @@ impl Plugin for News {
         })?;
         r.add_icon(OPEN, Cow::Borrowed("rss"))?;
         r.add_icon(FETCH, Cow::Borrowed("refresh"))?;
+        r.add_widget(quireink_sdk::widgets::WidgetSpec {
+            id: Id::new_static("news.widget.headlines"),
+            title: Cow::Borrowed("news.widget.headlines"),
+            height: Box::new(headlines_height),
+            draw: Box::new(draw_headlines),
+            signature: Some(Box::new(|env| {
+                headlines(env, SHOWN_HEADLINES)
+                    .into_iter()
+                    .map(|(t, _)| t)
+                    .collect::<Vec<_>>()
+                    .join("|")
+            })),
+            targets: Some(Box::new(|env, area| {
+                headline_rows(env, area)
+                    .into_iter()
+                    .map(|(row, _, book)| quireink_sdk::widgets::WidgetTarget {
+                        area: row,
+                        command: Command::OpenSlot(
+                            slots::READER,
+                            Params::new().with(params::PATH, book),
+                        ),
+                    })
+                    .collect()
+            })),
+        })?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/en.ini")))?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/de.ini")))?;
         Ok(())
