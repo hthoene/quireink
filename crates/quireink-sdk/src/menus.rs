@@ -12,7 +12,6 @@ pub struct MenuEntry {
     pub menu: Id,
     /// An action, run when the entry is chosen, or a setting, shown with
     /// its current value and changed in place. Its title is the label. An
-    /// action named like a menu with entries is shown as that submenu. An
     /// action named like a menu with entries is shown as that submenu.
     pub item: Id,
     /// Position; lower comes first.
@@ -30,6 +29,22 @@ pub struct MenuSection {
     pub menu: Id,
     /// Position among the menu's entries; lower comes first.
     pub order: i16,
+}
+
+/// What a menu entry needs to be offered (see
+/// [`Registrar::set_menu_need`](crate::Registrar::set_menu_need)), so
+/// menus stay short on every device.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum MenuNeed {
+    /// A device that speaks ([`Env::speech`](crate::Env)): hidden
+    /// elsewhere, also where the user listed it.
+    Speech,
+    /// A device without a touch screen, where it is the way to do what a
+    /// tap or a long press does elsewhere (e.g. choosing a link). On touch
+    /// devices it is left out of the menus plugins define; users can still
+    /// list it.
+    NoTouch,
 }
 
 /// One entry of a resolved menu.
@@ -55,6 +70,10 @@ pub struct Menus {
     titles: VecMap<Id, Cow<'static, str>>,
     icons: VecMap<Id, Cow<'static, str>>,
     sections: Vec<Id>,
+    needs: VecMap<Id, MenuNeed>,
+    /// The device has a touch screen; it cannot speak.
+    touch: bool,
+    mute: bool,
 }
 
 impl Menus {
@@ -72,6 +91,34 @@ impl Menus {
         self.titles.shrink_to_fit();
         self.icons.shrink_to_fit();
         self.sections.shrink_to_fit();
+        self.needs.shrink_to_fit();
+    }
+
+    /// What the device offers, for entries with a [`MenuNeed`].
+    pub fn set_device(&mut self, touch: bool, speech: bool) {
+        self.touch = touch;
+        self.mute = !speech;
+    }
+
+    /// Offers `item` only where `need` is met.
+    pub fn set_need(&mut self, item: Id, need: MenuNeed) {
+        self.needs.insert(item, need);
+    }
+
+    /// Whether `item` is offered on this device by default, e.g. whether
+    /// the settings screen lists a setting.
+    pub fn available(&self, item: &str) -> bool {
+        self.offered(item, false)
+    }
+
+    /// Whether `item` is offered here; `listed` if the user put it into
+    /// the menu.
+    fn offered(&self, item: &str, listed: bool) -> bool {
+        match self.needs.get(item) {
+            Some(MenuNeed::Speech) => !self.mute,
+            Some(MenuNeed::NoTouch) => listed || !self.touch,
+            None => true,
+        }
     }
 
     pub fn add(&mut self, entry: MenuEntry) {
@@ -112,7 +159,7 @@ impl Menus {
         let mut entries: Vec<&MenuEntry> = self
             .entries
             .iter()
-            .filter(|e| e.menu.as_str() == menu)
+            .filter(|e| e.menu.as_str() == menu && self.offered(e.item.as_str(), false))
             .collect();
         entries.sort_by_key(|e| e.order);
         entries.into_iter().map(|e| &e.item).collect()
@@ -122,7 +169,10 @@ impl Menus {
     /// label.
     pub fn ids(&self, menu: &str) -> Vec<&Id> {
         match self.custom.get(menu) {
-            Some(ids) => ids.iter().collect(),
+            Some(ids) => ids
+                .iter()
+                .filter(|id| self.offered(id.as_str(), true))
+                .collect(),
             None => self.default_ids(menu),
         }
     }
@@ -171,18 +221,9 @@ impl Menus {
     /// The entries of `menu`, in display order. Items without a known
     /// title are skipped.
     pub fn items(&self, menu: &str) -> Vec<MenuItem<'_>> {
-        if let Some(actions) = self.custom.get(menu) {
-            return actions.iter().filter_map(|a| self.item(a)).collect();
-        }
-        let mut entries: Vec<&MenuEntry> = self
-            .entries
-            .iter()
-            .filter(|e| e.menu.as_str() == menu)
-            .collect();
-        entries.sort_by_key(|e| e.order);
-        entries
+        self.ids(menu)
             .into_iter()
-            .filter_map(|e| self.item(&e.item))
+            .filter_map(|id| self.item(id))
             .collect()
     }
 
@@ -229,5 +270,25 @@ mod tests {
         menus.customize(Id::new_static("a.menu"), vec![Id::new_static("a.second")]);
         assert_eq!(titles(&menus), ["Second"]);
         assert!(menus.items("other").is_empty());
+
+        // Entries for devices without touch, or that speak.
+        menus.reset("a.menu");
+        menus.add(MenuEntry {
+            menu: Id::new_static("a.menu"),
+            item: Id::new_static("a.links"),
+            order: 30,
+        });
+        menus.set_title(Id::new_static("a.links"), Cow::Borrowed("Links"));
+        menus.set_need(Id::new_static("a.links"), MenuNeed::NoTouch);
+        assert_eq!(titles(&menus).last(), Some(&"Links"));
+        menus.set_device(true, false);
+        assert_eq!(titles(&menus).last(), Some(&"Second"));
+        // Listed by the user, it shows; one that needs speech does not.
+        menus.set_need(Id::new_static("a.second"), MenuNeed::Speech);
+        menus.customize(
+            Id::new_static("a.menu"),
+            alloc::vec![Id::new_static("a.links"), Id::new_static("a.second")],
+        );
+        assert_eq!(titles(&menus), ["Links"]);
     }
 }

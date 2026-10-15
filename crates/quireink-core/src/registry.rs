@@ -110,6 +110,7 @@ pub(crate) struct Staging {
     pub(crate) menu_entries: Vec<MenuEntry>,
     pub(crate) menu_sections: Vec<quireink_sdk::MenuSection>,
     pub(crate) icons: Vec<(Id, Cow<'static, str>)>,
+    pub(crate) menu_needs: Vec<(Id, quireink_sdk::MenuNeed)>,
     pub(crate) keymap_presets: Vec<(Id, Cow<'static, str>)>,
     pub(crate) setting_defaults: Vec<(Id, Cow<'static, str>)>,
     pub(crate) status_items: Vec<StatusItemSpec>,
@@ -333,6 +334,15 @@ impl Registrar for PluginRegistrar<'_> {
 
     fn add_icon(&mut self, item: Id, icon: Cow<'static, str>) -> Result<(), RegisterError> {
         self.staging.icons.push((item, icon));
+        Ok(())
+    }
+
+    fn set_menu_need(
+        &mut self,
+        item: Id,
+        need: quireink_sdk::MenuNeed,
+    ) -> Result<(), RegisterError> {
+        self.staging.menu_needs.push((item, need));
         Ok(())
     }
 

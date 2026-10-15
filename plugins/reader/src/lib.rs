@@ -117,7 +117,13 @@ pub mod settings {
     /// A tap on the top right corner sets or removes a bookmark.
     pub const CORNER_BOOKMARK: Id = Id::new_static("reader.corner-bookmark");
     /// How fast books are read aloud, in percent of the voice's speed.
-    pub const SPEECH_RATE: Id = Id::new_static("reader.speech-rate");
+    pub const ALOUD_SPEED: Id = Id::new_static("reader.aloud-speed");
+    /// The sentence read aloud is underlined.
+    pub const ALOUD_HIGHLIGHT: Id = Id::new_static("reader.aloud-highlight");
+    /// Reading aloud turns the pages; else it stops at the page's end.
+    pub const ALOUD_TURN: Id = Id::new_static("reader.aloud-turn-pages");
+    /// Reading aloud stops by itself after a while (a sleep timer).
+    pub const ALOUD_TIMER: Id = Id::new_static("reader.aloud-timer");
 }
 
 /// The reader's menu (`core.menu` on the reader screen). Any plugin can
@@ -364,16 +370,44 @@ impl Plugin for Reader {
             .group(groups::CONTROLS)
             .description("reader.setting.corner-bookmark.help"),
             SettingSpec::new(
-                settings::SPEECH_RATE,
-                "reader.setting.speech-rate",
+                settings::ALOUD_SPEED,
+                "reader.setting.aloud-speed",
                 SettingKind::Int { min: 50, max: 300 },
                 SettingValue::Int(100),
             )
             .group(groups::READING)
             .unit("core.unit.percent")
             .step(10)
-            .section(setting_sections::BEHAVIOUR)
-            .description("reader.setting.speech-rate.help"),
+            .section("reader.section.aloud")
+            .description("reader.setting.aloud-speed.help"),
+            flag(
+                settings::ALOUD_HIGHLIGHT,
+                "reader.setting.aloud-highlight",
+                true,
+            )
+            .section("reader.section.aloud")
+            .description("reader.setting.aloud-highlight.help"),
+            flag(
+                settings::ALOUD_TURN,
+                "reader.setting.aloud-turn-pages",
+                true,
+            )
+            .section("reader.section.aloud")
+            .description("reader.setting.aloud-turn-pages.help"),
+            SettingSpec::new(
+                settings::ALOUD_TIMER,
+                "reader.setting.aloud-timer",
+                SettingKind::Choice(
+                    aloud::TIMER_CHOICES
+                        .iter()
+                        .map(|c| Cow::Borrowed(*c))
+                        .collect(),
+                ),
+                SettingValue::Text(Cow::Borrowed(aloud::TIMER_CHOICES[0])),
+            )
+            .group(groups::READING)
+            .section("reader.section.aloud")
+            .description("reader.setting.aloud-timer.help"),
         ] {
             r.add_setting(setting)?;
         }
@@ -449,7 +483,7 @@ impl Plugin for Reader {
         let entries = [
             (MENU, actions::TOC, 10),
             (MENU, actions::SEARCH, 20),
-            (MENU, actions::GO_TO_PAGE, 30),
+            (MENU, actions::READ_ALOUD, 30),
             (MENU, actions::ANNOTATIONS, 40),
             (MENU, actions::QUICK_SETTINGS, 50),
             (MENU, core_settings::NIGHT_MODE, 60),
@@ -464,15 +498,28 @@ impl Plugin for Reader {
             (LAYOUT_MENU, settings::HYPHENATE, 50),
             (LAYOUT_MENU, settings::PUBLISHER_STYLES, 60),
             (MORE_MENU, actions::TOGGLE_BOOKMARK, 10),
-            (MORE_MENU, actions::READ_ALOUD, 15),
+            (MORE_MENU, actions::GO_TO_PAGE, 15),
             (MORE_MENU, actions::SELECT, 20),
             (MORE_MENU, actions::LINKS, 25),
-            (MORE_MENU, core_actions::LIBRARY, 30),
             (MORE_MENU, core_actions::HOME, 40),
             (MORE_MENU, core_actions::SETTINGS, 50),
         ];
         for (menu, item, order) in entries {
             r.add_menu_entry(quireink_sdk::MenuEntry { menu, item, order })?;
+        }
+        // Short menus: reading aloud where the device speaks; choosing
+        // text and links with the buttons where there is no touch screen.
+        for item in [
+            actions::READ_ALOUD,
+            settings::ALOUD_SPEED,
+            settings::ALOUD_HIGHLIGHT,
+            settings::ALOUD_TURN,
+            settings::ALOUD_TIMER,
+        ] {
+            r.set_menu_need(item, quireink_sdk::MenuNeed::Speech)?;
+        }
+        for item in [actions::SELECT, actions::LINKS] {
+            r.set_menu_need(item, quireink_sdk::MenuNeed::NoTouch)?;
         }
         for (item, icon) in [
             (actions::TOC, "list"),

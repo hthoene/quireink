@@ -124,6 +124,10 @@ pub trait Registrar {
     /// one, e.g. by an icon theme; the last registered wins.
     fn add_icon(&mut self, item: Id, icon: Cow<'static, str>) -> Result<(), RegisterError>;
 
+    /// Offers an action or setting in menus only on devices that meet
+    /// `need`, e.g. reading aloud only where the device can speak.
+    fn set_menu_need(&mut self, item: Id, need: crate::MenuNeed) -> Result<(), RegisterError>;
+
     /// Adds a group for the settings screen.
     fn add_setting_group(&mut self, group: SettingGroupSpec) -> Result<(), RegisterError>;
 

@@ -131,6 +131,10 @@ fn visible(env: &Env<'_>, spec: &SettingSpec) -> bool {
     if scope_only && env.settings.scope().is_none() {
         return false;
     }
+    // Not for this device (e.g. reading aloud without a speaker).
+    if !env.menus.available(spec.id.as_str()) {
+        return false;
+    }
     spec.level == Level::Basic || env.settings.bool(ADVANCED.as_str())
 }
 

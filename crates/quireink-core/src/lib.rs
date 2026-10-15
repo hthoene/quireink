@@ -376,6 +376,8 @@ impl KernelBuilder {
             plugin_defaults: Vec::new(),
             now: Instant::default(),
         };
+        let (touch, speech) = (kernel.shared.device.input.touch, kernel.shared.speech);
+        kernel.shared.menus.set_device(touch, speech);
 
         // The configuration file on the device, then the shell's overrides.
         let stored = read_config(kernel.shared.storage.as_ref());
@@ -1435,6 +1437,9 @@ impl Kernel {
         }
         for (item, icon) in staging.icons.drain(..) {
             self.shared.menus.set_icon(item, icon);
+        }
+        for (item, need) in staging.menu_needs.drain(..) {
+            self.shared.menus.set_need(item, need);
         }
         for item in staging.status_items.drain(..) {
             self.shared.status_items.add(item);
