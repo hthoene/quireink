@@ -1,0 +1,23 @@
+[package]
+name = "quireink-fat"
+description = "QuireInk's storage on FAT file systems with long file names, e.g. the X4's SD card"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+categories = ["no-std", "embedded", "filesystem"]
+# Its FAT library is not released with no_std support yet (see deny.toml).
+publish = false
+
+[dependencies]
+quireink-platform.workspace = true
+fatfs = { git = "https://github.com/rafalh/rust-fatfs", rev = "2aefc2a027ce94ed0671752814dac203f0450e11", default-features = false, features = ["alloc", "lfn", "unicode"] }
+
+[dev-dependencies]
+fatfs = { git = "https://github.com/rafalh/rust-fatfs", rev = "2aefc2a027ce94ed0671752814dac203f0450e11", default-features = false, features = ["alloc", "lfn", "unicode", "std"] }
+
+[lints]
+workspace = true

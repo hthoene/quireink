@@ -41,3 +41,6 @@ allow-wildcard-paths = true
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
+# FAT with long file names and no_std (quireink-fat, the X4's SD card):
+# not released yet, so pinned to a commit.
+allow-git = ["https://github.com/rafalh/rust-fatfs"]

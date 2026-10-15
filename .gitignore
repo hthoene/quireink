@@ -1,4 +1,6 @@
 /target/
+# The X4's firmware builds on its own (see shells/xteink).
+/shells/xteink/target/
 **/*.rs.bk
 
 # Emulator output

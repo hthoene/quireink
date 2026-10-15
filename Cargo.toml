@@ -1,7 +1,8 @@
 [workspace]
 resolver = "3"
-# Fuzz targets build with nightly Rust and libFuzzer on their own.
-exclude = ["fuzz"]
+# Fuzz targets build with nightly Rust and libFuzzer on their own, the X4's
+# firmware for its chip only.
+exclude = ["fuzz", "shells/xteink"]
 members = [
     "crates/quireink-platform",
     "crates/quireink-config",
@@ -22,6 +23,7 @@ members = [
     "crates/quireink-app",
     "crates/quireink-fs",
     "crates/quireink-x4",
+    "crates/quireink-fat",
     "plugins/diagnostics",
     "plugins/dictionary",
     "plugins/fonts-default",
@@ -83,6 +85,7 @@ quireink-xml = { path = "crates/quireink-xml", version = "0.1.0" }
 quireink-stardict = { path = "crates/quireink-stardict", version = "0.1.0" }
 quireink-layout = { path = "crates/quireink-layout", version = "0.1.0" }
 quireink-x4 = { path = "crates/quireink-x4", version = "0.1.0" }
+quireink-fat = { path = "crates/quireink-fat" }
 quireink-sdk = { path = "crates/quireink-sdk", version = "0.1.0" }
 quireink-core = { path = "crates/quireink-core", version = "0.1.0" }
 quireink-hyphen = { path = "crates/quireink-hyphen", version = "0.1.0" }

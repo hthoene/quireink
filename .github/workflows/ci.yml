@@ -47,7 +47,7 @@ jobs:
           cargo build --release --target ${{ matrix.target }}
           -p quireink-app --no-default-features --features packs
           -p quireink-image -p quireink-sqlite -p quireink-stardict
-          -p quireink-sample-hello -p quireink-x4
+          -p quireink-sample-hello -p quireink-x4 -p quireink-fat
 
   architecture:
     name: Architecture rules
