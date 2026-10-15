@@ -43,8 +43,11 @@ pub struct EpubDocument {
     /// Archive path of the cover image.
     cover: Option<String>,
     /// The printed pages of one section, resolved: offset and label.
-    pages: core::cell::RefCell<Option<(u32, Vec<(u32, String)>)>>,
+    pages: core::cell::RefCell<Option<SectionPages>>,
 }
+
+/// A section and its printed pages: offset and label.
+type SectionPages = (u32, Vec<(u32, String)>);
 
 fn fnv(text: &str) -> u64 {
     text.bytes().fold(0xcbf2_9ce4_8422_2325, |hash, b| {
