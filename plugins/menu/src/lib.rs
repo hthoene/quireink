@@ -150,6 +150,7 @@ impl MenuScreen {
             .menus
             .items(menu)
             .into_iter()
+            .filter(|item| !quireink_sdk::Menus::hidden(params, item.id.as_str()))
             .map(|item| Item {
                 id: item.id.clone(),
                 title: String::from(item.title),

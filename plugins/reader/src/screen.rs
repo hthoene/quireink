@@ -2576,10 +2576,24 @@ impl Screen for ReaderScreen {
                 (Some(page), Some(pages)) => format!("{page} / {pages}"),
                 _ => format!("{} %", event.get(params::PROGRESS).unwrap_or("0")),
             };
+            // Pictures of pages: no text to search, hear or set.
+            let mut hide: Vec<Id> = Vec::new();
+            if book.document.whole_pages() {
+                hide.extend([
+                    crate::actions::SEARCH,
+                    crate::actions::READ_ALOUD,
+                    crate::actions::QUICK_SETTINGS,
+                ]);
+                if book.document.toc_len(env.storage) == 0 {
+                    hide.push(crate::actions::TOC);
+                }
+            }
+            let hide: Vec<&str> = hide.iter().map(Id::as_str).collect();
             cx.command(Command::OpenSlot(
                 slots::MENU,
                 Params::new()
                     .with(params::MENU, crate::MENU.as_str())
+                    .with(params::HIDE, hide.join(","))
                     .with(params::MODE, "bar")
                     .with(params::TITLE, book.title.clone())
                     .with(params::TEXT, chapter)

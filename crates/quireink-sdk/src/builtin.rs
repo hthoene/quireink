@@ -150,6 +150,9 @@ pub mod params {
     pub const URL: &str = "url";
     /// An action to run, e.g. when the title of a menu bar is tapped.
     pub const ACTION: &str = "action";
+    /// Entries a menu leaves out this time, as ids separated by commas:
+    /// what does not apply where it is opened (e.g. searching a comic).
+    pub const HIDE: &str = "hide";
     /// Where something was before, e.g. a moved book
     /// ([`events::BOOK_MOVED`](super::events::BOOK_MOVED)).
     pub const FROM: &str = "from";

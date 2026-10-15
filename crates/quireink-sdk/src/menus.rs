@@ -105,6 +105,14 @@ impl Menus {
         self.needs.insert(item, need);
     }
 
+    /// Whether `item` is left out by the menu parameter
+    /// [`HIDE`](crate::builtin::params::HIDE) of `params`.
+    pub fn hidden(params: &crate::Params, item: &str) -> bool {
+        params
+            .get(crate::builtin::params::HIDE)
+            .is_some_and(|hide| hide.split(',').any(|h| h.trim() == item))
+    }
+
     /// Whether `item` is offered on this device by default, e.g. whether
     /// the settings screen lists a setting.
     pub fn available(&self, item: &str) -> bool {
@@ -290,5 +298,11 @@ mod tests {
             alloc::vec![Id::new_static("a.links"), Id::new_static("a.second")],
         );
         assert_eq!(titles(&menus), ["Links"]);
+
+        // Left out where a menu is opened.
+        let params = crate::Params::new().with(crate::builtin::params::HIDE, "a.first, a.links");
+        assert!(Menus::hidden(&params, "a.links"));
+        assert!(!Menus::hidden(&params, "a.second"));
+        assert!(!Menus::hidden(&crate::Params::new(), "a.links"));
     }
 }

@@ -70,7 +70,7 @@ impl BarScreen {
             .menus
             .items(menu)
             .into_iter()
-            .filter(|item| !item.section)
+            .filter(|item| !item.section && !quireink_sdk::Menus::hidden(params, item.id.as_str()))
             .map(|item| Entry {
                 id: item.id.clone(),
                 label: env
