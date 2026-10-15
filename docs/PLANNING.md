@@ -582,7 +582,7 @@ architecture (G1 to G12 below).
 | Library from Calibre / OPDS / Wallabag / RSS / web articles | `book-source` contributions; background jobs; network | G4 |
 | Wireless transfer ("send to device" from a browser) | HTTP server provided by the shell as a platform service | G2 |
 | Progress sync (KOReader, Readest, …), Goodreads/StoryGraph updates | `sync` service; events; network | G4 |
-| Full-text search in book and library | search service; index jobs. ✅ search in the book (background scan, hits with snippets, the hit underlined on its page), go to page · ⬜ library search | G4 |
+| Full-text search in book and library | search service; index jobs. ✅ search in the book (background scan, hits with snippets, the hit underlined on its page), go to page · ✅ library search (title, author, series, tags) | G4 |
 | Sleep screen: cover, clock, quote, calendar | `core.sleep` slot; power events | G7 |
 | Frontlight / warmth control and schedules | frontlight platform service; timers | G2, G4 |
 | Gestures: swipes, multi-finger, corners, button chords | raw pointer stream; gesture recognizers as contributions | G6 |
