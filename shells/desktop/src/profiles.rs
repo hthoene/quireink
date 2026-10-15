@@ -78,7 +78,7 @@ pub const PROFILES: &[Profile] = &[
         heap_budget: Some(192 * KIB),
         glyph_cache: 0,
         font_packs: true,
-        // 100 of 800 rows: 11.7 KiB instead of 94 KiB, eight bands a frame.
+        // 96 of 800 rows: 11.3 KiB instead of 94 KiB, nine bands a frame.
         // The controller takes 8 rows (turned) in a byte.
         frame_rows: Some(96),
         row_align: 8,

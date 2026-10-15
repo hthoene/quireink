@@ -49,6 +49,24 @@ jobs:
           -p quireink-image -p quireink-sqlite -p quireink-stardict
           -p quireink-sample-hello -p quireink-x4 -p quireink-fat
 
+  firmware:
+    name: X4 firmware
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: riscv32imc-unknown-none-elf
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: shells/xteink
+      - name: Lint and build for the ESP32-C3
+        working-directory: shells/xteink
+        run: |
+          cargo clippy --release -- -D warnings
+          cargo build --release
+
   architecture:
     name: Architecture rules
     runs-on: ubuntu-latest

@@ -1,0 +1,37 @@
+[package]
+name = "quireink-xteink"
+description = "QuireInk's firmware for the Xteink X4 (ESP32-C3)"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+license = "Apache-2.0"
+publish = false
+
+[[bin]]
+name = "quireink-xteink"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+quireink-app = { path = "../../crates/quireink-app", default-features = false, features = ["packs"] }
+quireink-core = { path = "../../crates/quireink-core" }
+quireink-platform = { path = "../../crates/quireink-platform" }
+quireink-x4 = { path = "../../crates/quireink-x4" }
+quireink-fat = { path = "../../crates/quireink-fat" }
+esp-hal = { version = "1.2", features = ["esp32c3", "unstable"] }
+esp-alloc = { version = "0.11", features = ["esp32c3"] }
+esp-backtrace = { version = "0.20", features = ["esp32c3", "panic-handler", "println"] }
+esp-println = { version = "0.18", features = ["esp32c3", "log-04"] }
+esp-bootloader-esp-idf = { version = "0.6", features = ["esp32c3"] }
+embedded-hal = "1.0"
+embedded-hal-bus = "0.3"
+log = "0.4"
+nb = "1"
+embedded-sdmmc = { version = "0.9", default-features = false }
+
+[profile.release]
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+debug = 2

@@ -1,0 +1,14 @@
+# The X4's chip: an ESP32-C3 (RISC-V). `cargo run --release` flashes it
+# with espflash (`cargo install espflash`) and shows its log.
+[build]
+target = "riscv32imc-unknown-none-elf"
+
+[target.riscv32imc-unknown-none-elf]
+runner = "espflash flash --monitor --chip esp32c3"
+rustflags = ["-C", "force-frame-pointers", "-C", "link-arg=-Tlinkall.x"]
+
+[env]
+ESP_LOG = "info"
+# Font packs: code and data share 4 MB of flash, so up to 36 px (about
+# 12 pt on its 220 dpi screen), not the 40 and 48 px of larger screens.
+QUIREINK_FONT_SIZES = "20,24,28,32,36"

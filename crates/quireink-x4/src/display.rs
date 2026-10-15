@@ -122,6 +122,9 @@ pub struct Display<SPI, DC, RST, BUSY, D> {
     delay: D,
     /// The panel's power is on (after a refresh not followed by sleep).
     powered: bool,
+    /// Nothing shown since [`Display::init`]: the controller does not know
+    /// what the panel shows, so a fast refresh would compare with nothing.
+    fresh: bool,
     buffer: Vec<u8>,
 }
 
@@ -141,6 +144,7 @@ where
             busy,
             delay,
             powered: false,
+            fresh: true,
             buffer: Vec::new(),
         }
     }
@@ -174,6 +178,7 @@ where
             self.command(fill, &[0xF7])?;
             self.wait()?;
         }
+        self.fresh = true;
         Ok(())
     }
 
@@ -263,8 +268,11 @@ where
     }
 
     /// Shows the new frame; `power_off` turns the panel's power off after
-    /// it, e.g. before sleeping.
+    /// it, e.g. before sleeping. The first after [`Display::init`] is full
+    /// in any case.
     pub fn refresh(&mut self, refresh: Refresh, power_off: bool) -> Result<(), Error> {
+        let refresh = if self.fresh { Refresh::Full } else { refresh };
+        self.fresh = false;
         // A fast refresh compares with the frame shown; the others
         // drive every pixel.
         let compare = if refresh == Refresh::Fast { 0x00 } else { 0x40 };
@@ -588,7 +596,8 @@ mod tests {
             Delay,
         );
         display.init().unwrap();
-        display.refresh(Refresh::Full, false).unwrap();
+        // The first is full whatever is asked.
+        display.refresh(Refresh::Fast, false).unwrap();
         display.refresh(Refresh::Fast, false).unwrap();
         display.refresh(Refresh::Half, true).unwrap();
         display.sleep().unwrap();

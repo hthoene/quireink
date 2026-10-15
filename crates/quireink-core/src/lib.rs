@@ -264,6 +264,13 @@ impl KernelBuilder {
         self
     }
 
+    /// Like [`storage`](Self::storage), for a storage chosen at run time
+    /// (e.g. the SD card, or none without one).
+    pub fn storage_boxed(mut self, storage: Box<dyn Storage>) -> Self {
+        self.storage = Some(storage);
+        self
+    }
+
     /// Changes the default of a setting for this device, e.g. the
     /// two-button key map preset on a device with only two buttons. Users
     /// can still override it.

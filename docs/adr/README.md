@@ -18,6 +18,7 @@ superseded by a new record that links back.
 | [0010](0010-overlays-menus-and-settings-ui.md) | Overlays, menus and the generated settings UI | Accepted |
 | [0011](0011-epub-streaming-conversion.md) | EPUB: streaming conversion into a block cache | Accepted |
 | [0012](0012-banded-rendering.md) | Rendering in bands | Accepted |
+| [0013](0013-x4-firmware.md) | The Xteink X4's firmware | Accepted |
 
 ## Template
 

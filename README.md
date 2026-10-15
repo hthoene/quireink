@@ -148,6 +148,7 @@ cargo run -p quireink-emulator -- --headless --profile boox-go-7 --set core.lang
 | `tools/fontgen` | Converts fonts into bitmap font packs for small devices |
 | `shells/desktop` | Desktop emulator with device profiles |
 | `shells/android` | Android app for e-readers such as Boox ([build and install](shells/android/README.md)) |
+| `shells/xteink` | Firmware for the Xteink X4 ([build, save the stock firmware, flash](shells/xteink/README.md)) |
 | `samples/` | Emulator library with public-domain books, sample plugins |
 | `docs/` | [Plan](docs/PLANNING.md), [writing plugins](docs/plugins.md) and [architecture decisions](docs/adr/) |
 
