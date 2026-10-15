@@ -8,8 +8,9 @@ with the release key) and, later, on F-Droid.
 All crates and the app share the workspace's version (`version` under
 `[workspace.package]` in `Cargo.toml`), following Semantic Versioning.
 Android installs a version over another only if its version code is
-higher; `shells/android/build-apk.sh` derives it from the version:
-1.2.3 is 10203.
+higher: 1.2.3 is 10203. The app's manifest
+(`shells/android/AndroidManifest.xml`) states both, where F-Droid looks
+for them; `build-apk.sh` stops if they differ from `Cargo.toml`.
 
 ## The release key, once
 
@@ -47,7 +48,11 @@ folder stay.
 
 ## A release
 
-1. Set the version in `Cargo.toml` and give `CHANGELOG.md` its section,
+1. Set the version in `Cargo.toml` (also the crates' versions under
+   `[workspace.dependencies]`), in the SDK (`SDK_VERSION` in
+   `crates/quireink-sdk/src/version.rs`; a test checks it) and in the
+   manifest (`android:versionName`, `android:versionCode`), and give
+   `CHANGELOG.md` its section,
    `## [x.y.z] - YYYY-MM-DD`, with a link at the end.
 2. Add `fastlane/metadata/android/*/changelogs/<version code>.txt` (at most
    500 characters each), and new screenshots if the app looks different
@@ -64,25 +69,43 @@ signed with the release key and makes the GitHub release with the app,
 its SHA-256 and the changelog's section as notes. Versions before 1.0 are
 marked as pre-releases.
 
+## Reproducible builds
+
+The app comes out byte for byte the same wherever it is built with the
+tools of `shells/android/versions.env` (Rust, NDK, build tools, platform,
+cargo-ndk, JDK): `build-apk.sh` with `QUIREINK_REPRODUCIBLE=1` checks
+them, writes no paths of the computer into the library and packs the APK
+in a fixed order, uncompressed and at a fixed time. The workflow
+`Reproducible build` builds it twice in two folders and compares (on
+every tag, or by hand). One dependency, `jni-macros`, wrote its code in a
+random order; `patches/jni-macros` is a copy that does not ("Modified for
+QuireInk"), until it is fixed upstream.
+
+To move to newer tools, change `versions.env`: the release workflow, the
+check and F-Droid's recipe all read it.
+
 ## F-Droid
 
 F-Droid builds apps itself from their source, at a tag, and reads their
 description, screenshots and changelogs from `fastlane/metadata/android`
-(English and German are there). To be listed, QuireInk needs a build
-recipe in [fdroiddata](https://gitlab.com/fdroid/fdroiddata), submitted
-as a merge request. What it has to say and what is still to do:
+(English and German). Since its build is the same as the release's, it
+publishes the release's APK, signed with QuireInk's key, and users can
+move between GitHub and F-Droid without reinstalling.
 
-- **The build:** no Gradle; F-Droid runs `shells/android/build-apk.sh`
-  with the Android SDK and NDK, Rust with the target
-  `aarch64-linux-android` and `cargo-ndk`. Everything QuireInk uses is
-  free software and comes from source.
-- **The signature:** F-Droid signs with its own key unless the app it
-  builds is byte for byte the one released here; then it publishes ours,
-  and users can switch between GitHub and F-Droid without reinstalling.
-  For that the build must be reproducible: a fixed Rust version for
-  releases, paths not written into the library, and fixed times in the
-  APK (today `jar` writes the current time). Until then the two are
-  separate apps to Android.
-- **Anti-features:** translation uses DeepL and highlights can go to
-  Readwise, services that are not free software; F-Droid marks such apps
-  `NonFreeNet`. Both need the user's own key and do nothing without it.
+The recipe is `shells/android/fdroid.yml`. To submit it, once:
+
+1. Make an account on [GitLab](https://gitlab.com) and fork
+   [fdroiddata](https://gitlab.com/fdroid/fdroiddata).
+2. Copy the recipe to `metadata/io.github.hthoene.quireink.yml` in the
+   fork, on a new branch, commit and push.
+3. Open a merge request to fdroiddata. Its pipeline builds the app;
+   F-Droid's reviewers answer there, often with small changes to the
+   recipe.
+
+After that, F-Droid finds new versions by their tags (`v1.2.3`) and the
+manifest, and builds them by itself. Each version needs its changelog in
+`fastlane/metadata/android/*/changelogs/<version code>.txt`.
+
+Translation uses DeepL and highlights can go to Readwise, services that
+are not free software; F-Droid marks the app `NonFreeNet` for that (the
+recipe says so). Both need the user's own key and do nothing without it.

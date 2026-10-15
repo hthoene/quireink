@@ -1,0 +1,59 @@
+# QuireInk's build recipe for F-Droid: submitted to fdroiddata
+# (https://gitlab.com/fdroid/fdroiddata) as
+# metadata/io.github.hthoene.quireink.yml. See docs/releasing.md.
+#
+# F-Droid builds the app unsigned with the tools of
+# shells/android/versions.env; it comes out byte for byte as the release on
+# GitHub, so F-Droid publishes that one, signed with QuireInk's key
+# (AllowedAPKSigningKeys).
+
+Categories:
+  - Reading
+License: Apache-2.0
+AuthorName: Hannes Thoene
+SourceCode: https://github.com/hthoene/quireink
+IssueTracker: https://github.com/hthoene/quireink/issues
+Changelog: https://github.com/hthoene/quireink/blob/HEAD/CHANGELOG.md
+
+AutoName: QuireInk
+
+AntiFeatures:
+  NonFreeNet:
+    en-US: >-
+      Translation uses DeepL, and highlights can be sent to Readwise; both
+      need the user's own key and do nothing without it.
+
+RepoType: git
+Repo: https://github.com/hthoene/quireink.git
+Binaries: https://github.com/hthoene/quireink/releases/download/v%v/quireink-%v.apk
+
+Builds:
+  - versionName: 0.1.1
+    versionCode: 101
+    commit: v0.1.1
+    sudo:
+      - apt-get update
+      - apt-get install -y openjdk-21-jdk-headless python3
+      - update-java-alternatives -a || true
+    output: target/android/quireink-unsigned.apk
+    srclibs:
+      - rustup@1.28.2
+    build:
+      - source shells/android/versions.env
+      - $$rustup$$/rustup-init.sh -y --profile minimal --default-toolchain $RUST_VERSION
+          --target aarch64-linux-android
+      - source $HOME/.cargo/env
+      - export RUSTUP_TOOLCHAIN=$RUST_VERSION
+      - cargo install cargo-ndk --version $CARGO_NDK_VERSION --locked
+      - sdkmanager "build-tools;$BUILD_TOOLS_VERSION" "platforms;android-$PLATFORM_VERSION"
+      - export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
+      - QUIREINK_REPRODUCIBLE=1 QUIREINK_UNSIGNED=1 shells/android/build-apk.sh
+    ndk: r28c
+
+AllowedAPKSigningKeys: 01b35ceeda6052bb2d49a11fa2cc7b1293c1baf89a60026522ac7a72fbfd9808
+
+AutoUpdateMode: Version
+# Version name and code are in shells/android/AndroidManifest.xml.
+UpdateCheckMode: Tags ^v[0-9.]+$
+CurrentVersion: 0.1.1
+CurrentVersionCode: 101

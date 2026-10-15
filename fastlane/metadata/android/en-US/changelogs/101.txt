@@ -1,0 +1,1 @@
+Built reproducibly for F-Droid; the app takes less space on the device.

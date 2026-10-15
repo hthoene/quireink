@@ -1,0 +1,1 @@
+Reproduzierbar gebaut für F-Droid; die App braucht weniger Platz auf dem Gerät.

@@ -4,6 +4,18 @@ What changes from one release of QuireInk to the next. Versions follow
 [Semantic Versioning](https://semver.org); before 1.0, a minor version may
 change the plugin SDK.
 
+## [0.1.1] - unreleased
+
+The Android app for F-Droid.
+
+- The app is built reproducibly: with the same tools (shells/android/
+  versions.env) it comes out byte for byte the same anywhere, so F-Droid
+  can publish it signed with QuireInk's key. A dependency's macro that
+  wrote its code in a random order is patched (patches/jni-macros).
+- The app's library is stored in the APK and runs from there, without
+  symbols: 6.8 MB to download, less space taken on the device.
+- The licence names the copyright holder; README with screenshots.
+
 ## [0.1.0] - 2026-10-15
 
 The first release: QuireInk on Android e-readers (tested on a Boox Go 7)
@@ -54,4 +66,5 @@ Xteink X4 is built but has not run on a device yet.
 - The Xteink X4's firmware, its display, buttons, battery and SD card
   tested against simulated hardware ([ADR 0013](docs/adr/0013-x4-firmware.md)).
 
+[0.1.1]: https://github.com/hthoene/quireink/releases/tag/v0.1.1
 [0.1.0]: https://github.com/hthoene/quireink/releases/tag/v0.1.0
