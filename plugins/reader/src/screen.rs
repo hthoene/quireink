@@ -435,15 +435,24 @@ pub(crate) struct ReaderScreen {
     resume: Option<(Locator, usize)>,
 }
 
-/// The sentence being read aloud, by words of the page shown.
-#[derive(Debug, Clone, Copy)]
-struct Aloud {
+/// A sentence read aloud, by words of the page that starts at `page`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Sentence {
+    page: Locator,
     from: usize,
     to: usize,
-    /// The words of the page.
+    /// The words of its page.
     words: usize,
-    /// Words of the next page spoken with it (the sentence goes on there).
+    /// Words of the following page spoken with it (it goes on there).
     carried: usize,
+}
+
+/// Reading aloud: the sentence spoken and the one handed over to follow
+/// it without a pause.
+#[derive(Debug, Clone, Copy)]
+struct Aloud {
+    now: Sentence,
+    next: Option<Sentence>,
     /// When the timer stops reading aloud.
     until: Option<quireink_sdk::Instant>,
 }
@@ -491,7 +500,31 @@ impl ReaderScreen {
         cx.command(Command::Notify(
             env.i18n.tr("reader.aloud.started").to_string(),
         ));
-        self.speak_from(from, until, cx);
+        self.begin_aloud(from, until, cx);
+    }
+
+    /// Speaks from word `from` of the page shown, handing over the next
+    /// sentence at once.
+    fn begin_aloud(
+        &mut self,
+        from: usize,
+        until: Option<quireink_sdk::Instant>,
+        cx: &mut Cx<'_, '_>,
+    ) {
+        let env = *cx.env();
+        let Ok(book) = &self.book else {
+            return;
+        };
+        let turn = env.settings.bool(crate::settings::ALOUD_TURN.as_str());
+        let (now, text) = book.sentence(&env, &book.page, from, turn);
+        book.speak(&env, text, false, cx);
+        let next = book.following(&env, &now, turn).map(|(next, text)| {
+            book.speak(&env, text, true, cx);
+            next
+        });
+        let before = self.aloud.map(|a| a.now);
+        self.aloud = Some(Aloud { now, next, until });
+        self.underline(before, Some(now), cx);
     }
 
     /// Pauses reading aloud; reading aloud again goes on from there.
@@ -500,99 +533,41 @@ impl ReaderScreen {
             return;
         };
         cx.command(Command::StopSpeaking);
-        if let Ok(book) = &self.book {
-            self.resume = Some((book.page.start, aloud.from));
-            let env = *cx.env();
-            let words = book.words(&env);
-            if let Some(area) = aloud_area(&env, &words, aloud.from..aloud.to) {
-                cx.request_redraw_area(area);
-                cx.request_refresh(RefreshMode::Fast);
-            }
-            cx.command(Command::Notify(
-                env.i18n.tr("reader.aloud.paused").to_string(),
-            ));
-        }
+        self.resume = Some((aloud.now.page, aloud.now.from));
+        self.underline(Some(aloud.now), None, cx);
+        let env = *cx.env();
+        cx.command(Command::Notify(
+            env.i18n.tr("reader.aloud.paused").to_string(),
+        ));
     }
 
-    /// Speaks the sentence that starts at word `from` of the page shown;
-    /// one that goes on on the next page is spoken whole, if pages are
-    /// turned. Past the page's last word, turns the page.
-    fn speak_from(
-        &mut self,
-        from: usize,
-        until: Option<quireink_sdk::Instant>,
-        cx: &mut Cx<'_, '_>,
-    ) {
+    /// Moves the underline from sentence `before` to `now`, where they
+    /// are on the page shown.
+    fn underline(&self, before: Option<Sentence>, now: Option<Sentence>, cx: &mut Cx<'_, '_>) {
         let env = *cx.env();
-        let Ok(book) = &mut self.book else {
+        let Ok(book) = &self.book else {
             return;
         };
-        let words = book.words(&env);
-        if from >= words.len() {
-            // Done with the page (or one without text, e.g. a picture).
-            self.aloud = None;
-            if env.settings.bool(crate::settings::ALOUD_TURN.as_str()) {
-                let end = book.page.end;
-                if book.show(cx, end, true) {
-                    self.speak_from(0, until, cx);
-                }
-            }
+        if !env.settings.bool(crate::settings::ALOUD_HIGHLIGHT.as_str()) {
             return;
         }
-        let texts: Vec<&str> = words.iter().map(|w| w.text.as_str()).collect();
-        let to = crate::aloud::sentence_end(&texts, from);
-        let starts_line =
-            |words: &[WordBox], i: usize| i == 0 || words[i].area.y != words[i - 1].area.y;
-        let mut parts: Vec<(&str, bool)> = (from..to)
-            .map(|i| (texts[i], starts_line(&words, i)))
-            .collect();
-        // The rest of a sentence going on on the next page.
-        let next_words;
-        let mut carried = 0;
-        let unfinished = to == words.len() && !crate::aloud::ends_sentence(texts[to - 1]);
-        if unfinished
-            && env.settings.bool(crate::settings::ALOUD_TURN.as_str())
-            && let Ok(next) = book.layout(&env, book.page.end)
-            && !next.is_past_end()
-        {
-            next_words = book.words_of(&env, &next);
-            let next_texts: Vec<&str> = next_words.iter().map(|w| w.text.as_str()).collect();
-            carried = crate::aloud::sentence_end(&next_texts, 0);
-            parts.extend((0..carried).map(|i| (next_texts[i], starts_line(&next_words, i))));
-        }
-        let mut speech =
-            quireink_sdk::Speech::new(crate::aloud::spoken(parts.into_iter()), crate::SPOKEN);
-        speech.language = book.language.clone();
-        speech.rate = env
-            .settings
-            .int(crate::settings::ALOUD_SPEED.as_str())
-            .clamp(50, 300) as u16;
-        speech.params = Params::new().with(params::PATH, book.path.clone());
-        cx.command(Command::Speak(speech));
-        // The sentence underlined instead of the one before.
-        let before = self.aloud.map(|a| a.from..a.to);
-        self.aloud = Some(Aloud {
-            from,
-            to,
-            words: words.len(),
-            carried,
-            until,
-        });
-        if env.settings.bool(crate::settings::ALOUD_HIGHLIGHT.as_str()) {
-            let area = [before, Some(from..to)]
-                .into_iter()
-                .flatten()
-                .filter_map(|range| aloud_area(&env, &words, range))
-                .reduce(|a, b| a.union(&b));
-            if let Some(area) = area {
-                cx.request_redraw_area(area);
-                cx.request_refresh(RefreshMode::Fast);
-            }
+        let words = book.words(&env);
+        let area = [before, now]
+            .into_iter()
+            .flatten()
+            .filter(|s| s.page == book.page.start)
+            .filter_map(|s| aloud_area(&env, &words, s.from..s.to))
+            .reduce(|a, b| a.union(&b));
+        if let Some(area) = area {
+            cx.request_redraw_area(area);
+            cx.request_refresh(RefreshMode::Fast);
         }
     }
 
-    /// A sentence was read aloud: on to the next one, up to the end, the
-    /// end of the page if pages are not turned, or the timer.
+    /// A sentence was read aloud: the next one is being spoken already;
+    /// the one after it is handed over, turning the page where needed.
+    /// Ends at the end of the book, of the page if pages are not turned,
+    /// or with the timer.
     fn spoken(&mut self, params: &Params, cx: &mut Cx<'_, '_>) {
         let Some(aloud) = self.aloud else {
             return;
@@ -613,26 +588,40 @@ impl ReaderScreen {
             ));
             return;
         }
-        if aloud.to < aloud.words {
-            return self.speak_from(aloud.to, aloud.until, cx);
-        }
-        if !env.settings.bool(crate::settings::ALOUD_TURN.as_str()) {
-            self.pause_aloud(cx);
-            self.resume = None;
-            cx.command(Command::Notify(
-                env.i18n.tr("reader.aloud.page-done").to_string(),
-            ));
+        let turn = env.settings.bool(crate::settings::ALOUD_TURN.as_str());
+        let Some(next) = aloud.next else {
+            // The end of the book, or of the page.
+            self.aloud = None;
+            self.underline(Some(aloud.now), None, cx);
+            if !turn {
+                cx.command(Command::Notify(
+                    env.i18n.tr("reader.aloud.page-done").to_string(),
+                ));
+            }
             return;
-        }
+        };
         let Ok(book) = &mut self.book else {
             return;
         };
-        let end = book.page.end;
-        self.aloud = None;
-        if book.show(cx, end, true) {
-            // On after what was spoken with the last page.
-            self.speak_from(aloud.carried, aloud.until, cx);
+        if next.page != book.page.start {
+            let end = book.page.end;
+            book.show(cx, end, true);
+            if book.page.start != next.page {
+                // Laid out anew meanwhile: on from the page's start.
+                cx.command(Command::StopSpeaking);
+                return self.begin_aloud(0, aloud.until, cx);
+            }
         }
+        let after = book.following(&env, &next, turn).map(|(after, text)| {
+            book.speak(&env, text, true, cx);
+            after
+        });
+        self.aloud = Some(Aloud {
+            now: next,
+            next: after,
+            until: aloud.until,
+        });
+        self.underline(Some(aloud.now), Some(next), cx);
     }
 
     /// The bar's items for the current selection.
@@ -1435,6 +1424,89 @@ impl Book {
         }
     }
 
+    /// The sentence that starts at word `from` of `page` (empty past its
+    /// last word) and its text as spoken; with `turn`, one that goes on on
+    /// the next page is spoken whole.
+    fn sentence(&self, env: &Env<'_>, page: &Page, from: usize, turn: bool) -> (Sentence, String) {
+        let words = self.words_of(env, page);
+        let from = from.min(words.len());
+        let texts: Vec<&str> = words.iter().map(|w| w.text.as_str()).collect();
+        let to = if from < texts.len() {
+            crate::aloud::sentence_end(&texts, from)
+        } else {
+            from
+        };
+        let starts_line =
+            |words: &[WordBox], i: usize| i == 0 || words[i].area.y != words[i - 1].area.y;
+        let mut parts: Vec<(&str, bool)> = (from..to)
+            .map(|i| (texts[i], starts_line(&words, i)))
+            .collect();
+        // The rest of a sentence going on on the next page.
+        let next_words;
+        let mut carried = 0;
+        let unfinished =
+            to > from && to == words.len() && !crate::aloud::ends_sentence(texts[to - 1]);
+        if unfinished
+            && turn
+            && let Ok(next) = self.layout(env, page.end)
+            && !next.is_past_end()
+        {
+            next_words = self.words_of(env, &next);
+            let next_texts: Vec<&str> = next_words.iter().map(|w| w.text.as_str()).collect();
+            carried = crate::aloud::sentence_end(&next_texts, 0);
+            parts.extend((0..carried).map(|i| (next_texts[i], starts_line(&next_words, i))));
+        }
+        let sentence = Sentence {
+            page: page.start,
+            from,
+            to,
+            words: words.len(),
+            carried,
+        };
+        (sentence, crate::aloud::spoken(parts.into_iter()))
+    }
+
+    /// The sentence after `sentence` with its text: on its page, else
+    /// (with `turn`) on the next one; `None` at the end.
+    fn following(
+        &self,
+        env: &Env<'_>,
+        sentence: &Sentence,
+        turn: bool,
+    ) -> Option<(Sentence, String)> {
+        let laid_out;
+        let page = if sentence.page == self.page.start {
+            &self.page
+        } else {
+            laid_out = self.layout(env, sentence.page).ok()?;
+            &laid_out
+        };
+        if sentence.to < sentence.words {
+            return Some(self.sentence(env, page, sentence.to, turn));
+        }
+        if !turn {
+            return None;
+        }
+        let next = self.layout(env, page.end).ok()?;
+        if next.is_past_end() || next.start == page.start {
+            return None;
+        }
+        Some(self.sentence(env, &next, sentence.carried, turn))
+    }
+
+    /// Hands `text` over to be spoken, after what is spoken with `queue`.
+    fn speak(&self, env: &Env<'_>, text: String, queue: bool, cx: &mut Cx<'_, '_>) {
+        let mut speech = quireink_sdk::Speech::new(text, crate::SPOKEN);
+        speech.language = self.language.clone();
+        speech.rate = env
+            .settings
+            .int(crate::settings::ALOUD_SPEED.as_str())
+            .clamp(50, 300) as u16;
+        speech.params = Params::new().with(params::PATH, self.path.clone());
+        speech.queue = queue;
+        cx.command(Command::Speak(speech));
+    }
+
     /// The words of the page with their boxes on the screen, in reading
     /// order, measured as they are drawn.
     fn words(&self, env: &Env<'_>) -> Vec<WordBox> {
@@ -1973,10 +2045,12 @@ impl Screen for ReaderScreen {
         }
         // The sentence read aloud, underlined like a search hit.
         if let Some(aloud) = self.aloud
+            && aloud.now.page == book.page.start
             && env.settings.bool(crate::settings::ALOUD_HIGHLIGHT.as_str())
         {
             let line = env.metrics.tenth_mm(5).max(2);
-            for b in selection::line_boxes(&words, |i| (aloud.from..aloud.to).contains(&i)) {
+            let sentence = aloud.now.from..aloud.now.to;
+            for b in selection::line_boxes(&words, |i| sentence.contains(&i)) {
                 canvas.fill_rect(
                     i32::from(b.x),
                     b.bottom() as i32 + 1,

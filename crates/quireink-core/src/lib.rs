@@ -369,7 +369,7 @@ impl KernelBuilder {
             incoming: Vec::new(),
             reads_clipboard: self.system_clipboard,
             speech_calls: Vec::new(),
-            speaking: None,
+            speaking: Vec::new(),
             next_speech: 0,
             awaiting: Vec::new(),
             next_request: 0,
@@ -581,10 +581,10 @@ pub struct Kernel {
     reads_clipboard: bool,
     /// What the shell is to do for speech.
     speech_calls: Vec<SpeechCall>,
-    /// The text being spoken: number for the shell, reply event and
-    /// parameters, and how many screens were open when it started (it
-    /// stops once fewer are).
-    speaking: Option<(u32, Id, Params, usize)>,
+    /// The texts being spoken, in order: number for the shell, reply event
+    /// and parameters, and how many screens were open when it started
+    /// (speech stops once fewer are).
+    speaking: Vec<(u32, Id, Params, usize)>,
     next_speech: u32,
     /// Requests made and not answered yet: id, reply event, parameters
     /// and where to save the body.
@@ -831,16 +831,15 @@ impl Kernel {
 
     /// Whether a text is being spoken, e.g. to keep watching for its end.
     pub fn speaking(&self) -> bool {
-        self.speaking.is_some()
+        !self.speaking.is_empty()
     }
 
     /// Text `id` of a [`SpeechCall::Say`] was spoken (`spoken`), or could
     /// not be.
     pub fn speech_done(&mut self, now: Instant, id: u32, spoken: bool) -> Effects {
         self.now = now;
-        if self.speaking.as_ref().is_some_and(|(at, ..)| *at == id)
-            && let Some((_, reply, params, _)) = self.speaking.take()
-        {
+        if let Some(at) = self.speaking.iter().position(|(n, ..)| *n == id) {
+            let (_, reply, params, _) = self.speaking.remove(at);
             self.reply_speech(reply, params, spoken);
         }
         self.finish()
@@ -863,12 +862,17 @@ impl Kernel {
         }
         let id = self.next_speech;
         self.next_speech = self.next_speech.wrapping_add(1);
-        self.speaking = Some((id, speech.reply, speech.params, self.stack.len()));
+        if !speech.queue {
+            self.speaking.clear();
+        }
+        self.speaking
+            .push((id, speech.reply, speech.params, self.stack.len()));
         self.speech_calls.push(SpeechCall::Say {
             id,
             text: speech.text,
             language: speech.language,
             rate: speech.rate,
+            queue: speech.queue,
         });
     }
 
@@ -877,10 +881,10 @@ impl Kernel {
         self.stop_servers_of_closed_screens();
         if self
             .speaking
-            .as_ref()
-            .is_some_and(|(.., screens)| *screens > self.stack.len())
+            .iter()
+            .any(|(.., screens)| *screens > self.stack.len())
         {
-            self.speaking = None;
+            self.speaking.clear();
             self.speech_calls.push(SpeechCall::Stop);
         }
     }
@@ -1809,7 +1813,8 @@ impl Kernel {
             Command::ReadClipboard(reply, params) => self.reply_clipboard(reply, params),
             Command::Speak(speech) => self.speak(speech),
             Command::StopSpeaking => {
-                if self.speaking.take().is_some() {
+                if !self.speaking.is_empty() {
+                    self.speaking.clear();
                     self.speech_calls.push(SpeechCall::Stop);
                 }
             }

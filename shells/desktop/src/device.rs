@@ -32,8 +32,9 @@ pub struct Device {
     pub http: crate::http::Http,
     /// Plugins' servers.
     pub servers: quireink_serve::Servers,
-    /// The text being spoken (emulated): its number and when it ends.
-    speech: Option<(u32, Instant)>,
+    /// The texts being spoken (emulated), in order: number and when each
+    /// ends.
+    speech: std::collections::VecDeque<(u32, Instant)>,
 }
 
 /// Either real time (interactive) or simulated time (headless, tests).
@@ -66,7 +67,7 @@ impl Device {
             wake_at: None,
             http: crate::http::Http::new(),
             servers: quireink_serve::Servers::new(|| {}),
-            speech: None,
+            speech: std::collections::VecDeque::new(),
             clock: if simulated_time {
                 Clock::Simulated(0)
             } else {
@@ -163,7 +164,7 @@ impl Device {
     /// When something is due next: a wake-up the kernel asked for, the end
     /// of speech.
     pub fn next_wake(&self) -> Option<Instant> {
-        let speech = self.speech.map(|(_, end)| end);
+        let speech = self.speech.front().map(|&(_, end)| end);
         match (self.wake_at, speech) {
             (Some(a), Some(b)) => Some(a.min(b)),
             (a, b) => a.or(b),
@@ -175,10 +176,10 @@ impl Device {
         self.poll_http(None);
         self.poll_servers();
         let now = self.now();
-        if let Some((id, end)) = self.speech
+        while let Some(&(id, end)) = self.speech.front()
             && end <= now
         {
-            self.speech = None;
+            self.speech.pop_front();
             let effects = budget::track(|| self.kernel.speech_done(now, id, true));
             self.execute(effects);
         }
@@ -224,16 +225,23 @@ impl Device {
                 text,
                 language,
                 rate,
+                queue,
             } => {
+                if !queue {
+                    self.speech.clear();
+                }
                 let words = text.split_whitespace().count() as u64;
                 let millis = words * 375 * 100 / u64::from(rate.max(1));
                 let start: String = text.chars().take(60).collect();
-                eprintln!("speech ({language}, {rate} %, {millis} ms): {start}");
-                self.speech = Some((id, self.now().add_millis(millis)));
+                let queued = if queue { ", queued" } else { "" };
+                eprintln!("speech ({language}, {rate} %, {millis} ms{queued}): {start}");
+                let after = self.speech.back().map_or(self.now(), |&(_, end)| end);
+                self.speech
+                    .push_back((id, after.max(self.now()).add_millis(millis)));
             }
             SpeechCall::Stop => {
                 eprintln!("speech stopped");
-                self.speech = None;
+                self.speech.clear();
             }
         }
     }

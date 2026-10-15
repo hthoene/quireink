@@ -1,6 +1,7 @@
 //! QuireInk for Android e-readers (Boox and others).
 //!
-//! A native activity in Rust, without Java code: it runs the kernel with the
+//! A native activity in Rust (its only Java code is the speech listener,
+//! see `speech`): it runs the kernel with the
 //! standard plugins, turns touch and key events into QuireInk input and
 //! copies rendered frames into the activity's window.
 //!

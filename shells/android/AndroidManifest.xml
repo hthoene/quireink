@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- QuireInk for Android: a native activity without Java code. -->
+<!-- QuireInk for Android: a native activity; its only Java code is the
+     speech listener (classes.dex). -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="io.github.hthoene.quireink">
 
@@ -25,7 +26,7 @@
     <application
         android:label="QuireInk"
         android:icon="@mipmap/ic_launcher"
-        android:hasCode="false"
+        android:hasCode="true"
         android:extractNativeLibs="true"
         android:allowBackup="true"
         android:requestLegacyExternalStorage="true"

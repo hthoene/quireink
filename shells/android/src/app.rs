@@ -88,8 +88,8 @@ fn android_main(app: AndroidApp) {
             .as_ref()
             .and_then(|r| r.wake_at)
             .map(|at| Duration::from_millis(at.since(now())));
-        // The end of speech is looked for regularly.
-        if running.as_ref().is_some_and(|r| r.speech.active()) {
+        // Speech waiting for the engine looks again soon.
+        if running.as_ref().is_some_and(|r| r.speech.waiting()) {
             let poll = crate::speech::POLL;
             timeout = Some(timeout.map_or(poll, |t| t.min(poll)));
         }
@@ -204,7 +204,7 @@ fn android_main(app: AndroidApp) {
             let effects = state.kernel.clipboard_text(now(), text);
             changed |= apply(state, effects);
         }
-        if let Some((id, spoken)) = state.speech.poll() {
+        for (id, spoken) in state.speech.poll() {
             let effects = state.kernel.speech_done(now(), id, spoken);
             changed |= apply(state, effects);
         }

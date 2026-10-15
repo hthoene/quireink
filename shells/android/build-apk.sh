@@ -53,6 +53,7 @@ done
 [[ -n "$jdk_bin" ]] || fail "no JDK with 'jar' found; set JAVA_HOME"
 exe() { if [[ -x "$1.exe" ]]; then echo "$1.exe"; else echo "$1"; fi; }
 jar="$(exe "$jdk_bin/jar")"
+javac="$(exe "$jdk_bin/javac")"
 java="$(exe "$jdk_bin/java")"
 keytool="$(exe "$jdk_bin/keytool")"
 aapt2="$(exe "$tools/aapt2")"
@@ -64,6 +65,12 @@ mkdir -p "$out/apk/lib" "$out/assets/books"
 
 echo "Building the native library ($profile)"
 cargo ndk -t arm64-v8a --platform 26 -o "$out/apk/lib" build "${cargo_profile[@]}" -p quireink-android
+
+echo "Compiling the speech listener (the only Java class)"
+rm -rf "$out/classes" "$out/dex"
+mkdir -p "$out/classes" "$out/dex"
+"$javac" -source 8 -target 8 -nowarn -Xlint:-options -classpath "$platform" -d "$out/classes"     shells/android/java/io/github/hthoene/quireink/*.java
+"$java" -cp "$tools/lib/d8.jar" com.android.tools.r8.D8 --release --min-api 26     --lib "$platform" --output "$out/dex" "$out"/classes/io/github/hthoene/quireink/*.class
 
 echo "Packaging"
 cp samples/library/books/*.epub samples/library/books/*.txt "$out/assets/books/"
@@ -81,6 +88,7 @@ rm -f "$out/res.zip"
 # backslashes on Windows.
 "$jar" --update --no-manifest --file "$out/unsigned.apk" -C "$out/apk" lib
 "$jar" --update --no-manifest --file "$out/unsigned.apk" -C "$out" assets
+"$jar" --update --no-manifest --file "$out/unsigned.apk" -C "$out/dex" classes.dex
 "$zipalign" -f -p 4 "$out/unsigned.apk" "$out/aligned.apk"
 
 keystore="$HOME/.android/debug.keystore"

@@ -1613,6 +1613,32 @@ fn speech_goes_to_the_shell_and_stops_with_its_screen() {
     assert!(!kernel.speaking());
     assert!(log.borrow().contains(&String::from("event ov.reply b")));
 
+    // Queued texts follow; each is answered when done.
+    let queued = |id: &str| {
+        let Command::Speak(mut speech) = speech(id) else {
+            unreachable!()
+        };
+        speech.queue = true;
+        Command::Speak(speech)
+    };
+    kernel.output.commands.extend([speech("q1"), queued("q2")]);
+    kernel.run_commands();
+    let calls = kernel.take_speech();
+    let ids: Vec<(u32, bool)> = calls
+        .iter()
+        .filter_map(|c| match c {
+            SpeechCall::Say { id, queue, .. } => Some((*id, *queue)),
+            SpeechCall::Stop => None,
+        })
+        .collect();
+    assert_eq!(ids.iter().map(|i| i.1).collect::<Vec<_>>(), [false, true]);
+    kernel.speech_done(Instant(6), ids[0].0, true);
+    assert!(kernel.speaking());
+    assert!(log.borrow().contains(&String::from("event ov.reply q1")));
+    kernel.speech_done(Instant(7), ids[1].0, true);
+    assert!(!kernel.speaking());
+    assert!(log.borrow().contains(&String::from("event ov.reply q2")));
+
     // Started over the menu, it stops when the menu closes.
     kernel.output.commands.push(Command::open_slot(slots::MENU));
     kernel.run_commands();

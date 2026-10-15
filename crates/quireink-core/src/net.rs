@@ -106,8 +106,9 @@ pub const MAX_FILE: usize = 64 << 20;
 /// What a shell does for speech (see `Kernel::take_speech`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SpeechCall {
-    /// Speak `text` instead of anything spoken now, and report with
-    /// `Kernel::speech_done` and `id` when it is done.
+    /// Speak `text` instead of anything spoken now, or after it with
+    /// `queue`, and report with `Kernel::speech_done` and `id` when it is
+    /// done. Texts replaced are not reported.
     Say {
         id: u32,
         text: String,
@@ -115,6 +116,7 @@ pub enum SpeechCall {
         language: String,
         /// In percent of the normal speed.
         rate: u16,
+        queue: bool,
     },
     /// Stop speaking.
     Stop,

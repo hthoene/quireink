@@ -114,6 +114,10 @@ pub struct Speech {
     /// [`speech_params::FAILED`] if it could not be.
     pub reply: Id,
     pub params: Params,
+    /// Spoken after the texts given before instead of replacing them: the
+    /// next sentence handed over while one is spoken follows without a
+    /// pause.
+    pub queue: bool,
 }
 
 impl Speech {
@@ -125,6 +129,7 @@ impl Speech {
             rate: 100,
             reply,
             params: Params::new(),
+            queue: false,
         }
     }
 }
@@ -219,11 +224,12 @@ pub enum Command {
     /// some systems tell the user every time an app reads the clipboard.
     ReadClipboard(Id, Params),
     /// Speaks text aloud where the device can
-    /// ([`Env::speech`](crate::Env)), instead of what is being spoken.
-    /// Without speech the reply comes at once, failed. Speech stops when
-    /// the screen that started it is closed.
+    /// ([`Env::speech`](crate::Env)), instead of what is being spoken or
+    /// after it ([`Speech::queue`]). Without speech the reply comes at
+    /// once, failed. Speech stops when the screen that started it is
+    /// closed.
     Speak(Speech),
-    /// Stops speaking; no reply comes for the text cut off.
+    /// Stops speaking; no reply comes for the texts cut off.
     StopSpeaking,
 }
 
