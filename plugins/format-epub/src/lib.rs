@@ -13,13 +13,15 @@
 //!
 //! HTML files (`.html`, `.htm`, `.xhtml`), e.g. saved web pages, open
 //! the same way, showing only a page's reading matter (see
-//! [`HtmlDocument`]), and FictionBooks (`.fb2`, see [`Fb2Document`]).
+//! [`HtmlDocument`]), FictionBooks (`.fb2`, see [`Fb2Document`]) and
+//! comic book archives (`.cbz`, see [`CbzDocument`]).
 
 #![no_std]
 
 extern crate alloc;
 
 mod cached;
+mod cbz;
 mod convert;
 mod css;
 mod document;
@@ -37,6 +39,7 @@ use quireink_sdk::{
     FormatSpec, Id, Manifest, Plugin, RegisterError, Registrar, SDK_VERSION, Version,
 };
 
+pub use cbz::CbzDocument;
 pub use document::EpubDocument;
 pub use fb2::Fb2Document;
 pub use html::HtmlDocument;
@@ -47,6 +50,8 @@ pub const FORMAT: Id = Id::new_static("format-epub.epub");
 pub const HTML: Id = Id::new_static("format-epub.html");
 /// FictionBook 2.
 pub const FB2: Id = Id::new_static("format-epub.fb2");
+/// Comic book archives.
+pub const CBZ: Id = Id::new_static("format-epub.cbz");
 
 /// The EPUB format plugin.
 #[derive(Debug, Default)]
@@ -96,6 +101,14 @@ impl Plugin for EpubFormat {
             open: Box::new(|storage, path, options| {
                 Fb2Document::open(storage, path, options.publisher_styles)
                     .map(|d| Box::new(d) as Box<dyn Document>)
+            }),
+        })?;
+        r.add_format(FormatSpec {
+            id: CBZ,
+            title: Cow::Borrowed("format-epub.cbz"),
+            extensions: vec![Cow::Borrowed("cbz")],
+            open: Box::new(|storage, path, _| {
+                CbzDocument::open(storage, path).map(|d| Box::new(d) as Box<dyn Document>)
             }),
         })?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/en.ini")))?;

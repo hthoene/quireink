@@ -111,7 +111,7 @@ pub(crate) struct CachePaths {
 
 /// Images are decoded at most this large (longer side, in pixels); readers
 /// scale them to the page.
-const IMAGE_SIDE: u32 = 1600;
+pub(crate) const IMAGE_SIDE: u32 = 1600;
 /// Longest side of a decoded cover: enough for the library and home screen.
 pub(crate) const COVER_SIDE: u32 = 300;
 
