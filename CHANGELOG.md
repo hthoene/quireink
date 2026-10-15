@@ -4,7 +4,7 @@ What changes from one release of QuireInk to the next. Versions follow
 [Semantic Versioning](https://semver.org); before 1.0, a minor version may
 change the plugin SDK.
 
-## [0.1.1] - unreleased
+## [0.1.1] - 2026-10-15
 
 The Android app for F-Droid.
 
