@@ -182,9 +182,17 @@ impl Sync {
         if let Some(run) = &mut self.run {
             run.pages.push(url.to_string());
         }
-        if let Some(mut request) = self.request(url, feed_path(), FEED_LOADED) {
-            request.params = request.params.with(crate::URL, url.to_string());
-            out.push(Command::Http(request));
+        if let Some(run) = &self.run {
+            let params = Params::new()
+                .with(RUN, run.number.to_string())
+                .with(crate::URL, url.to_string());
+            out.push(Command::Http(crate::list_request(
+                &run.catalog,
+                url,
+                feed_path(),
+                FEED_LOADED,
+                params,
+            )));
         }
     }
 
@@ -215,7 +223,10 @@ impl Sync {
             .or(params.get(crate::URL))
             .unwrap_or_default()
             .to_string();
-        let page = feed::read(env.storage, &feed_path(), &base);
+        let Some(catalog) = self.run.as_ref().map(|run| run.catalog.clone()) else {
+            return;
+        };
+        let page = crate::read_list(&catalog, env.storage, &feed_path(), &base);
         let _ = env.storage.remove(&feed_path());
         let Some(run) = &mut self.run else {
             return;

@@ -29,11 +29,13 @@ enum Field {
     Password,
     Folder,
     Sync,
+    WebDav,
 }
 
-const FIELDS: [Field; 6] = [
+const FIELDS: [Field; 7] = [
     Field::Name,
     Field::Address,
+    Field::WebDav,
     Field::User,
     Field::Password,
     Field::Folder,
@@ -49,6 +51,7 @@ impl Field {
             Field::Password => "opds.field.password",
             Field::Folder => "opds.field.folder",
             Field::Sync => "opds.field.sync",
+            Field::WebDav => "opds.field.webdav",
         }
     }
 
@@ -60,6 +63,7 @@ impl Field {
             Field::Password => "opds.field.password.help",
             Field::Folder => "opds.field.folder.help",
             Field::Sync => "opds.field.sync.help",
+            Field::WebDav => "opds.field.webdav.help",
         }
     }
 
@@ -117,7 +121,7 @@ impl EditScreen {
             Field::Password if c.password.is_empty() => String::new(),
             Field::Password => String::from("••••"),
             Field::Folder => c.sync_folder(env),
-            Field::Sync => String::new(),
+            Field::Sync | Field::WebDav => String::new(),
         }
     }
 
@@ -126,6 +130,13 @@ impl EditScreen {
         let Some(field) = FIELDS.get(index).copied() else {
             return;
         };
+        if field == Field::WebDav {
+            self.catalog.webdav = !self.catalog.webdav;
+            self.save(&env);
+            cx.request_redraw();
+            cx.request_refresh(RefreshMode::Fast);
+            return;
+        }
         if field == Field::Sync {
             self.catalog.sync = !self.catalog.sync;
             self.save(&env);
@@ -177,7 +188,7 @@ impl Screen for EditScreen {
             self.list.paging(FIELDS.len()),
         );
         let values: Vec<String> = FIELDS.iter().map(|&f| self.value(env, f)).collect();
-        let on = self.catalog.sync;
+        let (on, webdav) = (self.catalog.sync, self.catalog.webdav);
         self.list.draw(
             canvas,
             &style,
@@ -186,7 +197,8 @@ impl Screen for EditScreen {
                 let field = FIELDS[index];
                 let title = env.i18n.tr(field.key());
                 let note = env.i18n.tr(field.help());
-                if field == Field::Sync {
+                if field == Field::Sync || field == Field::WebDav {
+                    let on = if field == Field::Sync { on } else { webdav };
                     ui::draw_switch_row(canvas, env, &style, rect, focused, title, note, on);
                 } else {
                     let value = &values[index];

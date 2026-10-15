@@ -25,6 +25,8 @@ pub(crate) struct Catalog {
     pub folder: String,
     /// Synced with the others by *Sync catalogs*.
     pub sync: bool,
+    /// A WebDAV folder (e.g. in Nextcloud) rather than an OPDS catalog.
+    pub webdav: bool,
 }
 
 impl Catalog {
@@ -33,6 +35,8 @@ impl Catalog {
         Self {
             name: host(url).trim_start_matches("www.").to_string(),
             url: url.to_string(),
+            // Nextcloud's and ownCloud's addresses say so.
+            webdav: url.contains("/remote.php/") || url.contains("/webdav"),
             ..Self::default()
         }
     }
@@ -84,6 +88,7 @@ pub(crate) fn load(storage: &dyn Storage) -> Vec<Catalog> {
                 password: field(),
                 folder: field(),
                 sync: field() == "sync",
+                webdav: field() == "webdav",
             })
         })
         .collect()
@@ -94,13 +99,14 @@ pub(crate) fn save(storage: &dyn Storage, catalogs: &[Catalog]) {
     let mut text = String::new();
     for c in catalogs {
         text.push_str(&format!(
-            "{}\t{}\t{}\t{}\t{}\t{}\n",
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
             clean(&c.name),
             clean(&c.url),
             clean(&c.user),
             clean(&c.password),
             clean(&c.folder),
             if c.sync { "sync" } else { "" },
+            if c.webdav { "webdav" } else { "" },
         ));
     }
     let _ = storage.write(&path(), text.as_bytes());

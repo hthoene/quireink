@@ -175,7 +175,7 @@ impl BrowseScreen {
             .format("opds.loading", &[("host", Arg::Str(host(url)))]);
         self.say(message, cx);
         let params = Params::new().with(URL, url.to_string());
-        cx.command(Command::Http(request(
+        cx.command(Command::Http(crate::list_request(
             &self.catalog,
             url,
             feed_path(),
@@ -218,7 +218,7 @@ impl BrowseScreen {
             .get(http_params::FINAL_URL)
             .unwrap_or(&url)
             .to_string();
-        let feed = feed::read(env.storage, &feed_path(), &base);
+        let feed = crate::read_list(&self.catalog, env.storage, &feed_path(), &base);
         let _ = env.storage.remove(&feed_path());
         if feed.entries.is_empty() && feed.title.is_empty() {
             let message = env.i18n.tr("opds.not-a-catalog").to_string();

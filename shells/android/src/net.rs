@@ -154,13 +154,7 @@ fn connect<'a>(
     let conn = env
         .call_method(url, "openConnection", "()Ljava/net/URLConnection;", &[])?
         .l()?;
-    let method = env.new_string(&call.method)?;
-    env.call_method(
-        &conn,
-        "setRequestMethod",
-        "(Ljava/lang/String;)V",
-        &[JValue::Object(&method)],
-    )?;
+    set_method(env, &conn, &call.method)?;
     env.call_method(&conn, "setConnectTimeout", "(I)V", &[JValue::Int(15_000)])?;
     env.call_method(&conn, "setReadTimeout", "(I)V", &[JValue::Int(60_000)])?;
     for (name, value) in &call.headers {
@@ -182,6 +176,50 @@ fn connect<'a>(
         env.call_method(&out, "close", "()V", &[])?;
     }
     Ok(conn)
+}
+
+/// The methods `HttpURLConnection` takes as they are.
+const STANDARD_METHODS: [&str; 7] = ["GET", "POST", "HEAD", "OPTIONS", "PUT", "DELETE", "TRACE"];
+
+/// Sets the request method. Android refuses others than the standard
+/// ones (e.g. WebDAV's `PROPFIND`), so those are written into the
+/// connection's `method` field directly, and into the connection it
+/// hands HTTPS requests to.
+fn set_method(env: &mut JNIEnv<'_>, conn: &JObject<'_>, method: &str) -> jni::errors::Result<()> {
+    let standard = STANDARD_METHODS.contains(&method);
+    let name = env.new_string(if standard { method } else { "POST" })?;
+    env.call_method(
+        conn,
+        "setRequestMethod",
+        "(Ljava/lang/String;)V",
+        &[JValue::Object(&name)],
+    )?;
+    if standard {
+        return Ok(());
+    }
+    let value = env.new_string(method)?;
+    let field = |env: &mut JNIEnv<'_>, target: &JObject<'_>| {
+        let class = env.find_class("java/net/HttpURLConnection")?;
+        let id = env.get_field_id(&class, "method", "Ljava/lang/String;")?;
+        env.set_field_unchecked(target, id, JValue::Object(&value))
+    };
+    field(env, conn)?;
+    // HTTPS connections delegate to another one.
+    let class = env.get_object_class(conn)?;
+    match env.get_field_id(&class, "delegate", "Ljava/net/HttpURLConnection;") {
+        Ok(id) => {
+            let delegate = env
+                .get_field_unchecked(conn, id, jni::signature::ReturnType::Object)?
+                .l()?;
+            if !delegate.is_null() {
+                field(env, &delegate)?;
+            }
+        }
+        Err(_) => {
+            let _ = env.exception_clear();
+        }
+    }
+    Ok(())
 }
 
 /// Reads the answer of `conn`.

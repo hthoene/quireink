@@ -84,6 +84,44 @@ fn request(
     request
 }
 
+/// A request for a list of a catalog: for a WebDAV folder its listing
+/// (`PROPFIND`), else the feed.
+fn list_request(
+    catalog: &Catalog,
+    url: &str,
+    save_to: String,
+    reply: Id,
+    params: Params,
+) -> HttpRequest {
+    let mut request = request(catalog, url, save_to, reply, params);
+    if catalog.webdav {
+        request.method = String::from("PROPFIND");
+        request
+            .headers
+            .push((String::from("Depth"), String::from("1")));
+        request.headers.push((
+            String::from("Content-Type"),
+            String::from("application/xml; charset=utf-8"),
+        ));
+        request.body = Some(String::from(feed::PROPFIND));
+    }
+    request
+}
+
+/// Reads a list of a catalog from `path`, which came from `base`.
+fn read_list(
+    catalog: &Catalog,
+    storage: &dyn quireink_sdk::Storage,
+    path: &str,
+    base: &str,
+) -> feed::Feed {
+    if catalog.webdav {
+        feed::read_webdav(storage, path, base)
+    } else {
+        feed::read(storage, path, base)
+    }
+}
+
 /// The catalogs marked for syncing.
 fn marked(env: &Env<'_>) -> Vec<Catalog> {
     catalogs::load(env.storage)

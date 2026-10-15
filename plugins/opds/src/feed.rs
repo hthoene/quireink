@@ -1,5 +1,7 @@
 //! OPDS 1 catalogs: Atom feeds of books and of further feeds, read as
 //! they stream from storage, so a feed of any size needs little memory.
+//! WebDAV folders (e.g. in Nextcloud) are read as catalogs too: their
+//! subfolders lead further, their files are books ([`read_webdav`]).
 //!
 //! What is kept of a feed: its title, its entries (at most
 //! [`MAX_ENTRIES`]) with their titles, authors and links, the next page
@@ -10,7 +12,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use quireink_sdk::Storage;
-use quireink_sdk::web::{encode, join_url};
+use quireink_sdk::web::{encode, join_url, percent_decode};
 use quireink_sdk::xml::{Token, Tokenizer, decode, local_name};
 
 /// Entries kept of one page; catalogs page longer lists with *next*.
@@ -65,9 +67,23 @@ pub(crate) struct Book {
 }
 
 impl Book {
-    /// The file extension for its content type, if it is a known one.
+    /// The file extension for its content type, if it is a known one,
+    /// else from the file's name in its address.
     pub(crate) fn extension(&self) -> Option<&'static str> {
         let mime = self.mime.split(';').next().unwrap_or("").trim();
+        if let Some(ext) = Self::by_type(mime) {
+            return Some(ext);
+        }
+        let path = self.url.split(['?', '#']).next().unwrap_or("");
+        let name = path.rsplit('/').next().unwrap_or("").to_ascii_lowercase();
+        [
+            "epub", "txt", "pdf", "mobi", "azw3", "fb2", "cbz", "rtf", "odt", "html", "htm",
+        ]
+        .into_iter()
+        .find(|ext| name.ends_with(&alloc::format!(".{ext}")))
+    }
+
+    fn by_type(mime: &str) -> Option<&'static str> {
         Some(match mime {
             "application/epub+zip" => "epub",
             "text/plain" => "txt",
@@ -317,6 +333,122 @@ pub(crate) fn read(storage: &dyn Storage, path: &str, base: &str) -> Feed {
     reader.feed
 }
 
+/// What a WebDAV folder is asked for: names, kinds and types.
+pub(crate) const PROPFIND: &str = "<?xml version=\"1.0\"?><d:propfind xmlns:d=\"DAV:\"><d:prop><d:displayname/><d:resourcetype/><d:getcontenttype/></d:prop></d:propfind>";
+
+/// One `<response>` of a WebDAV listing.
+#[derive(Debug, Default)]
+struct Response {
+    href: String,
+    name: String,
+    kind: String,
+    folder: bool,
+}
+
+/// Reads the WebDAV listing (`PROPFIND`, depth 1) of the folder `base`
+/// in file `path`: subfolders lead further, files are books named by
+/// their file names. Folders first, then by name.
+pub(crate) fn read_webdav(storage: &dyn Storage, path: &str, base: &str) -> Feed {
+    let mut feed = Feed::default();
+    let mut current: Option<Response> = None;
+    let mut field: Option<&'static str> = None;
+    let mut text = String::new();
+    let own = percent_decode(
+        base.split("://")
+            .nth(1)
+            .map_or(base, |r| &r[r.find('/').unwrap_or(r.len())..]),
+    );
+    let own = own.trim_end_matches('/').to_string();
+    let mut tokenizer = Tokenizer::new();
+    let mut buf = [0u8; CHUNK];
+    let mut offset = 0;
+    let mut token = |token: Token<'_>| match token {
+        Token::Start {
+            name, self_closing, ..
+        } => match local_name(name) {
+            "response" => current = Some(Response::default()),
+            "collection" => {
+                if let Some(r) = &mut current {
+                    r.folder = true;
+                }
+            }
+            name @ ("href" | "displayname" | "getcontenttype") if !self_closing => {
+                field = Some(match name {
+                    "href" => "href",
+                    "displayname" => "displayname",
+                    _ => "getcontenttype",
+                });
+                text.clear();
+            }
+            _ => {}
+        },
+        Token::Text(t) if field.is_some() => text.push_str(&decode(&t)),
+        Token::CData(t) if field.is_some() => text.push_str(t),
+        Token::End { name } => {
+            let name = local_name(name);
+            if field == Some(name) {
+                if let Some(r) = &mut current {
+                    let value = text.trim().to_string();
+                    match name {
+                        "href" => r.href = value,
+                        "displayname" => r.name = value,
+                        _ => r.kind = value,
+                    }
+                }
+                field = None;
+            }
+            if name == "response"
+                && let Some(r) = current.take()
+                && feed.entries.len() < MAX_ENTRIES
+            {
+                let decoded = percent_decode(&r.href);
+                let target = decoded.trim_end_matches('/');
+                if target == own || r.href.is_empty() {
+                    return;
+                }
+                let url = join_url(base, &r.href);
+                let file = target.rsplit('/').next().unwrap_or("").to_string();
+                let title = if r.name.is_empty() {
+                    file.clone()
+                } else {
+                    r.name.clone()
+                };
+                let mut entry = Entry {
+                    id: url.clone(),
+                    ..Entry::default()
+                };
+                if r.folder {
+                    entry.title = title;
+                    entry.feed = Some(url);
+                } else {
+                    entry.title = title
+                        .rsplit_once('.')
+                        .map_or(title.clone(), |(stem, _)| stem.to_string());
+                    entry.books.push(Book {
+                        mime: r.kind,
+                        url,
+                        title: String::new(),
+                    });
+                }
+                feed.entries.push(entry);
+            }
+        }
+        _ => {}
+    };
+    while let Ok(n) = storage.read_at(path, offset, &mut buf) {
+        if n == 0 {
+            break;
+        }
+        tokenizer.feed(&buf[..n], &mut token);
+        offset += n as u64;
+    }
+    tokenizer.finish(&mut token);
+    feed.title = own.rsplit('/').next().unwrap_or("").to_string();
+    feed.entries
+        .sort_by_key(|e| (e.feed.is_none(), e.title.to_lowercase()));
+    feed
+}
+
 /// The address an OpenSearch description in file `path` (from `base`)
 /// gives for searches in OPDS, with `{searchTerms}` in it.
 pub(crate) fn search_template(storage: &dyn Storage, path: &str, base: &str) -> Option<String> {
@@ -479,6 +611,36 @@ mod tests {
         assert_eq!(
             search_url("https://a.org/s?q={searchTerms}&p={startPage?}", "x"),
             "https://a.org/s?q=x&p="
+        );
+    }
+
+    #[test]
+    fn webdav_folders() {
+        let listing = r#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:">
+<d:response><d:href>/remote.php/dav/files/me/Books/</d:href><d:propstat><d:prop><d:displayname>Books</d:displayname><d:resourcetype><d:collection/></d:resourcetype></d:prop></d:propstat></d:response>
+<d:response><d:href>/remote.php/dav/files/me/Books/Die%20Verwandlung.epub</d:href><d:propstat><d:prop><d:displayname>Die Verwandlung.epub</d:displayname><d:resourcetype/><d:getcontenttype>application/octet-stream</d:getcontenttype></d:prop></d:propstat></d:response>
+<d:response><d:href>/remote.php/dav/files/me/Books/Krimis/</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop></d:propstat></d:response>
+</d:multistatus>"#;
+        let storage = MemoryStorage::new();
+        storage.write("dav.xml", listing.as_bytes()).unwrap();
+        let feed = read_webdav(
+            &storage,
+            "dav.xml",
+            "https://cloud.example.org/remote.php/dav/files/me/Books/",
+        );
+        assert_eq!(feed.title, "Books");
+        assert_eq!(feed.entries.len(), 2, "not the folder itself");
+        assert_eq!(feed.entries[0].title, "Krimis", "folders first");
+        assert_eq!(
+            feed.entries[0].feed.as_deref(),
+            Some("https://cloud.example.org/remote.php/dav/files/me/Books/Krimis/")
+        );
+        let book = &feed.entries[1];
+        assert_eq!(book.title, "Die Verwandlung");
+        assert_eq!(
+            book.readable_book(|ext| ext == "epub").map(|(_, e)| e),
+            Some("epub")
         );
     }
 

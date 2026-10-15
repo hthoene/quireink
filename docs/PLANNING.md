@@ -707,7 +707,16 @@ Pages ("try QuireInk in your browser"), also handy for UI reviews.
 - `esp-hal` + Embassy (async) inside the shell; core stays synchronous.
 - SPI display driver, button GPIO/ADC, SD card (FAT via `embedded-sdmmc`),
   battery ADC, deep/light sleep between interactions.
-- Wi-Fi via `esp-wifi`/`esp-radio` **[VERIFY current crate]**, only on demand.
+- Wi-Fi via `esp-wifi`/`esp-radio` **[VERIFY current crate]**, only on
+  demand: the radio is the largest consumer after the display, so it is
+  off while reading. The shell switches it on for an HTTP request or a
+  server (transfer, sync, catalogs, browser), keeps it on for a short idle
+  time (e.g. 30 s, a setting) so a browsing session or a sync does not
+  reconnect for every request, and switches it off afterwards; a server
+  keeps it on only while its screen is open. `Env::network` then means
+  "can connect", not "is connected". Background work that needs the
+  network (rules, OPDS sync) runs only when asked or on wake-up, never by
+  keeping the radio on. Battery use is measured on the device before 1.0.
 - Flashing: `espflash`; OTA updates later.
 - One shell for the X4 (ESP32-C3, RISC-V, upstream Rust target) and the X4
   Pro (ESP32-S3, Xtensa, `esp` toolchain via `espup`): chip-specific code
@@ -791,7 +800,7 @@ makes it replaceable. ✅ done, 🔶 partly, ⬜ open.
 | C13 | Reading aloud | Speech engines as providers | ⬜ |
 | C14 | Library order: recently read or by name, folders as collections, by author and by series (from the books, also EPUB 3 and Calibre series) | `files` plugin: catalog made in the background, views `files.by-author`, `files.by-series` | 🔶 (tags open) |
 | C15 | Export of highlights and notes: Markdown in `Notes` beside the library; Obsidian, Joplin, Readwise, KOReader by plugins | Event `reader.notes-exported` for exporter plugins | 🔶 (Markdown done; exporter plugins open) |
-| C16 | More sync: Calibre wireless, Nextcloud, Syncthing (books, progress, notes) | Sync providers | 🔶 (kosync, statistics over WebDAV, OPDS) |
+| C16 | More sync: WebDAV folders (Nextcloud, ownCloud) browsed and synced like catalogs; Calibre wireless, Syncthing | `opds` plugin (catalogs of kind WebDAV, `PROPFIND`); Android sends any HTTP method | 🔶 (Calibre wireless needs sockets in the kernel) |
 | C17 | Buttons, held buttons, tap zones, held taps and swipes changed on the device, everywhere or while reading; a left-handed layout | `keys` plugin, `Command::Bind`, `Env::keys`, action `core.nothing`, preset `core.left-handed` | ✅ (custom zone shapes open) |
 | C18 | Home screen widgets: clock and date, today's reading, any plugin's; chosen under Appearance | `Registrar::add_widget`, `Env::widgets`; `home.clock`, `stats.widget.today` | ✅ (reading goal open) |
 | C19 | OPDS: covers in lists (devices with the memory), a folder per catalog, automatic sync (rules), OPDS 2 (JSON) | `opds` plugin, C5, C20 | 🔶 (OPDS 2 open) |
