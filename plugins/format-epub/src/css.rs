@@ -386,6 +386,8 @@ pub(crate) struct Rules {
     /// Font family names in the order first named.
     pub families: Vec<String>,
     pub faces: Vec<FontFace>,
+    /// One's own rules (see [`Rules::add_own`]): after all others.
+    own: Vec<(Selector, Props)>,
 }
 
 /// A font embedded with `@font-face`.
@@ -406,14 +408,26 @@ impl Rules {
     /// What the rules set for an element, by specificity, then order.
     pub fn props(&self, tag: &str, classes: &str) -> Props {
         let mut props = Props::default();
-        for level in 0..=3 {
-            for (selector, rule) in &self.rules {
-                if selector.specificity() == level && selector.matches(tag, classes) {
-                    props.apply(rule);
+        // The book's rules, then one's own over them.
+        for rules in [&self.rules, &self.own] {
+            for level in 0..=3 {
+                for (selector, rule) in rules {
+                    if selector.specificity() == level && selector.matches(tag, classes) {
+                        props.apply(rule);
+                    }
                 }
             }
         }
         props
+    }
+
+    /// Adds one's own stylesheet `css`: its rules apply after all of the
+    /// book's, also those it adds later (`<style>` in a chapter).
+    pub fn add_own(&mut self, css: &str) {
+        let start = self.rules.len();
+        Parser::new("").feed(css, self);
+        let own = self.rules.split_off(start);
+        self.own.extend(own);
     }
 
     /// Parses a `style` attribute.
@@ -519,6 +533,7 @@ impl Rules {
             rules,
             families,
             faces: Vec::new(),
+            own: Vec::new(),
         }
     }
 }

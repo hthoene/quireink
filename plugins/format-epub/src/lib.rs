@@ -635,6 +635,37 @@ mod tests {
     }
 
     #[test]
+    fn own_stylesheets_apply_after_the_books() {
+        let ch2 = String::from(
+            "<html><head><style>p.c { text-align: center }</style></head><body>\
+             <p class=\"c\">Mitte</p></body></html>",
+        );
+        let storage = epub(ch2);
+        use quireink_sdk::Storage;
+        let align = |storage: &MemoryStorage| {
+            let doc = EpubDocument::open(storage, "books/test.epub").unwrap();
+            doc.block_at(storage, Locator::new(1, 0))
+                .unwrap()
+                .unwrap()
+                .align
+        };
+        assert_eq!(align(&storage), Align::Center);
+        // For all books of the folder, then this one: the last wins.
+        storage
+            .write("books/styles.css", b"p.c { text-align: left }")
+            .unwrap();
+        assert_eq!(align(&storage), Align::Start);
+        storage
+            .write("books/test.css", b"p.c { text-align: right }")
+            .unwrap();
+        assert_eq!(align(&storage), Align::End);
+        // Without them, the book's own again.
+        storage.remove("books/styles.css").unwrap();
+        storage.remove("books/test.css").unwrap();
+        assert_eq!(align(&storage), Align::Center);
+    }
+
+    #[test]
     fn splits_long_paragraphs_and_reuses_the_cache() {
         let words: Vec<String> = (0..3000).map(|i| alloc::format!("w{i}")).collect();
         let ch2 = alloc::format!("<html><body><p>{}</p></body></html>", words.join(" "));

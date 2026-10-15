@@ -42,6 +42,9 @@ pub struct EpubDocument {
     styles: bool,
     /// Archive path of the cover image.
     cover: Option<String>,
+    /// One's own stylesheets for this book (see [`user_css`]), applied
+    /// after the book's.
+    user_css: String,
     /// The printed pages of one section, resolved: offset and label.
     pages: core::cell::RefCell<Option<SectionPages>>,
 }
@@ -128,10 +131,19 @@ impl EpubDocument {
                 package::build(storage, &archive, &cache, size)?
             }
         };
-        let chapters = if styles {
+        // One's own stylesheets: chapters converted with them go into a
+        // cache of their own, so a changed stylesheet applies at once.
+        let user_css = if styles {
+            user_css(storage, path)
+        } else {
+            String::new()
+        };
+        let chapters = if !styles {
+            plain_cache(&cache)
+        } else if user_css.is_empty() {
             cache.clone()
         } else {
-            plain_cache(&cache)
+            alloc::format!("{cache}/css-{:016x}", fnv(&user_css))
         };
         let mut metadata = package.metadata;
         if metadata.title.is_none() {
@@ -148,6 +160,7 @@ impl EpubDocument {
             cache,
             chapters,
             styles,
+            user_css,
             pages: core::cell::RefCell::new(None),
         })
     }
@@ -192,11 +205,15 @@ impl EpubDocument {
                     .archive
                     .entry_by_record(storage, self.spine[section as usize].record)
                     .map_err(package::error)?;
-                let rules = if self.styles {
+                let mut rules = if self.styles {
                     package::styles(storage, &self.cache)
                 } else {
                     Default::default()
                 };
+                // One's own after the book's: they win.
+                if !self.user_css.is_empty() {
+                    rules.add_own(&self.user_css);
+                }
                 let source = convert::Source::Zip {
                     archive: &self.archive,
                     entry: &entry,
@@ -216,6 +233,27 @@ impl EpubDocument {
         let (paths, ..) = self.chapter(storage, section).ok()?;
         cached::anchor(storage, &paths, id)
     }
+}
+
+/// Longest stylesheet of one's own that is read.
+const MAX_USER_CSS: usize = 64 * 1024;
+
+/// One's own stylesheets for the book at `path`: `styles.css` in its
+/// folder (for all books there), then the one named like the book
+/// (`Alice.css` for `Alice.epub`), each applied after the book's own.
+pub(crate) fn user_css(storage: &dyn Storage, path: &str) -> String {
+    let folder = quireink_sdk::files::parent(path);
+    let name = quireink_sdk::files::name(path);
+    let stem = name.rsplit_once('.').map_or(name, |(s, _)| s);
+    let mut css = String::new();
+    for file in [String::from("styles.css"), alloc::format!("{stem}.css")] {
+        let file = quireink_sdk::files::join(folder, &file);
+        if let Ok(data) = quireink_sdk::read_file(storage, &file, MAX_USER_CSS) {
+            css.push_str(&String::from_utf8_lossy(&data));
+            css.push('\n');
+        }
+    }
+    css
 }
 
 impl EpubDocument {
