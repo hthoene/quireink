@@ -1,0 +1,1 @@
+The first release: QuireInk on Android e-readers. EPUB, FB2, Markdown, text, comics and PDF; contents, search, highlights and notes; dictionaries, Wikipedia and translation; statistics and positions shared with KOReader; OPDS catalogs and WebDAV; a home screen of widgets; everything changeable.

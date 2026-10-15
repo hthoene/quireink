@@ -1,0 +1,1 @@
+Die erste Version: QuireInk auf Android-E-Readern. EPUB, FB2, Markdown, Text, Comics und PDF; Inhaltsverzeichnis, Suche, Markierungen und Notizen; Wörterbücher, Wikipedia und Übersetzung; Statistik und Lesepositionen gemeinsam mit KOReader; OPDS-Kataloge und WebDAV; eine Startseite aus Widgets; alles änderbar.

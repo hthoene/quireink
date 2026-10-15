@@ -1,0 +1,27 @@
+<p>QuireInk is a free e-reader made for e-ink devices such as Onyx Boox readers. It is fast, light on the battery and simple by default: turn it on and keep reading. Everything it does comes from plugins, and every screen, menu, button and gesture can be changed.</p>
+
+<p><b>Reading</b></p>
+<ul>
+<li>EPUB 2 and 3 with the book's styles, fonts and pictures, FB2, Markdown, plain text, comics (CBZ) and PDF</li>
+<li>Contents, search, bookmarks, highlights and notes, exported as Markdown</li>
+<li>Dictionaries (StarDict), Wikipedia, translation, a list of words looked up</li>
+<li>Hyphenation, fonts, margins and spacing to taste, reading aloud</li>
+<li>Reading statistics and positions shared with KOReader</li>
+</ul>
+
+<p><b>Books and more</b></p>
+<ul>
+<li>A home screen of widgets: date, battery, continue reading, recently read, statistics</li>
+<li>A library by folders, authors, series and tags, and a file manager</li>
+<li>OPDS catalogs and WebDAV folders (e.g. Nextcloud), kept in sync</li>
+<li>News feeds as books, transfers from a computer or phone over Wi-Fi</li>
+</ul>
+
+<p><b>Made for e-ink</b></p>
+<ul>
+<li>Equally easy by touch and with the page buttons</li>
+<li>Few refreshes, no animations, a night mode</li>
+<li>Settings with a description each, and a search</li>
+</ul>
+
+<p>Translation uses DeepL with a key of your own; Wallabag, Readwise and the browser are switched off until you want them.</p>

@@ -2,7 +2,8 @@
 rounded square, at every launcher density.
 
 Usage: python tools/android-icon.py   (needs Pillow; writes
-shells/android/res/mipmap-*/ic_launcher.png)
+shells/android/res/mipmap-*/ic_launcher.png and the 512 px icon of the
+app stores' metadata, fastlane/metadata/android/en-US/images/icon.png)
 """
 
 from pathlib import Path
@@ -49,6 +50,10 @@ def main() -> None:
         out.parent.mkdir(parents=True, exist_ok=True)
         icon(size).save(out, optimize=True)
         print(out.relative_to(ROOT))
+    store = ROOT / "fastlane/metadata/android/en-US/images/icon.png"
+    store.parent.mkdir(parents=True, exist_ok=True)
+    icon(512).save(store, optimize=True)
+    print(store.relative_to(ROOT))
 
 
 if __name__ == "__main__":

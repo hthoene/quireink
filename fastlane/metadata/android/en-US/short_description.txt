@@ -1,0 +1,1 @@
+A lean e-reader for e-ink devices: EPUB, sync with KOReader, plugins
