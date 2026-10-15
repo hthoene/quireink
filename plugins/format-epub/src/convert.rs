@@ -370,7 +370,7 @@ impl Converter<'_> {
         if let Some(html) = &self.html {
             return Some(match (href.strip_prefix('#'), &html.base) {
                 (Some(_), _) => href,
-                (None, Some(base)) => crate::html::join_url(base, &href),
+                (None, Some(base)) => quireink_sdk::web::join_url(base, &href),
                 (None, None) => crate::package::resolve(&self.base, &href).0,
             });
         }

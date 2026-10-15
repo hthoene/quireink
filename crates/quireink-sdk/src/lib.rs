@@ -58,6 +58,7 @@ pub mod status;
 pub mod time;
 pub mod ui;
 mod version;
+pub mod web;
 
 pub use action::{ActionHandler, ActionSpec, Actions};
 pub use command::{

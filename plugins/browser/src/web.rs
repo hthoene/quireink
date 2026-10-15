@@ -6,6 +6,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use quireink_sdk::document::is_external;
+use quireink_sdk::web::{encode, file_name};
 use quireink_sdk::xml::{Token, Tokenizer, decode, local_name};
 use quireink_sdk::{Storage, StorageError};
 
@@ -42,80 +43,6 @@ pub(crate) fn address(input: &str) -> String {
     } else {
         format!("{SEARCH}{}", encode(text))
     }
-}
-
-/// `text` for a query: letters, digits and `-_.~` as they are, spaces as
-/// `+`, everything else percent-encoded.
-pub(crate) fn encode(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for byte in text.bytes() {
-        match byte {
-            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(char::from(byte));
-            }
-            b' ' => out.push('+'),
-            byte => out.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    out
-}
-
-fn percent_decode(text: &str) -> String {
-    let bytes = text.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let hex = |b: u8| char::from(b).to_digit(16).map(|d| d as u8);
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%'
-            && let (Some(high), Some(low)) = (
-                bytes.get(i + 1).copied().and_then(hex),
-                bytes.get(i + 2).copied().and_then(hex),
-            )
-        {
-            out.push(high << 4 | low);
-            i += 3;
-            continue;
-        }
-        out.push(bytes[i]);
-        i += 1;
-    }
-    String::from_utf8_lossy(&out).into_owned()
-}
-
-/// The host of an address, for messages: `de.wikipedia.org`.
-pub(crate) fn host(url: &str) -> &str {
-    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
-    let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
-    &rest[..end]
-}
-
-/// A file name for what `url` points at: its last path part, decoded,
-/// without characters file systems refuse; `download` if it has none.
-pub(crate) fn file_name(url: &str) -> String {
-    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
-    let path = rest.split(['?', '#']).next().unwrap_or("");
-    let last = path.split_once('/').map_or("", |(_, path)| path);
-    let last = last.rsplit('/').find(|part| !part.is_empty()).unwrap_or("");
-    clean_name(&percent_decode(last), 200).unwrap_or_else(|| String::from("download"))
-}
-
-/// `name` as a file name: without characters file systems refuse, not
-/// hidden, at most `max` characters; `None` if nothing is left.
-pub(crate) fn clean_name(name: &str, max: usize) -> Option<String> {
-    let name: String = name
-        .chars()
-        .map(|c| match c {
-            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => ' ',
-            c => c,
-        })
-        .filter(|c| !c.is_control())
-        .take(max)
-        .collect();
-    let name = name.split_whitespace().collect::<Vec<_>>().join(" ");
-    let name = name
-        .trim_start_matches(|c: char| c == '.' || c.is_whitespace())
-        .trim_end();
-    (!name.is_empty()).then(|| name.to_string())
 }
 
 /// The extension of `name`, in lower case.
@@ -247,23 +174,6 @@ mod tests {
             address("localhost"),
             "https://html.duckduckgo.com/html/?q=localhost"
         );
-    }
-
-    #[test]
-    fn names_and_hosts() {
-        assert_eq!(
-            file_name("https://a.org/books/Die%20Verwandlung.epub?x=1"),
-            "Die Verwandlung.epub"
-        );
-        assert_eq!(file_name("https://a.org/"), "download");
-        assert_eq!(file_name("https://a.org"), "download");
-        assert_eq!(file_name("https://a.org/f/..%2F.hidden"), "hidden");
-        assert_eq!(
-            clean_name(" Kafka: Die  Verwandlung? ", 100).as_deref(),
-            Some("Kafka Die Verwandlung")
-        );
-        assert_eq!(clean_name("...", 100), None);
-        assert_eq!(host("https://de.wikipedia.org/wiki/X"), "de.wikipedia.org");
     }
 
     #[test]

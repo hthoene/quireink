@@ -104,40 +104,15 @@ fn save_password(env: &Env<'_>, password: &str) {
     let _ = env.storage.write(&file("webdav.ini"), text.as_bytes());
 }
 
-/// `Basic` authorisation for the user and password.
-fn basic(user: &str, password: &str) -> String {
-    format!("Basic {}", base64(format!("{user}:{password}").as_bytes()))
-}
-
-fn base64(data: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::new();
-    for chunk in data.chunks(3) {
-        let b = [
-            chunk[0],
-            *chunk.get(1).unwrap_or(&0),
-            *chunk.get(2).unwrap_or(&0),
-        ];
-        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
-        for i in 0..4 {
-            if i <= chunk.len() {
-                out.push(ALPHABET[(n >> (18 - 6 * i) & 63) as usize] as char);
-            } else {
-                out.push('=');
-            }
-        }
-    }
-    out
-}
-
 fn request(env: &Env<'_>, method: &str, reply: Id) -> HttpRequest {
     let url = format!("{}/{FILE}", folder(env.settings.text(URL.as_str())));
     let user = env.settings.text(USER.as_str());
     let mut request = HttpRequest::new(method, &url, reply);
     if !user.is_empty() {
-        request
-            .headers
-            .push((String::from("Authorization"), basic(user, &password(env))));
+        request.headers.push((
+            String::from("Authorization"),
+            quireink_sdk::web::basic_auth(user, &password(env)),
+        ));
     }
     request
 }
@@ -567,13 +542,6 @@ mod tests {
 
     #[test]
     fn credentials_and_folders() {
-        assert_eq!(base64(b"user:pass"), "dXNlcjpwYXNz");
-        assert_eq!(base64(b"a"), "YQ==");
-        assert_eq!(base64(b"ab"), "YWI=");
-        assert_eq!(
-            basic("Aladdin", "open sesame"),
-            "Basic QWxhZGRpbjpvcGVuIHNlc2FtZQ=="
-        );
         assert_eq!(
             folder(" cloud.example.org/dav/KOReader/ "),
             "https://cloud.example.org/dav/KOReader"

@@ -216,7 +216,7 @@ impl BrowserScreen {
     /// Loads `url`; what it is decides where it goes once it is there.
     fn load(&mut self, url: &str, cx: &mut Cx<'_, '_>) {
         let env = *cx.env();
-        let host = web::host(url).to_string();
+        let host = quireink_sdk::web::host(url).to_string();
         if !env.network {
             let message = env.i18n.tr("browser.no-network").to_string();
             return self.say(message, cx);
@@ -267,7 +267,7 @@ impl BrowserScreen {
         let url = params
             .get(http_params::FINAL_URL)
             .map_or(requested.clone(), ToString::to_string);
-        let host = web::host(&url).to_string();
+        let host = quireink_sdk::web::host(&url).to_string();
         let status: u16 = params
             .get(http_params::STATUS)
             .and_then(|s| s.parse().ok())
@@ -336,7 +336,7 @@ impl BrowserScreen {
     ) {
         let env = *cx.env();
         let _ = env.storage.create_dir(dir);
-        let name = web::file_name(url);
+        let name = quireink_sdk::web::file_name(url);
         let target = files::free_path(env.storage, dir, &name);
         if files::move_to(env.storage, tmp, &target).is_err() {
             let _ = env.storage.remove(tmp);
@@ -484,7 +484,7 @@ fn named_book(env: &Env<'_>, path: &str) -> Option<String> {
     };
     drop(document);
     let extension = path.rsplit_once('.').map_or("", |(_, ext)| ext);
-    let name = web::clean_name(&name, 100)?;
+    let name = quireink_sdk::web::clean_name(&name, 100)?;
     let dir = files::parent(path);
     if files::name(path) == format!("{name}.{extension}") {
         return None;
@@ -524,11 +524,11 @@ impl Screen for BrowserScreen {
                     ),
                     Row::Bookmark(i) => (
                         bookmarks[i].title.clone(),
-                        web::host(&bookmarks[i].url).to_string(),
+                        quireink_sdk::web::host(&bookmarks[i].url).to_string(),
                     ),
                     Row::History(i) => (
                         history[i].title.clone(),
-                        web::host(&history[i].url).to_string(),
+                        quireink_sdk::web::host(&history[i].url).to_string(),
                     ),
                 };
                 ui::draw_value_row(canvas, env, &style, rect, focused, &title, &value);
