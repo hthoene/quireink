@@ -1252,6 +1252,7 @@ dependencies = [
  "quireink-plugin-fonts-default",
  "quireink-plugin-format-epub",
  "quireink-plugin-format-txt",
+ "quireink-plugin-format-xtc",
  "quireink-plugin-home",
  "quireink-plugin-hyphenation",
  "quireink-plugin-keyboard",
@@ -1430,6 +1431,14 @@ dependencies = [
 
 [[package]]
 name = "quireink-plugin-format-txt"
+version = "0.1.0"
+dependencies = [
+ "quireink-i18n",
+ "quireink-sdk",
+]
+
+[[package]]
+name = "quireink-plugin-format-xtc"
 version = "0.1.0"
 dependencies = [
  "quireink-i18n",

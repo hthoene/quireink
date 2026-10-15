@@ -26,6 +26,7 @@ members = [
     "plugins/fonts-default",
     "plugins/format-txt",
     "plugins/format-epub",
+    "plugins/format-xtc",
     "plugins/reader",
     "plugins/files",
     "plugins/menu",
@@ -103,6 +104,7 @@ quireink-plugin-files = { path = "plugins/files", version = "0.1.0" }
 quireink-plugin-reader = { path = "plugins/reader", version = "0.1.0" }
 quireink-plugin-format-epub = { path = "plugins/format-epub", version = "0.1.0" }
 quireink-plugin-format-txt = { path = "plugins/format-txt", version = "0.1.0" }
+quireink-plugin-format-xtc = { path = "plugins/format-xtc", version = "0.1.0" }
 quireink-plugin-fonts-default = { path = "plugins/fonts-default", version = "0.1.0", default-features = false }
 
 [workspace.lints.rust]

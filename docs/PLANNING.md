@@ -828,7 +828,7 @@ not yet. Each idea stays simple by default and replaceable by plugins.
 | L2 | The library as a grid of covers | KOReader (cover browser), CrossPoint | ⬜ |
 | L3 | Searching the library by title and author | KOReader | ⬜ |
 | L4 | Marking a book finished, moving it to an archive folder | KOReader | ⬜ |
-| F1 | More formats: FB2, Markdown, CBZ, Xteink's own XTC/XTCH, pictures; PDF on Android through the system's renderer | KOReader, CrossPoint | 🔶 (FB2, FB2.zip and CBZ done: `format-epub.fb2`, `format-epub.cbz`; XTC, Markdown, PDF open) |
+| F1 | More formats: FB2, Markdown, CBZ, Xteink's own XTC/XTCH, pictures; PDF on Android through the system's renderer | KOReader, CrossPoint | 🔶 (FB2, FB2.zip, CBZ, XTC/XTCH done: `format-epub.fb2`, `format-epub.cbz`, `format-xtc`; Markdown, PDF and full-screen pages for pre-rendered books open) |
 | D1 | Sleep screen: the cover, own pictures, minimal, today's reading (C9) | CrossPoint, CrossInk, KOReader | ⬜ |
 | D2 | Sleeping and switching off by themselves after a while | KOReader, X4 firmware | ⬜ |
 | D3 | Turning the screen, also to landscape | CrossPoint | ⬜ |
