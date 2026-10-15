@@ -1616,6 +1616,41 @@ fn banded_frames_match_full_frames() {
 }
 
 #[test]
+fn turned_screens_are_made_anew_for_the_new_size() {
+    let log = log();
+    let mut kernel = Kernel::builder(DEVICE)
+        .plugin(OverlayPlugin { log: log.clone() })
+        .build()
+        .unwrap();
+    kernel.start(Instant(0));
+    for (at, state) in [(100, ButtonState::Pressed), (150, ButtonState::Released)] {
+        kernel.handle(
+            Instant(at),
+            InputEvent::Button {
+                name: "menu",
+                state,
+            },
+        );
+    }
+    let open: Vec<Id> = kernel.stack.iter().map(|s| s.id.clone()).collect();
+    let effects = kernel.resize(Instant(200), 120, 60);
+    assert_eq!(
+        effects.refresh().map(|(_, mode)| mode),
+        Some(RefreshMode::Full)
+    );
+    assert_eq!(kernel.device().display.width, 120);
+    assert_eq!(kernel.shared.env(Instant(200)).device.display.height, 60);
+    let mut size = (0, 0);
+    kernel.render(&mut |_, rows| size = (rows.width, size.1 + rows.height));
+    assert_eq!(size, (120, 60));
+    // The same screens, in the same order.
+    let reopened: Vec<Id> = kernel.stack.iter().map(|s| s.id.clone()).collect();
+    assert_eq!(reopened, open);
+    // The same size again: nothing to do.
+    assert!(kernel.resize(Instant(300), 120, 60).refresh().is_none());
+}
+
+#[test]
 fn bands_pass_whole_aligned_rows_and_again() {
     let mut kernel = Kernel::builder(DEVICE)
         .plugin(OverlayPlugin { log: log() })

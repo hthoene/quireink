@@ -120,17 +120,25 @@ fn android_main(app: AndroidApp) {
                 | MainEvent::WindowResized { .. }
                 | MainEvent::ConfigChanged { .. } => {
                     if let (Some(window), Some(running)) = (&window, running.as_mut()) {
-                        // Turned: the kernel is built again for the new size.
+                        // Turned: the same screens, made anew for the new size.
                         let size = (window.width(), window.height());
                         let frame = (
                             i32::from(running.frame.width()),
                             i32::from(running.frame.height()),
                         );
-                        if size == frame {
-                            present(window, &running.frame);
-                        } else {
-                            running.restart = true;
+                        if size != frame
+                            && let (Ok(width), Ok(height)) =
+                                (u16::try_from(size.0), u16::try_from(size.1))
+                            && let Ok(new) = Framebuffer::new(width, height, PixelFormat::Gray8)
+                        {
+                            running.frame = new;
+                            let effects = running.kernel.resize(now(), width, height);
+                            apply(running, effects);
+                            if let Some(epd) = epd.as_mut() {
+                                epd.set(RefreshMode::Full);
+                            }
                         }
+                        present(window, &running.frame);
                     }
                 }
                 MainEvent::Resume { .. } => {

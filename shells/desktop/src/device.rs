@@ -256,10 +256,19 @@ impl Device {
             self.speak(call);
         }
         self.report_warnings();
-        // Turned: built again for the turned size.
+        // Turned: the same screens, made anew for the turned size.
         if self.kernel.rotation() != self.rotation {
             self.rotation = self.kernel.rotation();
-            self.restart();
+            let display = turned(self.profile.device, self.rotation).display;
+            if let Ok(controller) = Framebuffer::new(display.width, display.height, display.format)
+            {
+                self.controller = controller;
+                self.panel = Panel::new(display.width, display.height, display.color);
+                let now = self.now();
+                let effects =
+                    budget::track(|| self.kernel.resize(now, display.width, display.height));
+                self.execute(effects);
+            }
         }
     }
 

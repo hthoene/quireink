@@ -1392,6 +1392,40 @@ impl Kernel {
         self.finish()
     }
 
+    /// The screen has another size, e.g. turned (see
+    /// [`Kernel::rotation`]): every open screen is made anew for it, with
+    /// what it was opened with, and the whole screen is drawn again.
+    pub fn resize(&mut self, now: Instant, width: u16, height: u16) -> Effects {
+        self.now = now;
+        let display = self.shared.device.display;
+        if (display.width, display.height) != (width, height) && width > 0 && height > 0 {
+            let banded = self.framebuffer.rows() < display.height;
+            let rows = if banded {
+                self.framebuffer.rows()
+            } else {
+                height
+            };
+            if let Ok(mut framebuffer) = Framebuffer::banded(width, height, rows, display.format) {
+                framebuffer.set_inverted(self.framebuffer.is_inverted());
+                self.framebuffer = framebuffer;
+                self.shared.device.display.width = width;
+                self.shared.device.display.height = height;
+                self.end_notice();
+                self.unrendered = None;
+                self.rendered = None;
+                let env = self.shared.env(now);
+                for active in &mut self.stack {
+                    if let Some(spec) = self.registry.screens.get(&active.id) {
+                        active.screen = (spec.factory)(&env, &active.params);
+                    }
+                }
+                let bounds = self.framebuffer.bounds();
+                self.screen_changed(bounds, false);
+            }
+        }
+        self.finish()
+    }
+
     /// Back from [`Kernel::suspend`].
     pub fn resume(&mut self, now: Instant) -> Effects {
         self.now = now;
