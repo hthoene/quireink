@@ -768,6 +768,35 @@ If the X4 has not arrived by the end of M3, M6 (Boox) is done before M4.
 | **M7 Kobo** | linux-fb shell, device DB, touch, frontlight, suspend | Daily-driver usable on one Kobo |
 | **M8 Expansion** | Runtime WASM plugins, PDF/CBZ/…, Kindle, PocketBook, reMarkable, web demo | none yet |
 
+### 12.1 Customisable before the first release
+
+Goal: before 1.0, everything a reader might want different can be changed,
+in the settings or by a plugin. Each item names the building block that
+makes it replaceable. ✅ done, 🔶 partly, ⬜ open.
+
+| # | What | Building block | State |
+|---|------|----------------|-------|
+| C1 | Every screen (home, library, reader, menus, keyboard, settings, browser) | Slots | ✅ |
+| C2 | Formats, fonts, hyphenation, translations, key maps, menus | Contributions, data plugins | ✅ |
+| C3 | Status lines: own text size; whole lines from plugins; a tap switches between the chosen ones, above and below the text | `add_status_line`, `add_status_item` | ✅ |
+| C4 | Short messages any plugin can show the same way ("Sync done") | SDK notice | ⬜ |
+| C5 | Rules: "when Wi-Fi is there, sync the catalogs", "from 22:00 night mode", "comics get another layout" | Rule plugin on events and actions | ⬜ |
+| C6 | Reading profiles: named sets of settings ("Night", "Commute", "Large print"), switched with a tap | Profiles over settings | ⬜ |
+| C7 | Themes: margins, row heights, UI text sizes, gray levels, header style, corners; icon packs (icons are a font role already) | Theme data plugins over `UiStyle` | ⬜ |
+| C8 | Menus as a grid of tiles besides lists | Menu presentation setting or plugin | ⬜ |
+| C9 | Sleep screen: cover, own picture, calendar, statistics | Slot `core.sleep` | ⬜ |
+| C10 | Text filters between format and layout: a style sheet per book, replaced words, reading aids, fonts for dyslexia | Document filter stage (§7.5) | ⬜ |
+| C11 | Footnotes as a popup or as a jump | Reader setting, replaceable behaviour | ⬜ |
+| C12 | Dictionary sources beside StarDict: online dictionaries, translators, Wikipedia | Dictionary providers | ⬜ |
+| C13 | Reading aloud | Speech engines as providers | ⬜ |
+| C14 | Library order: sort, group by author, series or tag, collections | Library views and sorters | 🔶 (recent/name, folders) |
+| C15 | Export of highlights and notes: Markdown, Obsidian, Joplin, Readwise, KOReader | Exporter plugins | ⬜ |
+| C16 | More sync: Calibre wireless, Nextcloud, Syncthing (books, progress, notes) | Sync providers | 🔶 (kosync, statistics over WebDAV, OPDS) |
+| C17 | Gestures and keys edited on the device; free tap zones (e.g. left-handed) | Key map editor plugin | 🔶 (`quireink.ini`, presets) |
+| C18 | Home screen widgets: reading goal, statistics, calendar, quote of the day | Widget contributions to the home screen | ⬜ |
+| C19 | OPDS: covers in lists, OPDS 2 (JSON), automatic sync | `opds` plugin, C5 | 🔶 |
+| C20 | Large-memory devices may use more (covers, more cached pages) without separate code | Device memory class in `DeviceInfo` | ⬜ |
+
 ---
 
 ## 13. Repository and project hygiene
