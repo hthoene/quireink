@@ -70,7 +70,7 @@ rust-version = "1.85"
 license = "Apache-2.0"
 repository = "https://github.com/hthoene/quireink"
 homepage = "https://github.com/hthoene/quireink"
-authors = ["The QuireInk Authors"]
+authors = ["Hannes Thoene", "The QuireInk contributors"]
 
 [workspace.dependencies]
 quireink-platform = { path = "crates/quireink-platform", version = "0.1.0" }

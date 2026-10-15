@@ -1,6 +1,6 @@
 ## Notice
 
-QuireInk Copyright 2026 The QuireInk Authors
+QuireInk Copyright 2026 Hannes Thoene and the QuireInk contributors
 
 This product is licensed under the Apache License, Version 2.0. See the LICENSE file for details.
 
