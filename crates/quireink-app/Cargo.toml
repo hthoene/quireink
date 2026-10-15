@@ -42,6 +42,7 @@ quireink-plugin-profiles.workspace = true
 quireink-plugin-keys.workspace = true
 quireink-plugin-wikipedia.workspace = true
 quireink-plugin-aids.workspace = true
+quireink-plugin-vocabulary.workspace = true
 quireink-plugin-plugin-manager.workspace = true
 quireink-plugin-reader.workspace = true
 quireink-plugin-settings.workspace = true

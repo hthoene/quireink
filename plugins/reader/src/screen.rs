@@ -416,6 +416,32 @@ impl WordBox {
 }
 
 /// The data folder of the book at `path`.
+/// Most words of a sentence on either side of a looked-up word.
+const SENTENCE_WORDS: usize = 30;
+
+/// The sentence around words `lo..=hi` of a page, as far as the page has
+/// it.
+fn sentence(words: &[WordBox], lo: usize, hi: usize) -> String {
+    let ends = |w: &WordBox| {
+        w.text
+            .trim_end_matches(['"', '\'', '’', '”', '»', '«', ')'])
+            .ends_with(['.', '!', '?', '…'])
+    };
+    let mut first = lo;
+    while first > 0 && lo - first < SENTENCE_WORDS && !ends(&words[first - 1]) {
+        first -= 1;
+    }
+    let mut last = hi;
+    while last + 1 < words.len() && last - hi < SENTENCE_WORDS && !ends(&words[last]) {
+        last += 1;
+    }
+    words[first..=last]
+        .iter()
+        .map(|w| w.text.as_str())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// Remembers `path` as the book read last (reopened at start-up).
 pub(crate) fn remember_last(storage: &dyn quireink_sdk::Storage, path: &str) {
     let state = format!(
@@ -827,6 +853,17 @@ impl ReaderScreen {
                     Params::new()
                         .with(params::WORD, phrase.to_string())
                         .with(params::LANGUAGE, book.language.clone()),
+                ));
+                cx.command(Command::Emit(
+                    events::WORD_LOOKED_UP,
+                    Params::new()
+                        .with(params::WORD, phrase.to_string())
+                        .with(params::LANGUAGE, book.language.clone())
+                        .with(params::TEXT, sentence(&words, lo, hi))
+                        .with(params::PATH, book.path.clone())
+                        .with(params::TITLE, book.title.clone())
+                        .with(params::SECTION, format!("{}", start.section))
+                        .with(params::OFFSET, format!("{}", start.offset)),
                 ));
             }
             return;

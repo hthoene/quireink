@@ -822,7 +822,7 @@ not yet. Each idea stays simple by default and replaceable by plugins.
 | I6 | Book information: description, subjects, series, file, from the library and the reader | KOReader | ✅ (hold a book in the library; tap the title in the reader's menu; slot `core.book-info`) |
 | I7 | The printed edition's page numbers (EPUB `page-list`) | KOReader | ✅ (status item "Printed page", `Document::page_label`) |
 | I8 | Contents made from the headings where a book has none or a poor one | KOReader | ✅ (found once when the contents open, kept per book) |
-| I9 | Vocabulary: words looked up, with their sentence, to review later | KOReader (vocabulary builder) | ⬜ |
+| I9 | Vocabulary: words looked up, with their sentence, to review later | KOReader (vocabulary builder) | ✅ (`vocabulary` plugin: every word looked up with its sentence and book (event `core.word-looked-up`), Vocabulary in the main menu: look up again, go to the place, delete, export for Anki) |
 | I10 | Translating selected text online, by a plugin | KOReader | ⬜ |
 | L1 | Favourites: a star on a book, a shelf of them | KOReader | ✅ (hold a book; "Shelves > Favourites") |
 | L2 | The library as a grid of covers | KOReader (cover browser), CrossPoint | ✅ (setting "Show books as": list or covers; `ListView::columns` for any grid) |

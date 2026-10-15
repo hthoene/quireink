@@ -184,6 +184,13 @@ pub mod events {
     /// [`PATH`](super::params::PATH) (the new one). Plugins that keep data
     /// by a book's path move it along (progress, notes, statistics).
     pub const BOOK_MOVED: Id = Id::new_static("core.book-moved");
+    /// A word of a book was looked up: parameters
+    /// [`WORD`](super::params::WORD), [`LANGUAGE`](super::params::LANGUAGE),
+    /// [`TEXT`](super::params::TEXT) (its sentence), the book's
+    /// [`PATH`](super::params::PATH) and [`TITLE`](super::params::TITLE),
+    /// and where the word is ([`SECTION`](super::params::SECTION),
+    /// [`OFFSET`](super::params::OFFSET)).
+    pub const WORD_LOOKED_UP: Id = Id::new_static("core.word-looked-up");
     /// A menu was redefined or reset; parameter [`ID`](super::params::ID).
     pub const MENU_CHANGED: Id = Id::new_static("core.menu-changed");
     /// The device goes to sleep or the app to the background: a moment to
