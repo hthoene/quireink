@@ -13,7 +13,7 @@ use quireink_sdk::ui::{self, UiStyle};
 use quireink_sdk::{Canvas, Color, Env, Id, Point, Rect};
 
 use crate::SELECTION_MENU;
-use crate::actions::{CANCEL, EXTEND, HIGHLIGHT, MORE, NOTE};
+use crate::actions::{CANCEL, EXTEND, HIGHLIGHT, MORE, NOTE, TRANSLATE};
 use crate::screen::WordBox;
 
 /// What the buttons do with the selection.
@@ -104,13 +104,16 @@ impl Selection {
 /// *Cancel* is left out (back cancels); on touch screens *Extend* is
 /// (tapping words extends the selection).
 pub(crate) fn items(env: &Env<'_>, highlight: Option<bool>) -> Vec<Item> {
+    let translates = translates(env);
     let mut all: Vec<Item> = env
         .menus
         .items(SELECTION_MENU.as_str())
         .into_iter()
         .filter(|item| {
             let touch = env.device.input.touch;
-            !(*item.id == EXTEND && touch || *item.id == CANCEL && !touch)
+            !(*item.id == EXTEND && touch
+                || *item.id == CANCEL && !touch
+                || *item.id == TRANSLATE && !translates)
         })
         .map(|item| Item {
             id: item.id.clone(),
@@ -156,6 +159,12 @@ pub(crate) fn items(env: &Env<'_>, highlight: Option<bool>) -> Vec<Item> {
     shown
 }
 
+/// Whether selected text can be translated: a translator is installed
+/// and there is a network.
+pub(crate) fn translates(env: &Env<'_>) -> bool {
+    env.network && env.has_slot(&quireink_sdk::builtin::slots::TRANSLATE)
+}
+
 /// Where the bar is: over the status line at the bottom.
 pub(crate) fn bar_area(env: &Env<'_>, style: &UiStyle) -> Rect {
     let display = env.device.display;
@@ -163,16 +172,23 @@ pub(crate) fn bar_area(env: &Env<'_>, style: &UiStyle) -> Rect {
     Rect::new(0, display.height - height, display.width, height)
 }
 
-/// How wide the items' labels are, with a gap around each.
+/// Space around a button in its part of the bar.
+fn button_pad(style: &UiStyle) -> u16 {
+    (style.gap / 4) as u16 + ui::button_border(style) as u16 * 3
+}
+
+/// How wide the items need to be: their labels with the room a button
+/// keeps around them (see [`ui::draw_button`]), so none is shortened.
 fn natural_widths(env: &Env<'_>, style: &UiStyle, items: &[Item]) -> Vec<f32> {
     let font = style.font(env);
+    let around = 2.0 * style.gap as f32 + 2.0 * f32::from(button_pad(style));
     items
         .iter()
         .map(|item| {
             let label = font
                 .as_ref()
                 .map_or(0.0, |f| f.measure(style.small, env.i18n.tr(&item.title)));
-            label + style.gap as f32
+            label + around
         })
         .collect()
 }
@@ -220,7 +236,7 @@ pub(crate) fn draw_bar(
     for (index, (item, &area)) in items.iter().zip(&areas).enumerate() {
         // Buttons as everywhere; the whole part stays the target of taps.
         let h = ui::button_height(area);
-        let pad = (style.gap / 4) as u16 + ui::button_border(&style) as u16 * 3;
+        let pad = button_pad(&style);
         let button = Rect::new(
             area.x + pad,
             area.y + (area.height - h) / 2,

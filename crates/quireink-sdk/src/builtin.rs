@@ -105,6 +105,13 @@ pub mod slots {
     /// the kernel; bind another screen here for messages that look
     /// different. Its [`region`](crate::Screen::region) is where it shows.
     pub const NOTICE: Id = Id::new_static("core.notice");
+    /// Translates text (an overlay): parameters
+    /// [`TEXT`](super::params::TEXT) and, if known,
+    /// [`LANGUAGE`](super::params::LANGUAGE) (the text's). The reader
+    /// offers it for selected text when a screen is bound here and there
+    /// is a network; the `translate` plugin binds DeepL, other services
+    /// can take its place.
+    pub const TRANSLATE: Id = Id::new_static("core.translate");
     /// Shown while the device sleeps (see
     /// [`actions::SLEEP`](super::actions::SLEEP)): a cover, a picture, a
     /// message. It closes itself when the device wakes

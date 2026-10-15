@@ -51,6 +51,7 @@ pub fn install(builder: KernelBuilder, fonts: Fonts) -> KernelBuilder {
         .plugin(quireink_plugin_aids::Aids)
         .plugin(quireink_plugin_vocabulary::Vocabulary)
         .plugin(quireink_plugin_sleep::Sleep)
+        .plugin(quireink_plugin_translate::Translate)
         .plugin_off(quireink_plugin_browser::Browser)
         .plugin(quireink_plugin_keyboard::Keyboard)
         .plugin(quireink_plugin_settings::SettingsPlugin)

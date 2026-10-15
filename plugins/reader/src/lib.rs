@@ -196,6 +196,9 @@ pub mod actions {
     pub const READ_FROM: Id = Id::new_static("reader.selection.read-aloud");
     /// Copies the selected text to the clipboard.
     pub const COPY: Id = Id::new_static("reader.selection.copy");
+    /// Translates the selected text (slot `core.translate`), where a
+    /// translator is installed and there is a network.
+    pub const TRANSLATE: Id = Id::new_static("reader.selection.translate");
     /// Moves the end of the selection with the buttons.
     pub const EXTEND: Id = Id::new_static("reader.selection.extend");
     pub const CANCEL: Id = Id::new_static("reader.selection.cancel");
@@ -274,6 +277,7 @@ impl Plugin for Reader {
             (actions::LOOK_UP, "reader.select.look-up"),
             (actions::HIGHLIGHT, "reader.select.highlight"),
             (actions::COPY, "reader.select.copy"),
+            (actions::TRANSLATE, "reader.select.translate"),
             (actions::READ_FROM, "reader.select.read-aloud"),
             (actions::NOTE, "reader.select.note"),
             (actions::BOOK_INFO, "reader.book-info"),
@@ -296,6 +300,7 @@ impl Plugin for Reader {
             (actions::NOTE, 22),
             (actions::READ_FROM, 25),
             (actions::COPY, 30),
+            (actions::TRANSLATE, 35),
             (actions::EXTEND, 80),
             (actions::CANCEL, 90),
         ] {

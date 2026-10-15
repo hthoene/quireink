@@ -110,6 +110,9 @@ pub struct SettingSpec {
     /// [`setting_sections::FONT`](crate::builtin::setting_sections::FONT)),
     /// shown as a heading above it in large groups.
     pub section: Option<Cow<'static, str>>,
+    /// A secret such as an API key: shown as dots, and entered afresh
+    /// rather than edited.
+    pub secret: bool,
 }
 
 impl SettingSpec {
@@ -135,6 +138,7 @@ impl SettingSpec {
             step: 1,
             slider: false,
             section: None,
+            secret: false,
         }
     }
 
@@ -148,6 +152,12 @@ impl SettingSpec {
     /// A number set with a slider in panels (see [`SettingSpec::slider`]).
     pub fn slider(mut self) -> Self {
         self.slider = true;
+        self
+    }
+
+    /// A secret, such as an API key (see [`SettingSpec::secret`]).
+    pub fn secret(mut self) -> Self {
+        self.secret = true;
         self
     }
 

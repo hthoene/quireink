@@ -1221,6 +1221,7 @@ fn plain_setting_value(env: &Env<'_>, spec: &SettingSpec) -> String {
             Some(unit) => env.i18n.plural(unit, *v, &[]),
             None => format!("{v}"),
         },
+        Some(SettingValue::Text(v)) if spec.secret && !v.is_empty() => "••••••".to_string(),
         Some(SettingValue::Text(v)) => option_name(env, spec, v),
         None => String::new(),
     }

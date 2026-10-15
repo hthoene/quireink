@@ -871,9 +871,23 @@ impl ReaderScreen {
         if *item == crate::actions::MORE {
             // The whole selection menu as a list; the chosen action comes
             // back to `on_action` while the text stays selected.
+            // As in the bar: what does not apply here is left out.
+            let env = *cx.env();
+            let mut hide = Vec::new();
+            if !crate::selection::translates(&env) {
+                hide.push(crate::actions::TRANSLATE.as_str().to_string());
+            }
+            hide.push(if env.device.input.touch {
+                crate::actions::EXTEND.as_str().to_string()
+            } else {
+                crate::actions::CANCEL.as_str().to_string()
+            });
+            let hide = hide.join(",");
             cx.command(Command::OpenSlot(
                 slots::MENU,
-                Params::new().with(params::MENU, crate::SELECTION_MENU.as_str()),
+                Params::new()
+                    .with(params::MENU, crate::SELECTION_MENU.as_str())
+                    .with(params::HIDE, hide),
             ));
             return;
         }
@@ -888,6 +902,13 @@ impl ReaderScreen {
         }
         if *item == crate::actions::COPY {
             cx.command(Command::SetClipboard(text.clone()));
+        } else if *item == crate::actions::TRANSLATE {
+            cx.command(Command::OpenSlot(
+                slots::TRANSLATE,
+                Params::new()
+                    .with(params::TEXT, text.clone())
+                    .with(params::LANGUAGE, book.language.clone()),
+            ));
         } else if *item == crate::actions::HIGHLIGHT {
             let highlight = |m: &Mark| m.kind == Kind::Highlight && m.overlaps(start, end);
             // On highlighted text the item removes the highlight.

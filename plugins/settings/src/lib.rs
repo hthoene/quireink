@@ -624,7 +624,14 @@ impl GroupPage {
                     slots::KEYBOARD,
                     Params::new()
                         .with(params::TITLE, env.i18n.tr(&spec.title).to_string())
-                        .with(params::TEXT, ui::setting_value(env, spec))
+                        .with(
+                            params::TEXT,
+                            if spec.secret {
+                                String::new()
+                            } else {
+                                ui::setting_value(env, spec)
+                            },
+                        )
                         .with(params::REPLY, TEXT_ENTERED.as_str())
                         .with(ID, spec.id.as_str().to_string()),
                 ));
