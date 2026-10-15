@@ -255,5 +255,5 @@ fn written_png_reads_back() {
     let data = file.0.borrow().clone();
     let image = decoded(&data, 1000);
     assert_eq!((image.width, image.height), (w, h));
-    assert_eq!(image.pixels[w as usize + 3], ((3 * 7 + 40) % 256) as u8);
+    assert_eq!(image.pixels[w as usize + 3], 3 * 7 + 40);
 }
