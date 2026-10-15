@@ -848,12 +848,12 @@ impl ListView {
         if len == 0 {
             return ListChange::None;
         }
-        if !self.shown {
-            // The first press shows where the focus is; pages still turn.
+        if !self.shown && delta.abs() == 1 {
+            // The first press of a direction shows where the focus is.
+            // Turning pages (also by swiping or a tap on the arrows)
+            // does not: on touch screens it stays hidden.
             self.shown = true;
-            if delta.abs() == 1 {
-                return ListChange::Focus;
-            }
+            return ListChange::Focus;
         }
         let focus = (self.focus as isize + delta).clamp(0, len as isize - 1) as usize;
         if focus == self.focus {

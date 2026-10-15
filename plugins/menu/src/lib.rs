@@ -328,6 +328,13 @@ impl MenuScreen {
                 let value = ui::setting_value(env, spec);
                 ui::draw_stepper(canvas, env, &style, rect, label, &value, self.editing);
             }
+            // On touch screens − and + are always there.
+            Some(spec)
+                if env.device.input.touch && matches!(spec.kind, SettingKind::Int { .. }) =>
+            {
+                let value = ui::setting_value(env, spec);
+                ui::draw_number(canvas, env, &style, rect, label, &value, None);
+            }
             Some(spec) => {
                 let mut value = ui::setting_value(env, spec);
                 if spec.editor.is_some()
@@ -443,6 +450,8 @@ impl Screen for MenuScreen {
             }
             return Handled::Yes;
         }
+        // Directions, not pages: turning pages (also by swiping) keeps the
+        // focus hidden on touch screens.
         let navigation = [
             actions::UP,
             actions::LEFT,
@@ -450,8 +459,6 @@ impl Screen for MenuScreen {
             actions::DOWN,
             actions::RIGHT,
             actions::NEXT,
-            actions::NEXT_PAGE,
-            actions::PREV_PAGE,
         ];
         if navigation.contains(a) && !self.keys {
             // The first button press shows where the focus is.
@@ -502,8 +509,10 @@ impl Screen for MenuScreen {
             self.run(index, cx);
             return Handled::Yes;
         };
-        // The first tap selects a number; its − and + buttons change it.
-        if index != self.rows.focus || !self.keys {
+        // On touch screens − and + are always there and act at once;
+        // with buttons the first tap selects a number.
+        let touch = env.device.input.touch;
+        if !touch && (index != self.rows.focus || !self.keys) {
             self.rows.focus = index;
             self.keys = true;
             self.editing = false;
@@ -521,9 +530,19 @@ impl Screen for MenuScreen {
             rect.height,
         );
         let value = ui::setting_value(&env, spec);
+        if touch {
+            self.rows.focus = index;
+            self.editing = false;
+        }
         if let Some((minus, plus)) = ui::stepper(&env, &self.style, rect, &value) {
             let x = gesture.start.x;
-            let within = |r: Rect| x >= i32::from(r.x) && x < r.right() as i32;
+            // A little room around the buttons: easier to hit.
+            let slack = if touch {
+                i32::from(self.style.gap as u16)
+            } else {
+                0
+            };
+            let within = |r: Rect| x >= i32::from(r.x) - slack && x < r.right() as i32 + slack;
             if within(minus) {
                 self.step(&env, spec, -1, cx);
             } else if within(plus) {

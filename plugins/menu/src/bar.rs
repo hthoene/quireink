@@ -340,6 +340,11 @@ impl Screen for BarScreen {
 
     fn on_action(&mut self, action: &Id, cx: &mut Cx<'_, '_>) -> Handled {
         let a = action;
+        // Turning pages (also by swiping) does not show the focus on
+        // touch screens; directions do.
+        if !self.keys && (*a == actions::NEXT_PAGE || *a == actions::PREV_PAGE) {
+            return Handled::Yes;
+        }
         if [
             actions::LEFT,
             actions::UP,
