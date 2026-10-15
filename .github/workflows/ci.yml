@@ -41,15 +41,13 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
       - name: Build kernel and first-party plugins
+        # The standard app pulls in every first-party plugin, so a new
+        # one is built here without being listed.
         run: >
           cargo build --release --target ${{ matrix.target }}
-          -p quireink-core -p quireink-plugin-diagnostics
-          -p quireink-plugin-format-txt -p quireink-plugin-format-epub -p quireink-plugin-hyphenation
-          -p quireink-image -p quireink-sqlite -p quireink-plugin-settings
-          -p quireink-plugin-reader -p quireink-plugin-files
-          -p quireink-plugin-menu -p quireink-plugin-menu-editor -p quireink-plugin-kosync -p quireink-plugin-stats -p quireink-plugin-file-manager -p quireink-plugin-transfer -p quireink-plugin-browser -p quireink-plugin-keyboard -p quireink-plugin-home -p quireink-plugin-plugin-manager
-          -p quireink-stardict -p quireink-plugin-dictionary
-          -p quireink-plugin-fonts-default --no-default-features
+          -p quireink-app --no-default-features --features packs
+          -p quireink-image -p quireink-sqlite -p quireink-stardict
+          -p quireink-sample-hello
 
   architecture:
     name: Architecture rules
@@ -57,10 +55,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Plugins depend on the SDK only
+        # Their tests may run them in a kernel (dev-dependencies).
         run: |
           status=0
-          for manifest in plugins/*/Cargo.toml; do
-            if grep -Eq '^quireink-core' "$manifest"; then
+          for manifest in plugins/*/Cargo.toml samples/*/Cargo.toml; do
+            if awk '/^\[/ { part = $0 } part == "[dependencies]" && /^quireink-core/' "$manifest" | grep -q .; then
               echo "::error file=$manifest::plugins must depend on quireink-sdk, not quireink-core"
               status=1
             fi
