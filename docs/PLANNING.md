@@ -444,8 +444,9 @@ display, controls, library, system, other), basic/advanced levels with a
 switch on the main page, descriptions shown below the list, units with
 plural forms, a chooser list for choices and languages, `−`/`+` buttons
 for numbers (a first tap only selects), text settings on the on-screen
-keyboard (slot `core.keyboard`). ⬜ sliders, live preview, search,
-contributed pages.
+keyboard (slot `core.keyboard`), contributed pages (`core.settings-pages`),
+a search over all settings and pages (accents and case ignored). ⬜
+sliders, live preview.
 
 ---
 
