@@ -518,19 +518,6 @@ impl Screen for PlaceholderScreen {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use quireink_i18n::{Catalog, check};
-
-    #[test]
-    fn translations_are_complete() {
-        let en = Catalog::parse(include_str!("../i18n/en.ini")).unwrap();
-        let de = Catalog::parse(include_str!("../i18n/de.ini")).unwrap();
-        let issues = check::compare(&en, &de);
-        assert!(issues.is_empty(), "{issues:?}");
-    }
-}
-
 /// Where a screenshot goes: `Screenshots` beside the library folder,
 /// named by the time ("QuireInk 2026-10-15 17-30-05.png").
 fn screenshot_path(env: &Env<'_>) -> alloc::string::String {
@@ -561,4 +548,17 @@ fn screenshot_path(env: &Env<'_>) -> alloc::string::String {
         n += 1;
     }
     path
+}
+
+#[cfg(test)]
+mod tests {
+    use quireink_i18n::{Catalog, check};
+
+    #[test]
+    fn translations_are_complete() {
+        let en = Catalog::parse(include_str!("../i18n/en.ini")).unwrap();
+        let de = Catalog::parse(include_str!("../i18n/de.ini")).unwrap();
+        let issues = check::compare(&en, &de);
+        assert!(issues.is_empty(), "{issues:?}");
+    }
 }
