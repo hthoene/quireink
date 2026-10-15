@@ -835,7 +835,7 @@ replaceable by plugins.
 | D3 | Turning the screen, also to landscape | CrossPoint | ⬜ |
 | D4 | Firmware updates over Wi-Fi (X4) | CrossPoint | ⬜ |
 | D5 | Screenshots | CrossPoint, KOReader | ⬜ |
-| S1 | Read-later articles (Wallabag), news feeds as books, highlights to Readwise and Joplin (C15), Calibre wireless (C16) | KOReader | ⬜ |
+| S1 | Read-later articles (Wallabag), news feeds as books, highlights to Readwise and Joplin (C15), Calibre wireless (C16) | KOReader | 🔶 (news feeds: `news` plugin, RSS and Atom as books in `News`; the rest open) |
 | U1 | Typing on a phone: passwords and keys sent from a phone's browser (QR code) into any text field; a store of credentials, replaceable by plugins | own idea | 🔶 (keyboard "Phone", slot `core.remote-keyboard` bound by `transfer`; the credentials store open) |
 | U2 | Pasting with a long press in a text field | phones | ✅ |
 
