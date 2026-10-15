@@ -22,7 +22,7 @@ pub(crate) const TODAY: Id = Id::new_static("stats.widget.today");
 /// Setting: minutes a day to read, or none.
 pub(crate) const GOAL: Id = Id::new_static("stats.goal");
 /// Choices of [`GOAL`]: minutes, `off` for none.
-const GOALS: [&str; 8] = [
+const GOALS: [&str; 12] = [
     "stats.goal.off",
     "stats.goal.10",
     "stats.goal.15",
@@ -31,6 +31,10 @@ const GOALS: [&str; 8] = [
     "stats.goal.45",
     "stats.goal.60",
     "stats.goal.90",
+    "stats.goal.120",
+    "stats.goal.180",
+    "stats.goal.240",
+    "stats.goal.300",
 ];
 
 /// The daily goal in seconds, if one is set.
