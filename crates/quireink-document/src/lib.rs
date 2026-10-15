@@ -436,6 +436,13 @@ pub trait Document {
     /// Number of sections (at least 1).
     fn sections(&self) -> u32;
 
+    /// Each section is the picture of a whole page (a comic, pages made
+    /// for one screen): readers show them edge to edge, without margins
+    /// or status lines.
+    fn whole_pages(&self) -> bool {
+        false
+    }
+
     /// Length of a section in source units, for progress calculation.
     fn section_len(&self, section: u32) -> u32;
 

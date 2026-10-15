@@ -336,6 +336,10 @@ impl Document for XtcDocument {
         &self.metadata
     }
 
+    fn whole_pages(&self) -> bool {
+        true
+    }
+
     fn sections(&self) -> u32 {
         self.pages
     }

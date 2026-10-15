@@ -237,8 +237,9 @@ struct Typography {
 }
 
 impl Typography {
-    /// Typography for a book in `language`.
-    fn new(env: &Env<'_>, font: &FontHandle<'_>, language: &str) -> Self {
+    /// Typography for a book in `language`; a book of `whole_pages` is
+    /// shown edge to edge, without margins or status lines.
+    fn new(env: &Env<'_>, font: &FontHandle<'_>, language: &str, whole_pages: bool) -> Self {
         let settings = env.settings;
         let m = env.metrics;
         let size = m.pt(settings.int(FONT_SIZE.as_str()) as f32);
@@ -258,9 +259,17 @@ impl Typography {
         };
 
         let display = env.device.display;
-        let margin = m.mm(settings.int(MARGIN.as_str()).max(0) as u32) as f32;
+        let margin = if whole_pages {
+            0.0
+        } else {
+            m.mm(settings.int(MARGIN.as_str()).max(0) as u32) as f32
+        };
         let status_height = status::height(env);
-        let (top, bottom) = (status::shown(env, true), status::shown(env, false));
+        let (top, bottom) = if whole_pages {
+            (false, false)
+        } else {
+            (status::shown(env, true), status::shown(env, false))
+        };
         let lines = f32::from(u8::from(top) + u8::from(bottom));
         let width = (f32::from(display.width) - 2.0 * margin).max(1.0);
         // Text never runs up to a status line, also on pages it fills to
@@ -278,7 +287,7 @@ impl Typography {
         let key = format!(
             "{:016x}",
             fnv(&format!(
-                "{}|{}|{}|{}|{}|{size}|{line_height}|{}|{}|{justify}|{width}x{height}|{}|{}|{}|{word_spacing}|{}",
+                "{}|{}|{}|{}|{}|{size}|{line_height}|{}|{}|{justify}|{width}x{height}|{}|{}|{}|{word_spacing}|{}|{whole_pages}",
                 quireink_sdk::layout::VERSION,
                 font.id(),
                 face_id(env, &fonts::READING_BOLD),
@@ -1236,7 +1245,7 @@ impl Book {
             .language
             .clone()
             .unwrap_or_else(|| env.i18n.language().to_string());
-        let typography = Typography::new(env, &font, &language);
+        let typography = Typography::new(env, &font, &language, document.whole_pages());
         let dir = book_dir(path);
         let marks = annotations::marks(env.storage, &dir);
         let title = document
@@ -1318,7 +1327,7 @@ impl Book {
         let Some(font) = self.font(env) else {
             return;
         };
-        self.typography = Typography::new(env, &font, &self.language);
+        self.typography = Typography::new(env, &font, &self.language, self.document.whole_pages());
         if let Ok(page) = self.layout(env, self.page.start) {
             self.page = page;
         }
