@@ -816,7 +816,7 @@ not yet. Each idea stays simple by default and replaceable by plugins.
 |---|------|---------|-------|
 | I1 | Time left in the chapter and the book, from one's reading speed, as status items | KOReader | ✅ (`stats.status.left-chapter`, `stats.status.left-book`) |
 | I2 | A slider to skim through the book (chapter marks on it), back to where one was with one tap | KOReader (skim widget) | ⬜ |
-| I3 | "Back" after any jump (contents, search, go to page, skimming), not only after links | KOReader | ⬜ |
+| I3 | "Back" after any jump (contents, search, go to page, skimming), not only after links | KOReader | ✅ |
 | I4 | Turning pages by itself every few seconds | KOReader (Autoturn), CrossPoint | ⬜ |
 | I5 | Notes on highlights; highlight styles (marker, underline, strikeout) | KOReader | ⬜ |
 | I6 | Book information: description, subjects, series, file, from the library and the reader | KOReader | ⬜ |

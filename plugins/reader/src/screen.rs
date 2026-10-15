@@ -28,7 +28,8 @@ const PAGES_PER_STEP: usize = 8;
 const STEP_DELAY_MS: u64 = 2;
 /// Pages remembered for going back before the index covers them.
 const HISTORY: usize = 64;
-/// Places links were followed from, kept for *Back*.
+/// Places jumps were made from (links, contents, search, page numbers),
+/// kept for *Back*.
 const RETURNS: usize = 32;
 
 /// Page geometry and text style, derived from settings and the screen.
@@ -1075,15 +1076,8 @@ impl ReaderScreen {
         let Some(target) = book.document.link_target(env.storage, href) else {
             return Handled::No;
         };
-        let from = book.page.start;
         let start = book.page_start(&env, target);
-        if book.show(cx, start, true) {
-            if book.returns.len() == RETURNS {
-                book.returns.remove(0);
-            }
-            book.returns.push(from);
-            book.landed = Some(book.page.start);
-        }
+        book.jump(cx, start);
         Handled::Yes
     }
 
@@ -1655,7 +1649,22 @@ impl Book {
             .find(|l| word.end.offset > l.start && word.start.offset < l.end)
     }
 
-    /// Back to where the last link was followed from.
+    /// Shows the page that starts at `start`, far from here (a link, the
+    /// contents, a search hit, a page number): *Back* returns here.
+    fn jump(&mut self, cx: &mut Cx<'_, '_>, start: Locator) -> bool {
+        let from = self.page.start;
+        if !self.show(cx, start, true) {
+            return false;
+        }
+        if self.returns.len() == RETURNS {
+            self.returns.remove(0);
+        }
+        self.returns.push(from);
+        self.landed = Some(self.page.start);
+        true
+    }
+
+    /// Back to where the last jump was made from.
     fn go_back(&mut self, cx: &mut Cx<'_, '_>) {
         if let Some(from) = self.returns.pop() {
             self.landed = None;
@@ -2387,7 +2396,7 @@ impl Screen for ReaderScreen {
             self.selection = None;
             let env = *cx.env();
             let start = book.page_start(&env, at);
-            book.show(cx, start, true);
+            book.jump(cx, start);
             let end = params
                 .get(crate::END_SECTION)
                 .zip(params.get(crate::END_OFFSET))
@@ -2422,7 +2431,7 @@ impl Screen for ReaderScreen {
                 let page = number.clamp(1, index.pages()) - 1;
                 if let Some(start) = index.entry(env.storage, page) {
                     self.selection = None;
-                    book.show(cx, start, true);
+                    book.jump(cx, start);
                 }
             }
             return;
