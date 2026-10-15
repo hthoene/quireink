@@ -6,7 +6,7 @@
 //!   buttons: the menu button) offers to sync, edit or remove it.
 //! - A catalog has an address and, if it needs them, a user name and a
 //!   password. Marked for syncing, *Sync catalogs* downloads its books
-//!   that are not on the device yet into its folder (see [`sync`]); the
+//!   that are not on the device yet into its folder (see `sync`); the
 //!   action can also be put into menus.
 //! - Books go to the library folder when downloaded one by one, in the
 //!   format QuireInk reads best of those offered.

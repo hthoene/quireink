@@ -91,7 +91,7 @@ const DEFAULT_GLYPH_CACHE: usize = 32 * 1024;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Effect {
-    /// Transfer `region` of [`Kernel::frame`] to the panel and refresh it.
+    /// Pass `region` on to the panel with [`Kernel::render`] and refresh it.
     Refresh { region: Rect, mode: RefreshMode },
     /// Call [`Kernel::tick`] at (or soon after) this time.
     WakeAt(Instant),

@@ -1029,7 +1029,7 @@ pub fn draw_value_row(
 const STEPPER_VALUE: &str = "000 %";
 
 /// The − and + buttons of a number row, with room for `room` between
-/// them (at least [`STEPPER_VALUE`]): the value, or the widest of the
+/// them (at least for "000 %"): the value, or the widest of the
 /// numbers in rows above each other (see [`number_room`]), so their
 /// buttons line up.
 pub fn stepper(env: &Env<'_>, style: &UiStyle, rect: Rect, room: &str) -> Option<(Rect, Rect)> {

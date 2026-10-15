@@ -9,7 +9,7 @@
 //! press on confirm finishes.
 //!
 //! - Layouts: the setting *Keyboard layouts* chooses one or more of the
-//!   built-in ones (see [`layouts`]); by default the UI language's, which
+//!   built-in ones (see `layouts`); by default the UI language's, which
 //!   a translation brings under `keyboard.letters`. With several, a key
 //!   with the layout's code (e.g. `DE`) switches between them.
 //! - Accents and other variants: a long press on a letter (with buttons:

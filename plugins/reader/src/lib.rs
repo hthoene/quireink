@@ -87,8 +87,8 @@ pub const FOLLOW: Id = Id::new_static("reader.follow");
 /// The reply when a page has been read aloud; parameter `path`.
 const SPOKEN: Id = Id::new_static("reader.spoken");
 /// Skimming through the book, an overlay (see `skim`); it asks the
-/// reader to move with [`SKIM`] and hears where the book is with
-/// [`SKIMMED`].
+/// reader to move with `reader.skim` and hears where the book is with
+/// `reader.skimmed`.
 pub const SKIM_SCREEN: Id = Id::new_static("reader.skim-screen");
 const SKIM: Id = Id::new_static("reader.skim");
 const SKIMMED: Id = Id::new_static("reader.skimmed");
@@ -138,7 +138,8 @@ pub mod settings {
     pub const HIGHLIGHT_STYLE: Id = Id::new_static("reader.highlight-style");
     pub const HIGHLIGHT_MARKER: &str = "reader.highlight-style.marker";
     pub const HIGHLIGHT_UNDERLINE: &str = "reader.highlight-style.underline";
-    /// Seconds between pages turned by themselves ([`actions::AUTO_TURN`]).
+    /// Seconds between pages turned by themselves
+    /// ([`actions::AUTO_TURN`](super::actions::AUTO_TURN)).
     pub const AUTO_TURN_SECONDS: Id = Id::new_static("reader.auto-turn-seconds");
 }
 

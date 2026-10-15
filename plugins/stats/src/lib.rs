@@ -7,12 +7,12 @@
 //! longer ones count as *Longest page* (2 min), so a book left open does
 //! not count as read. Books are recognised by KOReader's fingerprint of
 //! the file (a partial MD5). Reading pauses while the app is in the
-//! background. See [`store`] for the files.
+//! background. See `store` for the files.
 //!
 //! The statistics are shared with KOReader's: through the cloud folder
 //! KOReader syncs them to (WebDAV), and by taking over those of KOReader
-//! on the same device (see [`sync`]); its database format is in
-//! [`koreader`], the merge in [`merge`].
+//! on the same device (see `sync`); its database format is in
+//! `koreader`, the merge in `merge`.
 
 #![no_std]
 

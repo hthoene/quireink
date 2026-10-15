@@ -6,8 +6,8 @@ pub fn millivolts(measured: u16) -> u16 {
 }
 
 /// Empty and full, in millivolts.
-const EMPTY: u16 = 3250;
-const FULL: u16 = 4150;
+pub const EMPTY: u16 = 3250;
+pub const FULL: u16 = 4150;
 
 /// The charge left, in percent, from the battery's voltage: a curve
 /// fitted to a lithium polymer cell's discharge between [`EMPTY`] and
