@@ -781,7 +781,7 @@ makes it replaceable. ✅ done, 🔶 partly, ⬜ open.
 | C3 | Status lines: own text size; whole lines from plugins; a tap switches between the chosen ones, above and below the text | `add_status_line`, `add_status_item` | ✅ |
 | C4 | Short messages any plugin can show the same way ("Sync done"), how long they show | `Command::Notify`, slot `core.notice` | ✅ |
 | C5 | Rules: "every day at 22:00: night mode on", "when QuireInk starts: sync the catalogs"; when: start, time of day, book opened, waking up; then: any action, any switch on or off | `rules` plugin, `Command::Schedule` (timers for plugins) | ✅ (more triggers, e.g. Wi-Fi, once the shells report them) |
-| C6 | Reading profiles: named sets of settings ("Night", "Commute", "Large print"), switched with a tap | Profiles over settings | ⬜ |
+| C6 | Reading profiles: named sets of settings ("Night", "Commute", "Large print"), switched with a tap, a button or a rule | `profiles` plugin (reading, display and status line settings; action "Next profile") | ✅ |
 | C7 | Themes: margins, row heights, UI text sizes, gray levels, header style, corners; icon packs (icons are a font role already) | Theme data plugins over `UiStyle` | ⬜ |
 | C8 | Menus as a grid of tiles besides lists | Menu presentation setting or plugin | ⬜ |
 | C9 | Sleep screen: cover, own picture, calendar, statistics | Slot `core.sleep` | ⬜ |
