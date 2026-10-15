@@ -5,7 +5,8 @@ target = "riscv32imc-unknown-none-elf"
 
 [target.riscv32imc-unknown-none-elf]
 runner = "espflash flash --monitor --chip esp32c3"
-rustflags = ["-C", "force-frame-pointers", "-C", "link-arg=-Tlinkall.x"]
+# Frame pointers for backtraces; the linker script is in build.rs.
+rustflags = ["-C", "force-frame-pointers"]
 
 [env]
 ESP_LOG = "info"
