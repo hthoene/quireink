@@ -124,6 +124,8 @@ pub mod settings {
     pub const ALOUD_TURN: Id = Id::new_static("reader.aloud-turn-pages");
     /// Reading aloud stops by itself after a while (a sleep timer).
     pub const ALOUD_TIMER: Id = Id::new_static("reader.aloud-timer");
+    /// Seconds between pages turned by themselves ([`actions::AUTO_TURN`]).
+    pub const AUTO_TURN_SECONDS: Id = Id::new_static("reader.auto-turn-seconds");
 }
 
 /// The reader's menu (`core.menu` on the reader screen). Any plugin can
@@ -167,6 +169,8 @@ pub mod actions {
     pub const LOOK_UP: Id = Id::new_static("reader.selection.look-up");
     /// Highlights the selected text, or removes highlights in it.
     pub const HIGHLIGHT: Id = Id::new_static("reader.selection.highlight");
+    /// Turns the pages by themselves every few seconds, or stops it.
+    pub const AUTO_TURN: Id = Id::new_static("reader.auto-turn");
     /// Shows the book's information (slot `core.book-info`).
     pub const BOOK_INFO: Id = Id::new_static("reader.book-info");
     /// Reads aloud from the selected text on.
@@ -248,6 +252,7 @@ impl Plugin for Reader {
             (actions::COPY, "reader.select.copy"),
             (actions::READ_FROM, "reader.select.read-aloud"),
             (actions::BOOK_INFO, "reader.book-info"),
+            (actions::AUTO_TURN, "reader.auto-turn"),
             (actions::EXTEND, "reader.select.extend"),
             (actions::CANCEL, "reader.select.cancel"),
             (actions::MORE, "reader.select.more"),
@@ -376,6 +381,17 @@ impl Plugin for Reader {
             )
             .group(groups::CONTROLS)
             .description("reader.setting.corner-bookmark.help"),
+            SettingSpec::new(
+                settings::AUTO_TURN_SECONDS,
+                "reader.setting.auto-turn-seconds",
+                SettingKind::Int { min: 5, max: 600 },
+                SettingValue::Int(30),
+            )
+            .group(groups::READING)
+            .unit("core.unit.seconds")
+            .step(5)
+            .section(setting_sections::BEHAVIOUR)
+            .description("reader.setting.auto-turn-seconds.help"),
             SettingSpec::new(
                 settings::ALOUD_SPEED,
                 "reader.setting.aloud-speed",
@@ -506,6 +522,7 @@ impl Plugin for Reader {
             (LAYOUT_MENU, settings::PUBLISHER_STYLES, 60),
             (MORE_MENU, actions::TOGGLE_BOOKMARK, 10),
             (MORE_MENU, actions::GO_TO_PAGE, 15),
+            (MORE_MENU, actions::AUTO_TURN, 17),
             (MORE_MENU, actions::SELECT, 20),
             (MORE_MENU, actions::LINKS, 25),
             (MORE_MENU, core_actions::HOME, 40),
@@ -540,6 +557,7 @@ impl Plugin for Reader {
             (actions::TOGGLE_BOOKMARK, "bookmark"),
             (actions::SELECT, "highlight"),
             (actions::READ_ALOUD, "volume"),
+            (actions::AUTO_TURN, "clock"),
         ] {
             r.add_icon(item, Cow::Borrowed(icon))?;
         }

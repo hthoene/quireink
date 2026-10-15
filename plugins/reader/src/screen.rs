@@ -384,8 +384,9 @@ struct Book {
     chapter_marks: String,
     /// The page the last link led to: it offers the way back.
     landed: Option<Locator>,
-    /// The book is being read aloud (shown in the status line).
-    aloud: bool,
+    /// Read aloud (`volume`) or turning its pages by itself (`clock`):
+    /// the icon shown in the status line.
+    hands_free: Option<&'static str>,
 }
 
 /// A word on the page, with its box on the screen and its place in the
@@ -436,6 +437,8 @@ pub(crate) struct ReaderScreen {
     aloud: Option<Aloud>,
     /// Where reading aloud was paused: the page and its word.
     resume: Option<(Locator, usize)>,
+    /// When the page turns by itself next, while it does.
+    auto_turn: Option<quireink_sdk::Instant>,
 }
 
 /// A sentence read aloud, by words of the page that starts at `page`.
@@ -479,6 +482,52 @@ impl ReaderScreen {
             status_shown: String::new(),
             aloud: None,
             resume: None,
+            auto_turn: None,
+        }
+    }
+
+    /// Starts turning the pages by themselves, or stops it.
+    fn toggle_auto_turn(&mut self, cx: &mut Cx<'_, '_>) {
+        let env = *cx.env();
+        if self.auto_turn.take().is_some() {
+            cx.command(Command::Notify(
+                env.i18n.tr("reader.auto-turn.stopped").to_string(),
+            ));
+            self.hands_free_shown(cx);
+            return;
+        }
+        let seconds = self.auto_turn_seconds(&env);
+        self.auto_turn = Some(env.now.add_millis(seconds * 1000));
+        cx.command(Command::Notify(env.i18n.format(
+            "reader.auto-turn.started",
+            &[("seconds", Arg::Int(seconds as i64))],
+        )));
+        self.hands_free_shown(cx);
+        self.update_status(cx);
+    }
+
+    fn auto_turn_seconds(&self, env: &Env<'_>) -> u64 {
+        env.settings
+            .int(crate::settings::AUTO_TURN_SECONDS.as_str())
+            .clamp(5, 600) as u64
+    }
+
+    /// Turns the page if it is time; stops at the end of the book.
+    fn auto_turn_due(&mut self, cx: &mut Cx<'_, '_>) {
+        let env = *cx.env();
+        if !self.auto_turn.is_some_and(|at| env.now >= at) {
+            return;
+        }
+        let seconds = self.auto_turn_seconds(&env);
+        let Ok(book) = &mut self.book else {
+            return;
+        };
+        let end = book.page.end;
+        self.auto_turn = book
+            .show(cx, end, true)
+            .then(|| env.now.add_millis(seconds * 1000));
+        if self.auto_turn.is_none() {
+            self.hands_free_shown(cx);
         }
     }
 
@@ -528,16 +577,22 @@ impl ReaderScreen {
         let before = self.aloud.map(|a| a.now);
         self.aloud = Some(Aloud { now, next, until });
         self.underline(before, Some(now), cx);
-        self.aloud_shown(cx);
+        self.hands_free_shown(cx);
     }
 
     /// Shows in the status line whether the book is being read aloud.
-    fn aloud_shown(&mut self, cx: &mut Cx<'_, '_>) {
-        let aloud = self.aloud.is_some();
+    fn hands_free_shown(&mut self, cx: &mut Cx<'_, '_>) {
+        let icon = if self.aloud.is_some() {
+            Some("volume")
+        } else if self.auto_turn.is_some() {
+            Some("clock")
+        } else {
+            None
+        };
         if let Ok(book) = &mut self.book
-            && book.aloud != aloud
+            && book.hands_free != icon
         {
-            book.aloud = aloud;
+            book.hands_free = icon;
             self.update_status(cx);
         }
     }
@@ -550,7 +605,7 @@ impl ReaderScreen {
         cx.command(Command::StopSpeaking);
         self.resume = Some((aloud.now.page, aloud.now.from));
         self.underline(Some(aloud.now), None, cx);
-        self.aloud_shown(cx);
+        self.hands_free_shown(cx);
         let env = *cx.env();
         cx.command(Command::Notify(
             env.i18n.tr("reader.aloud.paused").to_string(),
@@ -609,7 +664,7 @@ impl ReaderScreen {
             // The end of the book, or of the page.
             self.aloud = None;
             self.underline(Some(aloud.now), None, cx);
-            self.aloud_shown(cx);
+            self.hands_free_shown(cx);
             if !turn {
                 cx.command(Command::Notify(
                     env.i18n.tr("reader.aloud.page-done").to_string(),
@@ -989,6 +1044,9 @@ impl ReaderScreen {
         }
         let next = quireink_sdk::time::next_minute(&env).unwrap_or(env.now.add_millis(60_000));
         cx.wake_at(next);
+        if let Some(at) = self.auto_turn {
+            cx.wake_at(at);
+        }
     }
 
     /// Asks on the keyboard what to search for, or which page to go to.
@@ -1165,7 +1223,7 @@ impl Book {
             status_lines: status::load_choice(env.storage),
             chapter_marks: String::new(),
             landed: None,
-            aloud: false,
+            hands_free: None,
         };
         book.chapter_marks = book.chapter_marks(env);
         book.embedded = Embedded::load(env, book.document.as_ref());
@@ -1850,8 +1908,8 @@ impl Book {
         if !self.chapter_marks.is_empty() {
             context.set(status_context::CHAPTERS, self.chapter_marks.clone());
         }
-        if self.aloud {
-            context.set(status::ALOUD_CONTEXT, "1");
+        if let Some(icon) = self.hands_free {
+            context.set(status::ALOUD_CONTEXT, icon);
         }
         context
     }
@@ -2158,6 +2216,7 @@ impl Screen for ReaderScreen {
         if book.index_step(&env) {
             cx.wake_at(env.now.add_millis(STEP_DELAY_MS));
         }
+        self.auto_turn_due(cx);
         // Page numbers once counted, the time, the battery, …
         self.update_status(cx);
     }
@@ -2172,6 +2231,26 @@ impl Screen for ReaderScreen {
         if *action == crate::actions::READ_ALOUD {
             self.start_aloud(cx);
             return Handled::Yes;
+        }
+        if *action == crate::actions::AUTO_TURN {
+            self.toggle_auto_turn(cx);
+            return Handled::Yes;
+        }
+        // While pages turn by themselves, turning one starts the count
+        // anew; the menu (a tap in the middle) stops it instead.
+        if self.auto_turn.is_some() {
+            let env = *cx.env();
+            if *action == actions::MENU || *action == actions::CONFIRM {
+                self.toggle_auto_turn(cx);
+                return Handled::Yes;
+            }
+            if *action == actions::NEXT_PAGE || *action == actions::PREV_PAGE {
+                let seconds = self.auto_turn_seconds(&env);
+                self.auto_turn = Some(env.now.add_millis(seconds * 1000));
+                if let Some(at) = self.auto_turn {
+                    cx.wake_at(at);
+                }
+            }
         }
         if let Some(selection) = self.selection {
             return self.on_selection(action, selection, cx);

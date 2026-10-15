@@ -83,11 +83,13 @@ pub mod items {
     pub const PAGE: Id = Id::new_static("reader.status.page");
     /// Reading progress in percent.
     pub const PROGRESS: Id = Id::new_static("reader.status.progress");
-    /// A speaker while the book is read aloud.
+    /// A speaker while the book is read aloud, a clock while its pages
+    /// turn by themselves.
     pub const ALOUD: Id = Id::new_static("reader.status.aloud");
 }
 
-/// Context: the book is being read aloud (`1`).
+/// Context: the icon of what turns the pages by itself (reading aloud,
+/// turning automatically).
 pub(crate) const ALOUD_CONTEXT: &str = "reader.aloud";
 
 pub(crate) fn register(r: &mut dyn Registrar) -> Result<(), RegisterError> {
@@ -225,7 +227,7 @@ pub(crate) fn register(r: &mut dyn Registrar) -> Result<(), RegisterError> {
         title: Cow::Borrowed("reader.status.item.aloud"),
         value: Box::new(|_, cx| {
             cx.get(ALOUD_CONTEXT)
-                .map(|_| StatusValue::Icon(Cow::Borrowed("volume")))
+                .map(|icon| StatusValue::Icon(Cow::Owned(icon.to_string())))
         }),
     })?;
     r.add_status_item(StatusItemSpec {
