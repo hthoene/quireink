@@ -158,9 +158,10 @@ pub fn wrap_lines_hyphenated(
 }
 
 /// The last hyphenation point of the word at `word_start` that fits on the
-/// line: `(byte offset, line width with the hyphen)`. Only words made of
-/// letters with at least one lowercase letter are hyphenated; punctuation
-/// around them stays attached.
+/// line: `(byte offset, line width with the hyphen)`. The letters the word
+/// starts with are hyphenated (with at least one lowercase letter among
+/// them); punctuation before them and whatever follows them, such as
+/// "(s)" or "'s", stays attached.
 #[allow(clippy::too_many_arguments)]
 fn hyphen_break(
     text: &str,
@@ -177,11 +178,13 @@ fn hyphen_break(
         .map_or(text.len(), |k| word_start + k);
     let word = &text[word_start..end];
     let first = word.find(char::is_alphabetic)?;
-    let (last, c) = word.char_indices().rev().find(|(_, c)| c.is_alphabetic())?;
-    let core = &word[first..last + c.len_utf8()];
+    let letters = word[first..]
+        .find(|c: char| !c.is_alphabetic())
+        .map_or(word.len(), |k| first + k);
+    let core = &word[first..letters];
     // Words in capitals (abbreviations, headings set in capitals) are
     // not hyphenated.
-    if !core.chars().all(char::is_alphabetic) || !core.chars().any(char::is_lowercase) {
+    if !core.chars().any(char::is_lowercase) {
         return None;
     }
     let mut best = None;
@@ -312,6 +315,11 @@ mod tests {
                 ("xy", 2.0, false)
             ]
         );
+        // The letters before a bracket or an apostrophe are hyphenated.
+        let bracketed = "ab abcdefghi(s) xy";
+        let result = wrap_lines_hyphenated(bracketed, |_| 9.0, |_, _| 1.0, Some(&hyphenate));
+        assert_eq!(&bracketed[result[1].range.clone()], "defghi(s)");
+        assert!(result[0].hyphen);
         // Words in capitals are not hyphenated.
         let caps = wrap_lines_hyphenated("ab ABCDEFGHI", |_| 9.0, |_, _| 1.0, Some(&hyphenate));
         assert!(caps.iter().all(|l| !l.hyphen));
