@@ -83,7 +83,12 @@ pub mod items {
     pub const PAGE: Id = Id::new_static("reader.status.page");
     /// Reading progress in percent.
     pub const PROGRESS: Id = Id::new_static("reader.status.progress");
+    /// A speaker while the book is read aloud.
+    pub const ALOUD: Id = Id::new_static("reader.status.aloud");
 }
+
+/// Context: the book is being read aloud (`1`).
+pub(crate) const ALOUD_CONTEXT: &str = "reader.aloud";
 
 pub(crate) fn register(r: &mut dyn Registrar) -> Result<(), RegisterError> {
     r.add_setting_group(SettingGroupSpec {
@@ -97,7 +102,7 @@ pub(crate) fn register(r: &mut dyn Registrar) -> Result<(), RegisterError> {
         "",
         "",
         "",
-        "reader.status.chapter",
+        "reader.status.aloud, reader.status.chapter",
         "core.status.clock",
         "core.status.battery, reader.status.page",
     ];
@@ -214,6 +219,14 @@ pub(crate) fn register(r: &mut dyn Registrar) -> Result<(), RegisterError> {
         id: items::CHAPTER,
         title: Cow::Borrowed("reader.status.item.chapter"),
         value: Box::new(move |_, cx| text(cx.get(context::CHAPTER).or(cx.get(params::TITLE)))),
+    })?;
+    r.add_status_item(StatusItemSpec {
+        id: items::ALOUD,
+        title: Cow::Borrowed("reader.status.item.aloud"),
+        value: Box::new(|_, cx| {
+            cx.get(ALOUD_CONTEXT)
+                .map(|_| StatusValue::Icon(Cow::Borrowed("volume")))
+        }),
     })?;
     r.add_status_item(StatusItemSpec {
         id: items::PAGE,

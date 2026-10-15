@@ -94,6 +94,9 @@ pub enum StatusValue {
         percent: u8,
         charging: bool,
     },
+    /// An icon by name ([`icons`](crate::icons)), e.g. while reading
+    /// aloud.
+    Icon(Cow<'static, str>),
 }
 
 /// Computes an item's value; `None` hides it (e.g. no battery).
@@ -246,7 +249,7 @@ impl StatusLine<'_> {
         let width = |values: &[StatusValue]| -> f32 {
             values
                 .iter()
-                .map(|v| value_width(font, size, v, percent))
+                .map(|v| value_width(env, font, size, v, percent))
                 .sum::<f32>()
                 + gap * values.len().saturating_sub(1) as f32
         };
@@ -278,6 +281,7 @@ impl StatusLine<'_> {
         let mut draw = |values: &[StatusValue], x: f32, end: f32| {
             draw_values(
                 canvas,
+                env,
                 font,
                 area,
                 values,
@@ -292,8 +296,15 @@ impl StatusLine<'_> {
     }
 }
 
-fn value_width(font: &FontHandle<'_>, size: f32, value: &StatusValue, with_percent: bool) -> f32 {
+fn value_width(
+    env: &Env<'_>,
+    font: &FontHandle<'_>,
+    size: f32,
+    value: &StatusValue,
+    with_percent: bool,
+) -> f32 {
     match value {
+        StatusValue::Icon(name) => crate::ui::icon_width(env, name, size),
         StatusValue::Text(text) => font.measure(size, text),
         StatusValue::Level { percent, .. } if with_percent => {
             battery_width(size) + size * 0.3 + font.measure(size, &level_text(*percent))
@@ -310,8 +321,10 @@ fn battery_width(size: f32) -> f32 {
     size * 1.3
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_values(
     canvas: &mut Canvas<'_>,
+    env: &Env<'_>,
     font: &FontHandle<'_>,
     area: Rect,
     values: &[StatusValue],
@@ -325,7 +338,7 @@ fn draw_values(
         + ((f32::from(area.height) + metrics.ascent - metrics.descent) / 2.0) as i32;
     let widths: Vec<f32> = values
         .iter()
-        .map(|v| value_width(font, size, v, with_percent))
+        .map(|v| value_width(env, font, size, v, with_percent))
         .collect();
     let texts: Vec<bool> = values
         .iter()
@@ -346,6 +359,9 @@ fn draw_values(
                 let room = (end - x + 1.0).min(budget(i));
                 let text = crate::ui::fit(font, size, text, room);
                 x += font.draw(canvas, size, x, baseline, &text, color);
+            }
+            StatusValue::Icon(name) => {
+                x += crate::ui::draw_icon(canvas, env, name, size, x, area, color);
             }
             StatusValue::Level { percent, charging } => {
                 let height = (metrics.ascent * 0.75) as i32;

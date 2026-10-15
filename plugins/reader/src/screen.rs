@@ -383,6 +383,8 @@ struct Book {
     chapter_marks: String,
     /// The page the last link led to: it offers the way back.
     landed: Option<Locator>,
+    /// The book is being read aloud (shown in the status line).
+    aloud: bool,
 }
 
 /// A word on the page, with its box on the screen and its place in the
@@ -525,6 +527,18 @@ impl ReaderScreen {
         let before = self.aloud.map(|a| a.now);
         self.aloud = Some(Aloud { now, next, until });
         self.underline(before, Some(now), cx);
+        self.aloud_shown(cx);
+    }
+
+    /// Shows in the status line whether the book is being read aloud.
+    fn aloud_shown(&mut self, cx: &mut Cx<'_, '_>) {
+        let aloud = self.aloud.is_some();
+        if let Ok(book) = &mut self.book
+            && book.aloud != aloud
+        {
+            book.aloud = aloud;
+            self.update_status(cx);
+        }
     }
 
     /// Pauses reading aloud; reading aloud again goes on from there.
@@ -535,6 +549,7 @@ impl ReaderScreen {
         cx.command(Command::StopSpeaking);
         self.resume = Some((aloud.now.page, aloud.now.from));
         self.underline(Some(aloud.now), None, cx);
+        self.aloud_shown(cx);
         let env = *cx.env();
         cx.command(Command::Notify(
             env.i18n.tr("reader.aloud.paused").to_string(),
@@ -593,6 +608,7 @@ impl ReaderScreen {
             // The end of the book, or of the page.
             self.aloud = None;
             self.underline(Some(aloud.now), None, cx);
+            self.aloud_shown(cx);
             if !turn {
                 cx.command(Command::Notify(
                     env.i18n.tr("reader.aloud.page-done").to_string(),
@@ -1155,6 +1171,7 @@ impl Book {
             status_lines: status::load_choice(env.storage),
             chapter_marks: String::new(),
             landed: None,
+            aloud: false,
         };
         book.chapter_marks = book.chapter_marks(env);
         book.embedded = Embedded::load(env, book.document.as_ref());
@@ -1823,6 +1840,9 @@ impl Book {
         }
         if !self.chapter_marks.is_empty() {
             context.set(status_context::CHAPTERS, self.chapter_marks.clone());
+        }
+        if self.aloud {
+            context.set(status::ALOUD_CONTEXT, "1");
         }
         context
     }
