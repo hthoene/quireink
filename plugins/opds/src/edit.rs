@@ -16,6 +16,8 @@ use crate::catalogs::{self, Catalog};
 
 /// The keyboard's reply with a field's new text.
 const ENTERED: Id = Id::new_static("opds.entered");
+/// The folder chooser's reply.
+const FOLDER_CHOSEN: Id = Id::new_static("opds.folder-chosen");
 /// Parameter of the reply: which field.
 const FIELD: &str = "field";
 
@@ -131,6 +133,15 @@ impl EditScreen {
             cx.request_refresh(RefreshMode::Fast);
             return;
         }
+        if field == Field::Folder && env.has_slot(&slots::CHOOSE_FOLDER) {
+            cx.command(Command::OpenSlot(
+                slots::CHOOSE_FOLDER,
+                Params::new()
+                    .with(params::REPLY, FOLDER_CHOSEN.as_str())
+                    .with(params::TEXT, self.catalog.sync_folder(&env)),
+            ));
+            return;
+        }
         let mut request = Params::new()
             .with(params::TITLE, env.i18n.tr(field.key()).to_string())
             .with(params::REPLY, ENTERED.as_str())
@@ -222,10 +233,18 @@ impl Screen for EditScreen {
     }
 
     fn on_event(&mut self, event: &Id, params: &Params, cx: &mut Cx<'_, '_>) {
+        let env = *cx.env();
+        if *event == FOLDER_CHOSEN {
+            let folder = params.get(params::PATH).unwrap_or_default();
+            self.catalog.folder = folder.trim_matches('/').to_string();
+            self.save(&env);
+            cx.request_redraw();
+            cx.request_refresh(RefreshMode::Fast);
+            return;
+        }
         if *event != ENTERED {
             return;
         }
-        let env = *cx.env();
         let Some(field) = params.get(FIELD).and_then(Field::of) else {
             return;
         };

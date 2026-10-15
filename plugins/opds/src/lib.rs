@@ -59,8 +59,6 @@ const URL: &str = params::URL;
 const ID: &str = params::ID;
 
 const USER_AGENT: &str = "QuireInk/0.1 (e-reader)";
-/// The library folder setting of the standard library.
-const LIBRARY: &str = "files.root";
 
 /// A request to a catalog, with its credentials.
 fn request(

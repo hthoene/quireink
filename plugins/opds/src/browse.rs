@@ -22,7 +22,7 @@ use quireink_sdk::{
 use crate::catalogs::{self, Catalog};
 use crate::feed::{self, Feed, Search};
 use crate::sync::{book_name, status};
-use crate::{CHOICE, ID, LIBRARY, OPTION_LABELS, PLUGIN, URL, request};
+use crate::{CHOICE, ID, OPTION_LABELS, PLUGIN, URL, request};
 
 /// Replies: a feed, a search description, a book, the words to search
 /// for, a choice made.
@@ -304,7 +304,8 @@ impl BrowseScreen {
             let _ = env.storage.remove(&tmp);
             return;
         }
-        let dir = env.settings.text(LIBRARY).trim_matches('/').to_string();
+        // The catalog's folder, for order on the device.
+        let dir = self.catalog.sync_folder(&env);
         let name = params.get(NAME).unwrap_or("download").to_string();
         let _ = env.storage.create_dir(&dir);
         let target = files::free_path(env.storage, &dir, &name);
@@ -314,9 +315,13 @@ impl BrowseScreen {
             return self.say(message, cx);
         }
         self.message = None;
-        let text = env
-            .i18n
-            .format("opds.saved", &[("name", Arg::Str(files::name(&target)))]);
+        let text = env.i18n.format(
+            "opds.saved",
+            &[
+                ("name", Arg::Str(files::name(&target))),
+                ("folder", Arg::Str(&dir)),
+            ],
+        );
         cx.command(choice::open(
             CHOICE,
             CHOSEN,

@@ -86,6 +86,12 @@ pub mod slots {
     /// The reader opens links out of a book this way, if a browser is
     /// bound here ([`Env::has_slot`](crate::Env::has_slot)).
     pub const BROWSER: Id = Id::new_static("core.browser");
+    /// Chooses a folder, browsing the device's folders (with a way to make
+    /// a new one). Parameters: [`ID`](super::params::ID), a setting the
+    /// folder is written to, or [`REPLY`](super::params::REPLY), an event
+    /// emitted with all of the parameters and [`PATH`](super::params::PATH)
+    /// set to the folder; [`TEXT`](super::params::TEXT), where to start.
+    pub const CHOOSE_FOLDER: Id = Id::new_static("core.choose-folder");
     /// Shows a short message ([`Command::Notify`](crate::Command::Notify))
     /// over whatever is open, for a few seconds: parameter
     /// [`TEXT`](super::params::TEXT). It gets no input and is closed by

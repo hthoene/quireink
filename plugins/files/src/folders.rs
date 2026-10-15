@@ -1,15 +1,18 @@
 //! Chooses a folder for a setting, e.g. the library folder: browse the
 //! device's folders and pick one, without typing a path.
 //!
-//! The first row uses the shown folder, the second goes to its parent;
-//! then come its subfolders. Like the library, only one page of folders is
-//! held in memory.
+//! The first row uses the shown folder, the next goes to its parent and
+//! *New folder* makes one in it; then come its subfolders. Like the
+//! library, only one page of folders is held in memory.
+//!
+//! Bound to `core.choose-folder`: a setting gets the folder, or the event
+//! the caller names comes back with it.
 
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use quireink_sdk::builtin::actions;
+use quireink_sdk::builtin::{actions, params, slots};
 use quireink_sdk::ui::{self, ListChange, ListView, UiStyle};
 use quireink_sdk::{
     Canvas, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Params, Rect, RefreshMode, Screen,
@@ -20,6 +23,8 @@ use crate::listing::{Entry, Listing};
 
 /// The setting the chosen folder is written to.
 pub(crate) const ID: &str = "id";
+/// The keyboard's reply with a new folder's name.
+const NAMED: Id = Id::new_static("files.folder-named");
 
 /// What a row does.
 enum Row<'a> {
@@ -27,6 +32,8 @@ enum Row<'a> {
     Use,
     /// Go to the parent folder.
     Up,
+    /// Make a folder in the shown one.
+    New,
     Folder(&'a Entry),
 }
 
@@ -34,6 +41,8 @@ enum Row<'a> {
 pub(crate) struct FolderChooser {
     /// The setting to change.
     setting: Option<Id>,
+    /// Else the event to emit, with the parameters it was opened with.
+    reply: Option<(Id, Params)>,
     /// The shown folder; empty for the top of the storage.
     dir: String,
     /// Number of subfolders.
@@ -49,11 +58,16 @@ pub(crate) struct FolderChooser {
 impl FolderChooser {
     pub(crate) fn new(env: &Env<'_>, params: &Params) -> Self {
         let setting = params.get(ID).and_then(|id| Id::parse(id).ok());
+        let reply = params
+            .get(params::REPLY)
+            .and_then(|r| Id::parse(r).ok())
+            .map(|r| (r, params.clone()));
         // Start in the current folder if it still exists.
-        let current = setting
-            .as_ref()
-            .map(|id| env.settings.text(id.as_str()).trim_matches('/').to_string())
-            .unwrap_or_default();
+        let current = match (&setting, params.get(params::TEXT)) {
+            (_, Some(text)) => text.trim_matches('/').to_string(),
+            (Some(id), None) => env.settings.text(id.as_str()).trim_matches('/').to_string(),
+            (None, None) => String::new(),
+        };
         let dir = if !current.is_empty() && env.storage.list(&current, &mut |_| {}).is_ok() {
             current
         } else {
@@ -66,6 +80,7 @@ impl FolderChooser {
         let area = Rect::new(0, top, display.width, display.height.saturating_sub(top));
         let mut chooser = Self {
             setting,
+            reply,
             dir,
             len: 0,
             page: Vec::new(),
@@ -88,9 +103,9 @@ impl FolderChooser {
         }
     }
 
-    /// Rows before the subfolders: *use* and, below the top, *up*.
+    /// Rows before the subfolders: *use*, below the top *up*, *new*.
     fn fixed(&self) -> usize {
-        if self.dir.is_empty() { 1 } else { 2 }
+        if self.dir.is_empty() { 2 } else { 3 }
     }
 
     fn len(&self) -> usize {
@@ -120,7 +135,8 @@ impl FolderChooser {
     fn row(&self, index: usize) -> Option<Row<'_>> {
         match index {
             0 => Some(Row::Use),
-            1 if self.fixed() == 2 => Some(Row::Up),
+            1 if self.fixed() == 3 => Some(Row::Up),
+            i if i + 1 == self.fixed() => Some(Row::New),
             _ => self
                 .page
                 .get((index - self.fixed()).checked_sub(self.first)?)
@@ -132,11 +148,23 @@ impl FolderChooser {
         let env = *cx.env();
         match self.row(index) {
             Some(Row::Use) => {
+                cx.command(Command::Back);
                 if let Some(id) = self.setting.clone() {
                     let value = SettingValue::Text(self.dir.clone().into());
                     cx.command(Command::SetSetting(id, value));
                 }
-                cx.command(Command::Back);
+                if let Some((reply, params)) = &self.reply {
+                    let params = params.clone().with(params::PATH, self.dir.clone());
+                    cx.command(Command::Emit(reply.clone(), params));
+                }
+            }
+            Some(Row::New) => {
+                cx.command(Command::OpenSlot(
+                    slots::KEYBOARD,
+                    Params::new()
+                        .with(params::TITLE, env.i18n.tr("files.choose.new").to_string())
+                        .with(params::REPLY, NAMED.as_str()),
+                ));
             }
             Some(Row::Up) => {
                 self.up(&env);
@@ -226,6 +254,7 @@ impl Screen for FolderChooser {
                 Some(match row {
                     Row::Use => (index, env.i18n.tr("files.choose.use").to_string(), ""),
                     Row::Up => (index, format!("‹ {}", env.i18n.tr("files.choose.up")), ""),
+                    Row::New => (index, env.i18n.tr("files.choose.new").to_string(), "+"),
                     Row::Folder(entry) => (index, format!("{}/", entry.name), "›"),
                 })
             })
@@ -236,6 +265,29 @@ impl Screen for FolderChooser {
                     ui::draw_value_row(canvas, env, &style, rect, focused, title, value);
                 }
             });
+    }
+
+    fn on_event(&mut self, event: &Id, params: &Params, cx: &mut Cx<'_, '_>) {
+        if *event != NAMED {
+            return;
+        }
+        let env = *cx.env();
+        let name = params.get(params::TEXT).unwrap_or_default();
+        let name: String = name
+            .chars()
+            .filter(|c| !matches!(c, '/' | '\\' | ':') && !c.is_control())
+            .collect();
+        let name = name.trim().trim_start_matches('.');
+        if name.is_empty() {
+            return;
+        }
+        let path = quireink_sdk::files::join(&self.dir, name);
+        if env.storage.create_dir(&path).is_ok() {
+            self.dir = path;
+            self.load(&env);
+            cx.request_redraw();
+            cx.request_refresh(RefreshMode::Partial);
+        }
     }
 
     fn on_action(&mut self, action: &Id, cx: &mut Cx<'_, '_>) -> Handled {
