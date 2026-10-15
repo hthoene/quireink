@@ -36,6 +36,7 @@ const DEVICE: DeviceInfo = DeviceInfo {
         touch: true,
         pen: false,
     },
+    memory: quireink_platform::MemoryClass::Large,
 };
 
 type Log = Rc<RefCell<Vec<String>>>;

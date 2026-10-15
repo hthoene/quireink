@@ -61,6 +61,9 @@ pub(crate) struct Report {
     pub failed: usize,
     /// Catalogs that could not be read.
     pub unreachable: usize,
+    /// Catalogs whose address lists no books, only further lists (such
+    /// as Project Gutenberg's start page): nothing to sync there.
+    pub only_lists: usize,
     pub running: bool,
 }
 
@@ -217,6 +220,15 @@ impl Sync {
         let Some(run) = &mut self.run else {
             return;
         };
+        // Sync follows no further lists: a catalog of lists has no books.
+        let first = run.pages.len() == 1;
+        if first
+            && !page.entries.is_empty()
+            && page.entries.iter().all(|e| e.books.is_empty())
+            && let Some(report) = &mut self.report
+        {
+            report.only_lists += 1;
+        }
         for entry in &page.entries {
             let Some((book, ext)) =
                 entry.readable_book(|ext| env.formats.supports(&format!("book.{ext}")))

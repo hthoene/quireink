@@ -59,6 +59,8 @@ const URL: &str = params::URL;
 const ID: &str = params::ID;
 
 const USER_AGENT: &str = "QuireInk/0.1 (e-reader)";
+/// Setting: covers in the lists of catalogs (on devices with the memory).
+const COVERS: Id = Id::new_static("opds.covers");
 
 /// A request to a catalog, with its credentials.
 fn request(
@@ -168,6 +170,17 @@ impl Plugin for Opds {
                 ),
             )?;
         }
+        r.add_setting(
+            SettingSpec::new(
+                COVERS,
+                "opds.setting.covers",
+                SettingKind::Bool,
+                SettingValue::Bool(true),
+            )
+            .group(groups::LIBRARY)
+            .section("opds.section")
+            .description("opds.setting.covers.help"),
+        )?;
         r.add_setting(
             SettingSpec::new(
                 sync::LIMIT,

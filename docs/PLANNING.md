@@ -794,8 +794,8 @@ makes it replaceable. ✅ done, 🔶 partly, ⬜ open.
 | C16 | More sync: Calibre wireless, Nextcloud, Syncthing (books, progress, notes) | Sync providers | 🔶 (kosync, statistics over WebDAV, OPDS) |
 | C17 | Buttons, held buttons, tap zones, held taps and swipes changed on the device, everywhere or while reading; a left-handed layout | `keys` plugin, `Command::Bind`, `Env::keys`, action `core.nothing`, preset `core.left-handed` | ✅ (custom zone shapes open) |
 | C18 | Home screen widgets: clock and date, today's reading, any plugin's; chosen under Appearance | `Registrar::add_widget`, `Env::widgets`; `home.clock`, `stats.widget.today` | ✅ (reading goal open) |
-| C19 | OPDS: covers in lists, OPDS 2 (JSON), automatic sync | `opds` plugin, C5 | 🔶 (sync at start or a time of day via rules) |
-| C20 | Large-memory devices may use more (covers, more cached pages) without separate code | Device memory class in `DeviceInfo` | ⬜ |
+| C19 | OPDS: covers in lists (devices with the memory), a folder per catalog, automatic sync (rules), OPDS 2 (JSON) | `opds` plugin, C5, C20 | 🔶 (OPDS 2 open) |
+| C20 | Large-memory devices may use more (covers in lists, caches) without separate code | `DeviceInfo::memory` (`MemoryClass::Small`/`Large`) | ✅ |
 
 ---
 

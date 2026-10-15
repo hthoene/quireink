@@ -11,12 +11,13 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use quireink_sdk::builtin::{actions, params, slots};
+use quireink_sdk::document::ImageRef;
 use quireink_sdk::ui::choice;
 use quireink_sdk::ui::{self, ListChange, ListView, UiStyle};
 use quireink_sdk::web::host;
 use quireink_sdk::{
-    Arg, Canvas, Color, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Params, Rect,
-    RefreshMode, Screen, files, http_params,
+    Arg, Canvas, Color, Command, Cx, Env, Gesture, GestureKind, Handled, Id, MemoryClass, Params,
+    Rect, RefreshMode, Screen, files, http_params,
 };
 
 use crate::catalogs::{self, Catalog};
@@ -31,6 +32,10 @@ const DESCRIBED: Id = Id::new_static("opds.described");
 const DOWNLOADED: Id = Id::new_static("opds.downloaded");
 const TERMS: Id = Id::new_static("opds.terms");
 const CHOSEN: Id = Id::new_static("opds.read");
+/// The answer with a cover.
+const COVER: Id = Id::new_static("opds.cover");
+/// Parameter: the entry a cover belongs to.
+const ENTRY: &str = "entry";
 /// Parameter: the file name a download gets.
 const NAME: &str = "name";
 
@@ -38,6 +43,22 @@ fn feed_path() -> String {
     format!(
         "{}/browse.xml",
         quireink_sdk::Env::plugin_dir(PLUGIN.as_str())
+    )
+}
+
+fn cover_download_path() -> String {
+    format!(
+        "{}/cover.tmp",
+        quireink_sdk::Env::plugin_dir(PLUGIN.as_str())
+    )
+}
+
+/// Where the cover from `url` is kept, decoded.
+fn cover_path(url: &str) -> String {
+    format!(
+        "{}/covers/{}.gray",
+        quireink_sdk::Env::plugin_dir(PLUGIN.as_str()),
+        quireink_sdk::md5::of(url)
     )
 }
 
@@ -71,6 +92,14 @@ pub(crate) struct BrowseScreen {
     /// Where searches go, once known.
     template: Option<String>,
     message: Option<String>,
+    /// Covers of the feed's entries, where loaded (on devices with the
+    /// memory for them).
+    covers: Vec<Option<ImageRef>>,
+    /// Whether covers show, and the entry whose cover is loading.
+    with_covers: bool,
+    fetching: Option<usize>,
+    /// Entries whose cover failed, not tried again.
+    failed: Vec<usize>,
 }
 
 impl BrowseScreen {
@@ -100,6 +129,11 @@ impl BrowseScreen {
             loading: None,
             template: None,
             message: None,
+            covers: Vec::new(),
+            with_covers: env.device.memory == MemoryClass::Large
+                && env.settings.bool(crate::COVERS.as_str()),
+            fetching: None,
+            failed: Vec::new(),
             catalog,
             style,
             header,
@@ -199,9 +233,94 @@ impl BrowseScreen {
             self.template = None;
         }
         self.feed = feed;
+        self.covers = alloc::vec![None; self.feed.entries.len()];
+        self.fetching = None;
+        self.failed.clear();
         self.list.focus = 0;
         self.message = None;
         self.redraw(cx);
+        self.next_cover(cx);
+    }
+
+    /// The row of entry `i`, if it is on the page shown.
+    fn row_of(&self, i: usize) -> Option<usize> {
+        let row = self.rows().iter().position(|r| *r == Row::Entry(i))?;
+        let rows = self.list.rows();
+        (row / rows == self.list.page()).then_some(row % rows)
+    }
+
+    /// Loads the cover of the next entry on the page shown that has one
+    /// and lacks it; covers kept from before need no download.
+    fn next_cover(&mut self, cx: &mut Cx<'_, '_>) {
+        if !self.with_covers || self.fetching.is_some() {
+            return;
+        }
+        let env = *cx.env();
+        for i in 0..self.feed.entries.len() {
+            if self.covers[i].is_some() || self.failed.contains(&i) || self.row_of(i).is_none() {
+                continue;
+            }
+            let Some(url) = self.feed.entries[i].thumbnail.clone() else {
+                continue;
+            };
+            let kept = cover_path(&url);
+            if let Some(file) = quireink_sdk::image::GrayFile::open(env.storage, &kept) {
+                self.covers[i] = Some(ImageRef {
+                    path: file.path,
+                    width: file.width,
+                    height: file.height,
+                });
+                continue;
+            }
+            if !env.network {
+                return;
+            }
+            self.fetching = Some(i);
+            let params = Params::new()
+                .with(URL, url.clone())
+                .with(ENTRY, i.to_string());
+            cx.command(Command::Http(request(
+                &self.catalog,
+                &url,
+                cover_download_path(),
+                COVER,
+                params,
+            )));
+            return;
+        }
+        // Covers found in the cache show at once.
+        self.redraw(cx);
+    }
+
+    /// A cover arrived: decoded and kept, then the next one.
+    fn cover_loaded(&mut self, params: &Params, cx: &mut Cx<'_, '_>) {
+        let env = *cx.env();
+        let i = params.get(ENTRY).and_then(|i| i.parse::<usize>().ok());
+        let url = params.get(URL).unwrap_or_default().to_string();
+        let Some(i) = i.filter(|&i| self.fetching == Some(i) && i < self.covers.len()) else {
+            return;
+        };
+        self.fetching = None;
+        let tmp = cover_download_path();
+        let side = self.style.noted_row();
+        let image = (200..300)
+            .contains(&status(params))
+            .then(|| {
+                quireink_sdk::image::gray_from_file(env.storage, &tmp, &cover_path(&url), side)
+            })
+            .flatten();
+        let _ = env.storage.remove(&tmp);
+        match image {
+            Some(image) => {
+                self.covers[i] = Some(image);
+                if let Some(row) = self.row_of(i) {
+                    cx.request_redraw_area(self.list.row_rect(row));
+                    cx.request_refresh(RefreshMode::Fast);
+                }
+            }
+            None => self.failed.push(i),
+        }
+        self.next_cover(cx);
     }
 
     /// Asks for the words to search for, once the address is known.
@@ -359,7 +478,10 @@ impl BrowseScreen {
         let len = self.rows().len();
         match self.list.move_focus(delta, len) {
             ListChange::None => {}
-            ListChange::Page => self.redraw(cx),
+            ListChange::Page => {
+                self.redraw(cx);
+                self.next_cover(cx);
+            }
             ListChange::Focus => {
                 cx.request_redraw_area(self.list.area);
                 cx.request_refresh(RefreshMode::Fast);
@@ -386,6 +508,13 @@ impl Screen for BrowseScreen {
             self.list.paging(rows.len()),
         );
         let entries = &self.feed.entries;
+        let covers = &self.covers;
+        // A column for covers, as wide as a book's picture of the row's height.
+        let column = if self.with_covers && entries.iter().any(|e| e.thumbnail.is_some()) {
+            (style.noted_row() * 2 / 3) as u16 + style.gap as u16
+        } else {
+            0
+        };
         let readable = |ext: &str| env.formats.supports(&format!("book.{ext}"));
         self.list.draw(
             canvas,
@@ -421,6 +550,32 @@ impl Screen for BrowseScreen {
                         }
                         (entry.title.clone(), value, note)
                     }
+                };
+                let rect = match rows[index] {
+                    Row::Entry(i) if column > 0 => {
+                        if let Some(cover) = &covers[i] {
+                            let pad = style.gap as u16 / 2;
+                            let (w, h) = ui::fit_image(
+                                cover,
+                                column - style.gap as u16,
+                                rect.height.saturating_sub(2 * pad),
+                            );
+                            let area = Rect::new(
+                                rect.x + style.margin as u16,
+                                rect.y + (rect.height - h) / 2,
+                                w,
+                                h,
+                            );
+                            ui::draw_image(canvas, env.storage, cover, area);
+                        }
+                        Rect::new(
+                            rect.x + column,
+                            rect.y,
+                            rect.width.saturating_sub(column),
+                            rect.height,
+                        )
+                    }
+                    _ => rect,
                 };
                 ui::draw_noted_row(canvas, env, &style, rect, focused, &title, &value, &note);
             },
@@ -513,6 +668,8 @@ impl Screen for BrowseScreen {
     fn on_event(&mut self, event: &Id, params: &Params, cx: &mut Cx<'_, '_>) {
         if *event == LOADED {
             self.loaded(params, cx);
+        } else if *event == COVER {
+            self.cover_loaded(params, cx);
         } else if *event == DESCRIBED {
             self.described(params, cx);
         } else if *event == DOWNLOADED {

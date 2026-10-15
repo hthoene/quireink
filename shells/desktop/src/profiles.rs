@@ -6,7 +6,7 @@
 //! on real hardware.
 
 use quireink_platform::{
-    ColorPanel, DeviceInfo, DisplayInfo, InputCaps, PixelFormat, Rotation, buttons,
+    ColorPanel, DeviceInfo, DisplayInfo, InputCaps, MemoryClass, PixelFormat, Rotation, buttons,
 };
 
 /// An emulated device.
@@ -52,6 +52,7 @@ pub const PROFILES: &[Profile] = &[
                 touch: false,
                 pen: false,
             },
+            memory: MemoryClass::Small,
         },
         buttons: &[
             buttons::PAGE_BACK,
@@ -90,6 +91,7 @@ pub const PROFILES: &[Profile] = &[
                 touch: true,
                 pen: false,
             },
+            memory: MemoryClass::Small,
         },
         // Previous/next, a touch home key and power (reset is hardware).
         buttons: &[
@@ -124,6 +126,7 @@ pub const PROFILES: &[Profile] = &[
                 touch: true,
                 pen: false,
             },
+            memory: MemoryClass::Large,
         },
         buttons: &[buttons::PAGE_BACK, buttons::PAGE_FORWARD, buttons::POWER],
         heap_budget: None,
@@ -153,6 +156,7 @@ pub const PROFILES: &[Profile] = &[
                 touch: true,
                 pen: true,
             },
+            memory: MemoryClass::Large,
         },
         buttons: &[buttons::PAGE_BACK, buttons::PAGE_FORWARD, buttons::POWER],
         heap_budget: None,
@@ -179,6 +183,7 @@ pub const PROFILES: &[Profile] = &[
                 touch: true,
                 pen: false,
             },
+            memory: MemoryClass::Large,
         },
         buttons: &[buttons::POWER],
         heap_budget: None,
@@ -205,6 +210,7 @@ pub const PROFILES: &[Profile] = &[
                 touch: true,
                 pen: false,
             },
+            memory: MemoryClass::Large,
         },
         buttons: &[buttons::POWER],
         heap_budget: None,
@@ -231,6 +237,7 @@ pub const PROFILES: &[Profile] = &[
                 touch: false,
                 pen: false,
             },
+            memory: MemoryClass::Large,
         },
         buttons: &[buttons::PAGE_BACK, buttons::PAGE_FORWARD, buttons::POWER],
         heap_budget: None,

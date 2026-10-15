@@ -36,4 +36,16 @@ pub struct DeviceInfo {
     pub name: &'static str,
     pub display: DisplayInfo,
     pub input: InputCaps,
+    pub memory: MemoryClass,
+}
+
+/// How much memory the device has for QuireInk. Everything must work
+/// with [`MemoryClass::Small`]; on large devices plugins may use more to
+/// be faster or show more (caches, covers in lists), never to work at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemoryClass {
+    /// A microcontroller with a few hundred kilobytes (the Xteink X4).
+    Small,
+    /// Megabytes and more (Android, Linux readers, desktops).
+    Large,
 }

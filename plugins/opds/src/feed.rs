@@ -49,6 +49,8 @@ pub(crate) struct Entry {
     pub summary: String,
     /// A feed it leads to.
     pub feed: Option<String>,
+    /// A small picture of it (a cover), if the catalog has one.
+    pub thumbnail: Option<String>,
     pub books: Vec<Book>,
 }
 
@@ -245,6 +247,16 @@ impl Reader {
             return;
         };
         let rel = rel.unwrap_or("");
+        if rel == "http://opds-spec.org/image/thumbnail" || rel == "http://opds-spec.org/thumbnail"
+        {
+            entry.thumbnail = Some(url);
+            return;
+        }
+        if rel == "http://opds-spec.org/image" || rel == "http://opds-spec.org/cover" {
+            // The full picture only where there is no small one.
+            entry.thumbnail.get_or_insert(url);
+            return;
+        }
         if rel == "http://opds-spec.org/acquisition"
             || rel == "http://opds-spec.org/acquisition/open-access"
         {

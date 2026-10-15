@@ -90,8 +90,8 @@ pub use quireink_graphics::Canvas;
 pub use quireink_i18n::{Arg, Translator};
 pub use quireink_platform::{Battery, SystemStatus, WallClock};
 pub use quireink_platform::{
-    Color, DeviceInfo, DisplayInfo, InputCaps, Instant, PixelFormat, Point, PointerEvent,
-    PointerPhase, PointerTool, Rect, RefreshMode,
+    Color, DeviceInfo, DisplayInfo, InputCaps, Instant, MemoryClass, PixelFormat, Point,
+    PointerEvent, PointerPhase, PointerTool, Rect, RefreshMode,
 };
 pub use quireink_platform::{DirEntry, NoStorage, Storage, StorageError};
 pub use status::{
@@ -123,6 +123,56 @@ pub mod xml {
 /// Streaming JPEG and PNG decoding to gray (see `quireink-image`).
 pub mod image {
     pub use quireink_image::*;
+
+    use crate::document::ImageRef;
+    use quireink_platform::Storage;
+
+    /// Reads a file in storage as an image source.
+    struct FileSource<'a> {
+        storage: &'a dyn Storage,
+        path: &'a str,
+        offset: u64,
+    }
+
+    impl Source for FileSource<'_> {
+        fn read(&mut self, buf: &mut [u8]) -> Result<usize, ImageError> {
+            let n = self
+                .storage
+                .read_at(self.path, self.offset, buf)
+                .map_err(|_| ImageError::Io)?;
+            self.offset += n as u64;
+            Ok(n)
+        }
+    }
+
+    /// Decodes the JPEG or PNG file `from` into the gray file `to`, no side
+    /// longer than `side` (as far as the format scales), for
+    /// [`ui::draw_image`](crate::ui::draw_image); `None` if it is no image
+    /// QuireInk reads.
+    pub fn gray_from_file(
+        storage: &dyn Storage,
+        from: &str,
+        to: &str,
+        side: u32,
+    ) -> Option<ImageRef> {
+        let mut head = [0u8; 8];
+        let n = storage.read_at(from, 0, &mut head).ok()?;
+        let format = Format::detect(&head[..n])?;
+        let mut source = FileSource {
+            storage,
+            path: from,
+            offset: 0,
+        };
+        let mut writer = GrayWriter::new(storage, to);
+        decode(format, &mut source, side, &mut writer)
+            .and_then(|()| writer.finish())
+            .ok()?;
+        GrayFile::open(storage, to).map(|file| ImageRef {
+            path: file.path,
+            width: file.width,
+            height: file.height,
+        })
+    }
 }
 
 /// Hyphenation with compiled patterns (see `quireink-hyphen`).

@@ -221,6 +221,13 @@ pub(crate) fn report_text(env: &Env<'_>, report: &Report) -> String {
         text.push(' ');
         text.push_str(&env.i18n.plural("opds.failed", report.failed as i64, &[]));
     }
+    if report.only_lists > 0 {
+        text.push(' ');
+        text.push_str(
+            &env.i18n
+                .plural("opds.only-lists", report.only_lists as i64, &[]),
+        );
+    }
     if report.unreachable > 0 {
         text.push(' ');
         text.push_str(

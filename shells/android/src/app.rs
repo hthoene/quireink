@@ -251,6 +251,7 @@ fn start_kernel(
             touch: true,
             pen: false,
         },
+        memory: quireink_platform::MemoryClass::Large,
     };
     let root = app
         .external_data_path()
