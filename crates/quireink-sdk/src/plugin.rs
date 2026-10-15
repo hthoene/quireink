@@ -142,6 +142,10 @@ pub trait Registrar {
     /// reading time left.
     fn add_status_item(&mut self, item: StatusItemSpec) -> Result<(), RegisterError>;
 
+    /// Adds a widget, e.g. for the home screen (see
+    /// [`widgets`](crate::widgets)).
+    fn add_widget(&mut self, widget: crate::widgets::WidgetSpec) -> Result<(), RegisterError>;
+
     /// Adds a whole status line, drawn by the plugin (see
     /// [`status`](crate::status)).
     fn add_status_line(&mut self, line: StatusLineSpec) -> Result<(), RegisterError>;

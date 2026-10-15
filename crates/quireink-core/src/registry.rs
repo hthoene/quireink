@@ -114,6 +114,7 @@ pub(crate) struct Staging {
     pub(crate) setting_defaults: Vec<(Id, Cow<'static, str>)>,
     pub(crate) status_items: Vec<StatusItemSpec>,
     pub(crate) status_lines: Vec<StatusLineSpec>,
+    pub(crate) widgets: Vec<quireink_sdk::widgets::WidgetSpec>,
 }
 
 impl Staging {
@@ -285,6 +286,16 @@ impl Registrar for PluginRegistrar<'_> {
         self.check_namespace(&item.id)?;
         Self::check_unique(self.staging.status_items.iter().map(|i| &i.id), &item.id)?;
         self.staging.status_items.push(item);
+        Ok(())
+    }
+
+    fn add_widget(
+        &mut self,
+        widget: quireink_sdk::widgets::WidgetSpec,
+    ) -> Result<(), RegisterError> {
+        self.check_namespace(&widget.id)?;
+        Self::check_unique(self.staging.widgets.iter().map(|w| &w.id), &widget.id)?;
+        self.staging.widgets.push(widget);
         Ok(())
     }
 

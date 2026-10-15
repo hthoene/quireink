@@ -1219,7 +1219,10 @@ pub fn option_name(env: &Env<'_>, spec: &SettingSpec, value: &str) -> String {
         SettingKind::Choice(_) => env.i18n.tr(value).to_string(),
         SettingKind::List => {
             let names: Vec<&str> = crate::status::item_ids(value)
-                .map(|id| env.i18n.tr(env.status_items.title(id).unwrap_or(id)))
+                .map(|id| {
+                    let title = env.status_items.title(id).or_else(|| env.widgets.title(id));
+                    env.i18n.tr(title.unwrap_or(id))
+                })
                 .collect();
             if names.is_empty() {
                 env.i18n.tr("core.list.none").to_string()

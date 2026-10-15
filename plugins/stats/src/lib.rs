@@ -30,6 +30,7 @@ mod overview;
 mod store;
 mod sync;
 mod totals;
+mod widget;
 
 use alloc::borrow::Cow;
 use alloc::boxed::Box;
@@ -250,6 +251,7 @@ impl Plugin for Stats {
 
     fn register(&self, r: &mut dyn Registrar) -> Result<(), RegisterError> {
         let state: Shared = Rc::new(RefCell::new(State::default()));
+        widget::register(r)?;
         r.add_setting_group(SettingGroupSpec {
             id: GROUP,
             title: Cow::Borrowed("stats.group"),

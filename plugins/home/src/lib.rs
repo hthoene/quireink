@@ -2,6 +2,8 @@
 //!
 //! - **Continue reading**: the last book with its progress, one press away.
 //! - **Recently read**: the books before it.
+//! - **Widgets**: the ones chosen under Settings › Appearance (a clock,
+//!   today's reading, any plugin's), below the card.
 //! - **Shortcuts**: the entries of the `home.actions` menu (library and
 //!   settings by default). Any plugin can add shortcuts with
 //!   `Registrar::add_menu_entry`; users can redefine them in `[menus]`.
@@ -16,10 +18,11 @@
 extern crate alloc;
 
 mod recent;
+mod widgets;
 
 use alloc::borrow::Cow;
 use alloc::boxed::Box;
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use quireink_sdk::builtin::{actions, events, params, slots};
@@ -75,6 +78,7 @@ impl Plugin for Home {
                 Box::new(|env, params, _| recent::record(env, params)),
             )?;
         }
+        widgets::register(r)?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/en.ini")))?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/de.ini")))?;
         Ok(())
@@ -103,6 +107,8 @@ struct Dashboard {
     on_card: bool,
     /// The current book's cover, once looked up: `(path, cover)`.
     cover: Option<(String, Option<ImageRef>)>,
+    /// The widgets shown, where they are, and what they showed when drawn.
+    widgets: Vec<(String, Rect, Option<String>)>,
 }
 
 impl Dashboard {
@@ -118,6 +124,7 @@ impl Dashboard {
             items: Vec::new(),
             on_card: false,
             cover: None,
+            widgets: Vec::new(),
         };
         dashboard.load(env);
         dashboard
@@ -149,6 +156,17 @@ impl Dashboard {
             (style.row as f32 * 2.6) as u16,
         );
         y += card.height + style.gap as u16;
+        // The widgets chosen, between the margins.
+        let width = display.width.saturating_sub(2 * margin);
+        self.widgets = widgets::chosen(env)
+            .into_iter()
+            .filter_map(|id| {
+                let height = env.widgets.height(id, env, width)?;
+                let rect = Rect::new(margin, y, width, height);
+                y += height + style.gap as u16;
+                Some((id.to_string(), rect, env.widgets.signature(id, env)))
+            })
+            .collect();
         let label = (recent_count > 0).then(|| {
             let rect = Rect::new(0, y, display.width, (style.row as f32 * 0.7) as u16);
             y += rect.height;
@@ -343,6 +361,10 @@ impl Screen for Dashboard {
             None,
         );
         self.draw_card(canvas, env);
+        for (id, rect, _) in &self.widgets {
+            ui::fill(canvas, *rect, Color::WHITE);
+            env.widgets.draw(id, canvas, env, *rect);
+        }
         let Some(font) = style.font(env) else {
             return;
         };
@@ -406,6 +428,23 @@ impl Screen for Dashboard {
     /// format plugin, which caches the cover).
     fn on_timer(&mut self, cx: &mut Cx<'_, '_>) {
         let env = *cx.env();
+        // Widgets whose content changed (a clock each minute).
+        let mut changed = false;
+        for (id, rect, shown) in &mut self.widgets {
+            let now = env.widgets.signature(id, &env);
+            if now.is_some() && now != *shown {
+                *shown = now;
+                cx.request_redraw_area(*rect);
+                changed = true;
+            }
+        }
+        if changed {
+            cx.request_refresh(RefreshMode::Fast);
+        }
+        if self.widgets.iter().any(|(_, _, s)| s.is_some()) {
+            let next = quireink_sdk::time::next_minute(&env).unwrap_or(env.now.add_millis(60_000));
+            cx.wake_at(next);
+        }
         let Some(book) = &self.current else {
             return;
         };

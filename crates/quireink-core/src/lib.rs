@@ -322,6 +322,7 @@ impl KernelBuilder {
                 plugins: Plugins::new(),
                 status: SystemStatus::default(),
                 status_items: StatusItems::new(),
+                widgets: quireink_sdk::widgets::Widgets::new(),
                 network: self.network,
                 clipboard: String::new(),
                 system_clipboard: false,
@@ -695,6 +696,7 @@ impl Kernel {
         shared.formats.shrink_to_fit();
         shared.hyphenation.shrink_to_fit();
         shared.status_items.shrink_to_fit();
+        shared.widgets.shrink_to_fit();
         shared.translator.shrink_to_fit();
     }
 
@@ -1355,6 +1357,9 @@ impl Kernel {
         }
         for line in staging.status_lines.drain(..) {
             self.shared.status_items.add_line(line);
+        }
+        for widget in staging.widgets.drain(..) {
+            self.shared.widgets.add(widget);
         }
         Ok(())
     }
@@ -2335,6 +2340,7 @@ struct Shared {
     plugins: Plugins,
     status: SystemStatus,
     status_items: StatusItems,
+    widgets: quireink_sdk::widgets::Widgets,
     network: bool,
     /// Text copied here.
     clipboard: String,
@@ -2365,6 +2371,7 @@ impl Shared {
             plugins: &self.plugins,
             status: &self.status,
             status_items: &self.status_items,
+            widgets: &self.widgets,
             network: self.network,
             clipboard: self.system_clipboard || !self.clipboard.is_empty(),
             slots: &self.slots,

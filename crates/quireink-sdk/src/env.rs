@@ -35,6 +35,8 @@ pub struct Env<'a> {
     pub status: &'a SystemStatus,
     /// Items for status lines, from every plugin.
     pub status_items: &'a StatusItems,
+    /// Widgets for screens that show them, from every plugin.
+    pub widgets: &'a crate::widgets::Widgets,
     /// What buttons, taps and swipes do (see [`keys`](crate::keys)).
     pub keys: &'a dyn crate::keys::KeyBindings,
     /// Whether the device can make HTTP requests

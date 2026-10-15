@@ -245,7 +245,7 @@ impl Overview {
 }
 
 /// Distinct pages read on local day `day`.
-fn distinct_pages(env: &Env<'_>, day: i32) -> u32 {
+pub(crate) fn distinct_pages(env: &Env<'_>, day: i32) -> u32 {
     let since = fmt::unix_near(day).saturating_sub(14 * 3600).max(0) as u32;
     let mut pages: Vec<(u16, u32)> = Vec::new();
     store::scan_recent(env.storage, since, |stat| {
