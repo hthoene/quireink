@@ -26,6 +26,7 @@ mod index;
 mod screen;
 mod search;
 mod selection;
+mod skim;
 mod status;
 mod toc;
 
@@ -85,6 +86,12 @@ pub const GOTO: Id = Id::new_static("reader.goto");
 pub const FOLLOW: Id = Id::new_static("reader.follow");
 /// The reply when a page has been read aloud; parameter `path`.
 const SPOKEN: Id = Id::new_static("reader.spoken");
+/// Skimming through the book, an overlay (see `skim`); it asks the
+/// reader to move with [`SKIM`] and hears where the book is with
+/// [`SKIMMED`].
+pub const SKIM_SCREEN: Id = Id::new_static("reader.skim-screen");
+const SKIM: Id = Id::new_static("reader.skim");
+const SKIMMED: Id = Id::new_static("reader.skimmed");
 /// A footnote over the page (see `footnote`).
 pub const FOOTNOTE_SCREEN: Id = Id::new_static("reader.footnote");
 
@@ -176,6 +183,9 @@ pub mod actions {
     pub const LOOK_UP: Id = Id::new_static("reader.selection.look-up");
     /// Highlights the selected text, or removes highlights in it.
     pub const HIGHLIGHT: Id = Id::new_static("reader.selection.highlight");
+    /// Skims through the book: a bar with its chapters, chapter by
+    /// chapter, back to where one was (an overlay at the bottom).
+    pub const SKIM_BOOK: Id = Id::new_static("reader.skim-book");
     /// Turns the pages by themselves every few seconds, or stops it.
     pub const AUTO_TURN: Id = Id::new_static("reader.auto-turn");
     /// Shows the book's information (slot `core.book-info`).
@@ -237,6 +247,11 @@ impl Plugin for Reader {
         })?;
         status::register(r)?;
         r.add_screen(ScreenSpec {
+            id: SKIM_SCREEN,
+            title: Cow::Borrowed("reader.skim"),
+            factory: Box::new(|env, params| Box::new(skim::SkimScreen::new(env, params))),
+        })?;
+        r.add_screen(ScreenSpec {
             id: FOOTNOTE_SCREEN,
             title: Cow::Borrowed("reader.title"),
             factory: Box::new(|env, params| Box::new(footnote::FootnoteScreen::new(env, params))),
@@ -263,6 +278,7 @@ impl Plugin for Reader {
             (actions::NOTE, "reader.select.note"),
             (actions::BOOK_INFO, "reader.book-info"),
             (actions::AUTO_TURN, "reader.auto-turn"),
+            (actions::SKIM_BOOK, "reader.skim"),
             (actions::EXTEND, "reader.select.extend"),
             (actions::CANCEL, "reader.select.cancel"),
             (actions::MORE, "reader.select.more"),
@@ -544,7 +560,7 @@ impl Plugin for Reader {
             (LAYOUT_MENU, settings::HYPHENATE, 50),
             (LAYOUT_MENU, settings::PUBLISHER_STYLES, 60),
             (MORE_MENU, actions::TOGGLE_BOOKMARK, 10),
-            (MORE_MENU, actions::GO_TO_PAGE, 15),
+            (MORE_MENU, actions::SKIM_BOOK, 15),
             (MORE_MENU, actions::AUTO_TURN, 17),
             (MORE_MENU, actions::SELECT, 20),
             (MORE_MENU, actions::LINKS, 25),
@@ -581,6 +597,7 @@ impl Plugin for Reader {
             (actions::SELECT, "highlight"),
             (actions::READ_ALOUD, "volume"),
             (actions::AUTO_TURN, "clock"),
+            (actions::SKIM_BOOK, "adjustments-horizontal"),
         ] {
             r.add_icon(item, Cow::Borrowed(icon))?;
         }

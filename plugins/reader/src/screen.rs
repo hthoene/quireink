@@ -448,6 +448,8 @@ pub(crate) struct ReaderScreen {
     resume: Option<(Locator, usize)>,
     /// When the page turns by itself next, while it does.
     auto_turn: Option<quireink_sdk::Instant>,
+    /// Where skimming began, while skimming.
+    skim_from: Option<Locator>,
 }
 
 /// A sentence read aloud, by words of the page that starts at `page`.
@@ -492,7 +494,41 @@ impl ReaderScreen {
             aloud: None,
             resume: None,
             auto_turn: None,
+            skim_from: None,
         }
+    }
+
+    /// Opens the skimming overlay where the book is.
+    fn open_skim(&mut self, cx: &mut Cx<'_, '_>) {
+        let env = *cx.env();
+        let Ok(book) = &self.book else {
+            return;
+        };
+        self.skim_from.get_or_insert(book.page.start);
+        cx.command(Command::OpenScreen(
+            crate::SKIM_SCREEN,
+            book.skim_params(&env)
+                .with(crate::skim::MARKS, book.chapter_marks.clone()),
+        ));
+    }
+
+    /// Moves as the skimming overlay asks, and tells it where the book is.
+    fn skim(&mut self, to: &str, cx: &mut Cx<'_, '_>) {
+        let env = *cx.env();
+        let from = self.skim_from;
+        let Ok(book) = &mut self.book else {
+            return;
+        };
+        let target = if to == "back" {
+            from
+        } else {
+            book.skim_target(&env, to)
+        };
+        if let Some(target) = target {
+            let start = book.page_start(&env, target);
+            book.show(cx, start, true);
+        }
+        cx.command(Command::Emit(crate::SKIMMED, book.skim_params(&env)));
     }
 
     /// Starts turning the pages by themselves, or stops it.
@@ -1866,6 +1902,100 @@ impl Book {
     /// The start of the page that contains `at`, as the page index has it
     /// (so pages look the same as when paging there); `at` itself where
     /// the index does not reach yet.
+    /// Where the book is, for the skimming overlay: the page, the chapter
+    /// and how far, in thousandths.
+    fn skim_params(&self, env: &Env<'_>) -> Params {
+        let chapter = self
+            .chapter
+            .as_ref()
+            .map(|(_, _, title)| title.clone())
+            .unwrap_or_default();
+        Params::new()
+            .with(params::PATH, self.path.clone())
+            .with(params::PAGE, self.position_label(env))
+            .with(params::TEXT, chapter)
+            .with(
+                crate::skim::AT,
+                format!("{}", (self.percent() * 10.0) as u32),
+            )
+    }
+
+    /// Where `to` leads: `page:±n` pages on (or as many tenths of a
+    /// percent while pages are counted), `permille:n` that far into the
+    /// book, `chapter:±1` the chapter before or after.
+    fn skim_target(&self, env: &Env<'_>, to: &str) -> Option<Locator> {
+        let (kind, value) = to.split_once(':')?;
+        let value: i64 = value.trim_start_matches('+').parse().ok()?;
+        let pages = self
+            .index
+            .as_ref()
+            .filter(|i| i.is_complete() && i.pages() > 0);
+        match kind {
+            "page" => {
+                if let Some(index) = pages
+                    && let Some((page, _)) = index.locate(env.storage, self.page.start)
+                {
+                    let target = (i64::from(page) + value).clamp(0, i64::from(index.pages()) - 1);
+                    return index.entry(env.storage, target as u32);
+                }
+                let at = (self.percent() as f64 * 10.0 + value as f64).clamp(0.0, 999.0);
+                Some(self.locator_at(at / 1000.0))
+            }
+            "permille" => {
+                let fraction = value.clamp(0, 999) as f64 / 1000.0;
+                if let Some(index) = pages {
+                    let page = (fraction * f64::from(index.pages())) as u32;
+                    return index.entry(env.storage, page.min(index.pages() - 1));
+                }
+                Some(self.locator_at(fraction))
+            }
+            "chapter" => {
+                // Where the top-level entries begin, exactly (their anchors).
+                let storage = env.storage;
+                let mut starts: Vec<Locator> = (0..self.document.toc_len(storage).min(2000))
+                    .filter(|&i| {
+                        self.document
+                            .toc_entry(storage, i)
+                            .is_some_and(|e| e.level == 0)
+                    })
+                    .filter_map(|i| self.document.toc_target(storage, i))
+                    .collect();
+                starts.sort();
+                starts.dedup();
+                let here = self.page.start;
+                let current = starts.iter().rposition(|&s| s <= here);
+                let target = match (value < 0, current) {
+                    // Back: to the start of this chapter, or the one before.
+                    (true, Some(i)) if starts[i] < here => Some(i),
+                    (true, Some(i)) => i.checked_sub(1),
+                    (true, None) => None,
+                    (false, Some(i)) => Some(i + 1),
+                    (false, None) => Some(0),
+                };
+                target.and_then(|i| starts.get(i).copied())
+            }
+            _ => None,
+        }
+    }
+
+    /// The position `fraction` of the way through the book, by the
+    /// sections' lengths.
+    fn locator_at(&self, fraction: f64) -> Locator {
+        let sections = self.document.sections();
+        let total: u64 = (0..sections)
+            .map(|s| u64::from(self.document.section_len(s)))
+            .sum();
+        let mut left = (fraction.clamp(0.0, 1.0) * total as f64) as u64;
+        for section in 0..sections {
+            let len = u64::from(self.document.section_len(section));
+            if left < len {
+                return Locator::new(section, left as u32);
+            }
+            left -= len;
+        }
+        Locator::new(sections.saturating_sub(1), 0)
+    }
+
     fn page_start(&self, env: &Env<'_>, at: Locator) -> Locator {
         let Some(index) = &self.index else {
             return at;
@@ -2264,6 +2394,22 @@ impl Screen for ReaderScreen {
     }
 
     fn on_show(&mut self, cx: &mut Cx<'_, '_>) {
+        // Done skimming: *Back* returns to where it began.
+        if let (Some(from), Ok(book)) = (self.skim_from.take(), &mut self.book)
+            && book.page.start != from
+        {
+            if book.returns.len() == RETURNS {
+                book.returns.remove(0);
+            }
+            book.returns.push(from);
+            book.landed = Some(book.page.start);
+        }
+        // *Back* is drawn anew: screens over it may have hidden it.
+        if let Ok(book) = &self.book
+            && let Some(area) = book.back_area(cx.env())
+        {
+            cx.request_redraw_area(area);
+        }
         if let Ok(book) = &self.book {
             // The book's own settings ("Only this book") while it is open.
             cx.command(Command::SetScope(Some(format!(
@@ -2307,6 +2453,10 @@ impl Screen for ReaderScreen {
         }
         if *action == crate::actions::AUTO_TURN {
             self.toggle_auto_turn(cx);
+            return Handled::Yes;
+        }
+        if *action == crate::actions::SKIM_BOOK {
+            self.open_skim(cx);
             return Handled::Yes;
         }
         // While pages turn by themselves, turning one starts the count
@@ -2564,6 +2714,11 @@ impl Screen for ReaderScreen {
                 book.found = Some((at, end));
                 cx.request_redraw();
             }
+            return;
+        }
+        if *event == crate::SKIM && this_book {
+            let to = params.get(crate::skim::TO).unwrap_or_default().to_string();
+            self.skim(&to, cx);
             return;
         }
         if *event == crate::NOTE_ENTERED
