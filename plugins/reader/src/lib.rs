@@ -167,6 +167,8 @@ pub mod actions {
     pub const LOOK_UP: Id = Id::new_static("reader.selection.look-up");
     /// Highlights the selected text, or removes highlights in it.
     pub const HIGHLIGHT: Id = Id::new_static("reader.selection.highlight");
+    /// Reads aloud from the selected text on.
+    pub const READ_FROM: Id = Id::new_static("reader.selection.read-aloud");
     /// Copies the selected text to the clipboard.
     pub const COPY: Id = Id::new_static("reader.selection.copy");
     /// Moves the end of the selection with the buttons.
@@ -242,6 +244,7 @@ impl Plugin for Reader {
             (actions::LOOK_UP, "reader.select.look-up"),
             (actions::HIGHLIGHT, "reader.select.highlight"),
             (actions::COPY, "reader.select.copy"),
+            (actions::READ_FROM, "reader.select.read-aloud"),
             (actions::EXTEND, "reader.select.extend"),
             (actions::CANCEL, "reader.select.cancel"),
             (actions::MORE, "reader.select.more"),
@@ -256,6 +259,7 @@ impl Plugin for Reader {
         for (item, order) in [
             (actions::LOOK_UP, 10),
             (actions::HIGHLIGHT, 20),
+            (actions::READ_FROM, 25),
             (actions::COPY, 30),
             (actions::EXTEND, 80),
             (actions::CANCEL, 90),
@@ -511,6 +515,7 @@ impl Plugin for Reader {
         // text and links with the buttons where there is no touch screen.
         for item in [
             actions::READ_ALOUD,
+            actions::READ_FROM,
             settings::ALOUD_SPEED,
             settings::ALOUD_HIGHLIGHT,
             settings::ALOUD_TURN,

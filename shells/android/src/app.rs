@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant as StdInstant};
 
 use android_activity::input::{InputEvent as AndroidInput, KeyAction, MotionAction, ToolType};
-use android_activity::{AndroidApp, InputStatus, MainEvent, PollEvent};
+use android_activity::{AndroidApp, InputStatus, MainEvent, PollEvent, WindowManagerFlags};
 use ndk::hardware_buffer_format::HardwareBufferFormat;
 use ndk::native_window::NativeWindow;
 use quireink_core::{Effects, Kernel};
@@ -61,6 +61,8 @@ struct Running {
     servers: quireink_serve::Servers,
     /// Reading aloud.
     speech: crate::speech::Speech,
+    /// The screen is kept on (while reading aloud).
+    awake: bool,
 }
 
 /// How often the battery and time zone are read again.
@@ -209,6 +211,21 @@ fn android_main(app: AndroidApp) {
         if state.wake_at.is_some_and(|at| at <= now()) {
             let effects = state.kernel.tick(now());
             changed |= apply(state, effects);
+        }
+        // The screen stays on while reading aloud: a sleeping device would
+        // stop after the sentence.
+        let speaking = state.kernel.speaking();
+        if speaking != state.awake {
+            state.awake = speaking;
+            let (on, none) = (
+                WindowManagerFlags::KEEP_SCREEN_ON,
+                WindowManagerFlags::empty(),
+            );
+            if speaking {
+                app.set_window_flags(on, none);
+            } else {
+                app.set_window_flags(none, on);
+            }
         }
         if changed && let Some(window) = &window {
             if let (Some(epd), Some(mode)) = (epd.as_mut(), state.refresh.take()) {
@@ -388,6 +405,7 @@ fn start_kernel(
             quireink_serve::Servers::new(move || waker.wake())
         },
         speech: crate::speech::Speech::new(app),
+        awake: false,
     };
     apply(&mut running, effects);
     Some(running)

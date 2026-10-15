@@ -674,6 +674,15 @@ impl ReaderScreen {
     /// Does what a bar item stands for. Items of other plugins are
     /// announced with the selected text (event [`crate::TEXT_CHOSEN`]).
     fn activate(&mut self, item: &Id, cx: &mut Cx<'_, '_>) {
+        if *item == crate::actions::READ_FROM
+            && let (Ok(book), Some(selection)) = (&self.book, self.selection)
+        {
+            // From the first word chosen.
+            self.resume = Some((book.page.start, selection.range().0));
+            self.set_selection(None, cx);
+            self.start_aloud(cx);
+            return;
+        }
         let env = *cx.env();
         let (Ok(book), Some(selection)) = (&mut self.book, self.selection) else {
             return;
