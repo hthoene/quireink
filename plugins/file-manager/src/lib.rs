@@ -155,7 +155,7 @@ impl Browser {
             display.height.saturating_sub(top + bottom),
         );
         let mut browser = Self {
-            list: ListView::new(area, style.row),
+            list: ListView::new(area, style.row).focus_on_keys(env),
             bar: Rect::new(0, display.height - bar_height, display.width, bar_height),
             dir: params.get(params::PATH).unwrap_or_default().to_string(),
             entries: Vec::new(),

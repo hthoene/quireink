@@ -139,7 +139,7 @@ fn visible(env: &Env<'_>, spec: &SettingSpec) -> bool {
 fn frame(env: &Env<'_>, noted: bool) -> (UiStyle, ui::Header, ListView) {
     let (style, header, area) = page(env);
     let row = if noted { style.noted_row() } else { style.row };
-    (style, header, ListView::new(area, row))
+    (style, header, ListView::new(area, row).focus_on_keys(env))
 }
 
 /// The style, header and the area below it for the list of a page.

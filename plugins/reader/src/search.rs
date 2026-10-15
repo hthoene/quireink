@@ -81,7 +81,7 @@ impl SearchScreen {
             hits: Vec::new(),
             more: false,
             shown_percent: 0,
-            list: ListView::new(area, style.noted_row()),
+            list: ListView::new(area, style.noted_row()).focus_on_keys(env),
             style,
             header,
         }

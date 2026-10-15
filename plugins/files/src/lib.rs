@@ -180,7 +180,7 @@ impl Browser {
             first: 0,
             page: Vec::new(),
             fresh: true,
-            list: ListView::new(area, style.noted_row()),
+            list: ListView::new(area, style.noted_row()).focus_on_keys(env),
             style,
             header,
         };

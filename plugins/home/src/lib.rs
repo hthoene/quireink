@@ -19,7 +19,6 @@ mod recent;
 
 use alloc::borrow::Cow;
 use alloc::boxed::Box;
-use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -113,7 +112,7 @@ impl Dashboard {
             header: Rect::default(),
             card: Rect::default(),
             label: None,
-            list: ListView::new(Rect::default(), style.row),
+            list: ListView::new(Rect::default(), style.row).focus_on_keys(env),
             style,
             current: None,
             items: Vec::new(),
@@ -158,7 +157,7 @@ impl Dashboard {
         let area = Rect::new(0, y, display.width, display.height.saturating_sub(y));
 
         let focus = self.list.focus.min(items.len().saturating_sub(1));
-        self.list = ListView::new(area, style.row);
+        self.list = ListView::new(area, style.row).focus_on_keys(env);
         self.list.focus = focus;
         self.on_card = current.is_some() && (self.on_card || self.current.is_none());
         self.list.active = !self.on_card;
@@ -240,7 +239,8 @@ impl Dashboard {
         let Some(font) = style.font(env) else {
             return;
         };
-        let border = if self.on_card {
+        // A thick frame shows the focus, once buttons are used.
+        let border = if self.on_card && self.list.shown {
             style.line * 5
         } else {
             style.line * 2
@@ -357,26 +357,38 @@ impl Screen for Dashboard {
                 Color::gray(90),
             );
         }
+        // Like menu entries: an icon, the label, and what is behind it.
         let items = &self.items;
+        let room = ui::icon_room(env, &style, true);
         self.list.draw(
             canvas,
             &style,
             items.len(),
             |canvas, index, rect, focused| {
-                let color = if focused { Color::WHITE } else { Color::BLACK };
-                let margin = style.margin as f32;
+                let ink = if focused { Color::WHITE } else { Color::BLACK };
                 match &items[index] {
                     Item::Book(book) => {
-                        let percent = format!("{} %", (book.progress + 0.5) as i64);
-                        let pw = font.measure(style.small, &percent);
-                        let right = f32::from(rect.width) - margin - pw;
-                        ui::draw_label(canvas, &font, style.small, right, rect, &percent, color);
-                        let title = ui::fit(&font, style.text, &book.title, right - margin * 3.0);
-                        ui::draw_label(canvas, &font, style.text, margin, rect, &title, color);
+                        let rect =
+                            ui::draw_row_icon(canvas, env, &style, rect, room, Some("book"), ink);
+                        let percent = env.i18n.format(
+                            "home.percent",
+                            &[("percent", Arg::Int((book.progress + 0.5) as i64))],
+                        );
+                        ui::draw_value_row(
+                            canvas,
+                            env,
+                            &style,
+                            rect,
+                            focused,
+                            &book.title,
+                            &percent,
+                        );
                     }
-                    Item::Action(_, title) => {
-                        let label = format!("› {}", env.i18n.tr(title));
-                        ui::draw_label(canvas, &font, style.text, margin, rect, &label, color);
+                    Item::Action(id, title) => {
+                        let icon = env.menus.icon(id.as_str());
+                        let rect = ui::draw_row_icon(canvas, env, &style, rect, room, icon, ink);
+                        let title = env.i18n.tr(title);
+                        ui::draw_value_row(canvas, env, &style, rect, focused, title, "›");
                     }
                 }
             },
@@ -428,6 +440,23 @@ impl Screen for Dashboard {
     fn on_action(&mut self, action: &Id, cx: &mut Cx<'_, '_>) -> Handled {
         let a = action;
         let rows = self.list.rows() as isize;
+        let navigation = [
+            actions::UP,
+            actions::LEFT,
+            actions::PREVIOUS,
+            actions::DOWN,
+            actions::RIGHT,
+            actions::NEXT,
+            actions::NEXT_PAGE,
+            actions::PREV_PAGE,
+        ];
+        if navigation.contains(a) && !self.list.shown {
+            // The first button press shows where the focus is.
+            self.list.shown = true;
+            cx.request_redraw();
+            cx.request_refresh(RefreshMode::Fast);
+            return Handled::Yes;
+        }
         if *a == actions::UP || *a == actions::LEFT || *a == actions::PREVIOUS {
             self.up(cx);
         } else if *a == actions::DOWN || *a == actions::RIGHT || *a == actions::NEXT {

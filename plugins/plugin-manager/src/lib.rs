@@ -109,7 +109,7 @@ impl PluginList {
         let bar = Rect::new(0, display.height - bar_height, display.width, bar_height);
         let height = display.height.saturating_sub(top + bar_height);
         let area = Rect::new(0, top, display.width, height);
-        let list = ListView::new(area, style.noted_row());
+        let list = ListView::new(area, style.noted_row()).focus_on_keys(env);
         let mut plugins: Vec<&PluginInfo> = env.plugins.iter().collect();
         plugins.sort_by_key(|p| {
             (

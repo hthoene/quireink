@@ -46,7 +46,7 @@ impl ChooseScreen {
         let top = header.area.height + style.gap as u16;
         let area = Rect::new(0, top, display.width, display.height - top);
         Self {
-            list: ListView::new(area, style.row),
+            list: ListView::new(area, style.row).focus_on_keys(env),
             style,
             header,
         }

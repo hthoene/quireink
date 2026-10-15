@@ -79,7 +79,8 @@ impl Overview {
             list: ListView::new(
                 Rect::new(0, list_top, display.width, list_height),
                 style.row,
-            ),
+            )
+            .focus_on_keys(env),
             rows,
             style,
             header,

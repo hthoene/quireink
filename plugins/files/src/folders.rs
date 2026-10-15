@@ -70,7 +70,7 @@ impl FolderChooser {
             len: 0,
             page: Vec::new(),
             first: 0,
-            list: ListView::new(area, style.row),
+            list: ListView::new(area, style.row).focus_on_keys(env),
             style,
             header,
         };

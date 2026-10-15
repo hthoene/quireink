@@ -163,7 +163,7 @@ impl BrowserScreen {
             session.borrow_mut().pages.clear();
         }
         Self {
-            list: ListView::new(area, style.row),
+            list: ListView::new(area, style.row).focus_on_keys(env),
             status,
             bookmarks: store::bookmarks(env),
             history: store::load(env.storage, &store::history_path()).unwrap_or_default(),

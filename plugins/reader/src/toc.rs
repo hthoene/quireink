@@ -70,7 +70,7 @@ impl TocScreen {
             visible: Vec::new(),
             style,
             header,
-            list: ListView::new(area, style.row),
+            list: ListView::new(area, style.row).focus_on_keys(env),
         };
         if let Some(current) = locator_of(params) {
             screen.list.focus = screen.current(env, current);

@@ -186,7 +186,7 @@ impl Frame {
         let top = header.area.height + style.gap as u16;
         let area = Rect::new(0, top, display.width, display.height - top);
         Self {
-            list: ListView::new(area, style.row),
+            list: ListView::new(area, style.row).focus_on_keys(env),
             style,
             header,
         }
@@ -524,7 +524,7 @@ impl EntryScreen {
             menu: params.get(MENU).unwrap_or_default().to_string(),
             index: params.get(INDEX).and_then(|i| i.parse().ok()).unwrap_or(0),
             refused: false,
-            list: ListView::new(list_area, style.row),
+            list: ListView::new(list_area, style.row).focus_on_keys(env),
             style,
             region,
         }

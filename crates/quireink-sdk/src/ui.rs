@@ -763,6 +763,9 @@ pub struct ListView {
     /// Whether the focused row is highlighted; off while the focus is on
     /// another element of the screen.
     pub active: bool,
+    /// Whether the focus shows at all: on touch screens only once a
+    /// button moved it (see [`ListView::focus_on_keys`]), as in menus.
+    pub shown: bool,
 }
 
 impl ListView {
@@ -772,6 +775,7 @@ impl ListView {
             row: row.max(1),
             focus: 0,
             active: true,
+            shown: true,
         }
     }
 
@@ -795,9 +799,23 @@ impl ListView {
     }
 
     /// Moves the focus by `delta` rows, clamped to `0..len`.
+    /// On touch screens, hides the focus until a button moves it: taps
+    /// need no focus, and a black row nobody chose looks like a mistake.
+    pub fn focus_on_keys(mut self, env: &Env<'_>) -> Self {
+        self.shown = !env.device.input.touch;
+        self
+    }
+
     pub fn move_focus(&mut self, delta: isize, len: usize) -> ListChange {
         if len == 0 {
             return ListChange::None;
+        }
+        if !self.shown {
+            // The first press shows where the focus is; pages still turn.
+            self.shown = true;
+            if delta.abs() == 1 {
+                return ListChange::Focus;
+            }
         }
         let focus = (self.focus as isize + delta).clamp(0, len as isize - 1) as usize;
         if focus == self.focus {
@@ -845,7 +863,7 @@ impl ListView {
         let first = self.page() * self.rows();
         for (slot, index) in (first..len).take(self.rows()).enumerate() {
             let rect = self.row_rect(slot);
-            let focused = self.active && index == self.focus;
+            let focused = self.active && self.shown && index == self.focus;
             if focused {
                 fill(canvas, rect, Color::BLACK);
             } else {

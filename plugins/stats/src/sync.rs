@@ -380,7 +380,8 @@ impl SyncScreen {
         let height = style.row as u16 * rows.len() as u16;
         let note_top = top + height + style.gap as u16;
         Self {
-            list: ListView::new(Rect::new(0, top, display.width, height), style.row),
+            list: ListView::new(Rect::new(0, top, display.width, height), style.row)
+                .focus_on_keys(env),
             note: Rect::new(
                 0,
                 note_top,

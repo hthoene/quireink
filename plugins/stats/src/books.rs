@@ -40,7 +40,7 @@ impl BookList {
             .collect();
         books.sort_by_key(|(b, _)| core::cmp::Reverse(b.last_open));
         Self {
-            list: ListView::new(area, style.noted_row()),
+            list: ListView::new(area, style.noted_row()).focus_on_keys(env),
             style,
             header,
             books,
