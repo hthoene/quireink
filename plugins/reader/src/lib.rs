@@ -7,6 +7,9 @@
 //!   start-up (setting `reader.open-last`).
 //! - Builds a page index in the background, so page numbers and total pages
 //!   become available without slowing down page turns.
+//! - Follows links: a tap, or with buttons *Links* in the menu, which
+//!   moves from link to link (on over the pages) until one is confirmed.
+//!   *Back* returns to where a link was followed from.
 //! - Emits the standard events `core.book-opened` and `core.page-turned`,
 //!   so other plugins (home screen, statistics, sync, …) follow the reading.
 //!
@@ -118,6 +121,9 @@ pub mod actions {
     /// Selects text with the buttons to look it up or highlight it
     /// (touch: long-press a word).
     pub const SELECT: Id = Id::new_static("reader.select-text");
+    /// Chooses a link on the page with the buttons and follows it
+    /// (touch: tap the link).
+    pub const LINKS: Id = Id::new_static("reader.links");
     /// Sets or removes the bookmark of the page.
     pub const TOGGLE_BOOKMARK: Id = Id::new_static("reader.toggle-bookmark");
     /// Lists the book's bookmarks and highlights.
@@ -193,6 +199,7 @@ impl Plugin for Reader {
             (actions::SEARCH, "reader.search"),
             (actions::GO_TO_PAGE, "reader.go-to-page"),
             (actions::SELECT, "reader.select"),
+            (actions::LINKS, "reader.links"),
             (actions::TOGGLE_BOOKMARK, "reader.toggle-bookmark"),
             (actions::ANNOTATIONS, "reader.annotations"),
             (actions::LOOK_UP, "reader.select.look-up"),
@@ -404,6 +411,7 @@ impl Plugin for Reader {
             (LAYOUT_MENU, settings::PUBLISHER_STYLES, 60),
             (MORE_MENU, actions::TOGGLE_BOOKMARK, 10),
             (MORE_MENU, actions::SELECT, 20),
+            (MORE_MENU, actions::LINKS, 25),
             (MORE_MENU, core_actions::LIBRARY, 30),
             (MORE_MENU, core_actions::HOME, 40),
             (MORE_MENU, core_actions::SETTINGS, 50),
@@ -413,6 +421,7 @@ impl Plugin for Reader {
         }
         for (item, icon) in [
             (actions::TOC, "list"),
+            (actions::LINKS, "link"),
             (actions::SEARCH, "search"),
             (actions::GO_TO_PAGE, "hash"),
             (actions::ANNOTATIONS, "bookmarks"),

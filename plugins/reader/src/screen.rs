@@ -366,10 +366,19 @@ pub(crate) fn book_dir(path: &str) -> String {
 }
 
 /// Shows a book page by page.
+/// Choosing a link with the buttons: which of the page's links that can
+/// be followed has the focus (`None` if the page has none).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Linking {
+    focus: Option<usize>,
+}
+
 pub(crate) struct ReaderScreen {
     book: Result<Book, String>,
     /// Text chosen on the page (see `selection`).
     selection: Option<Selection>,
+    /// A link being chosen with the buttons.
+    linking: Option<Linking>,
     /// The last search, offered again.
     last_search: String,
     /// What the status lines showed when last drawn.
@@ -381,6 +390,7 @@ impl ReaderScreen {
         Self {
             book: Book::open(env, params),
             selection: None,
+            linking: None,
             last_search: String::new(),
             status_shown: String::new(),
         }
@@ -508,6 +518,85 @@ impl ReaderScreen {
     }
 
     /// Buttons while text is selected.
+    fn set_linking(&mut self, to: Option<Linking>, cx: &mut Cx<'_, '_>) {
+        if self.linking != to {
+            self.linking = to;
+            cx.request_redraw();
+            cx.request_refresh(RefreshMode::Fast);
+        }
+    }
+
+    /// Buttons while choosing a link: the next or previous one (on to
+    /// the next or previous page past the last or first), *confirm*
+    /// follows it, *back* ends.
+    fn on_linking(&mut self, action: &Id, linking: Linking, cx: &mut Cx<'_, '_>) -> Handled {
+        let env = *cx.env();
+        let a = action;
+        let forward = [
+            actions::RIGHT,
+            actions::DOWN,
+            actions::NEXT,
+            actions::NEXT_PAGE,
+        ];
+        let backward = [
+            actions::LEFT,
+            actions::UP,
+            actions::PREVIOUS,
+            actions::PREV_PAGE,
+        ];
+        let Ok(book) = &mut self.book else {
+            self.linking = None;
+            return Handled::No;
+        };
+        let count = book.followable(&env).len();
+        if forward.contains(a) {
+            match linking.focus {
+                Some(i) if i + 1 < count => {
+                    self.set_linking(Some(Linking { focus: Some(i + 1) }), cx);
+                }
+                _ => {
+                    let end = book.page.end;
+                    book.show(cx, end, true);
+                    let focus = (!book.followable(&env).is_empty()).then_some(0);
+                    self.linking = Some(Linking { focus });
+                    cx.request_redraw();
+                }
+            }
+        } else if backward.contains(a) {
+            match linking.focus {
+                Some(i) if i > 0 => {
+                    self.set_linking(Some(Linking { focus: Some(i - 1) }), cx);
+                }
+                _ => {
+                    if let Some(start) = book.previous_start(&env) {
+                        book.show(cx, start, false);
+                    }
+                    let count = book.followable(&env).len();
+                    self.linking = Some(Linking {
+                        focus: count.checked_sub(1),
+                    });
+                    cx.request_redraw();
+                }
+            }
+        } else if *a == actions::CONFIRM {
+            let href = linking
+                .focus
+                .and_then(|i| book.followable(&env).get(i).copied())
+                .map(|i| book.links[i].href.clone());
+            self.set_linking(None, cx);
+            if let Some(href) = href {
+                return self.follow(&href, cx);
+            }
+        } else if *a == actions::BACK || *a == actions::MENU {
+            self.set_linking(None, cx);
+        } else {
+            // Anything else ends choosing and goes on as usual.
+            self.set_linking(None, cx);
+            return Handled::No;
+        }
+        Handled::Yes
+    }
+
     fn on_selection(&mut self, action: &Id, selection: Selection, cx: &mut Cx<'_, '_>) -> Handled {
         let env = *cx.env();
         let Ok(book) = &self.book else {
@@ -1113,6 +1202,17 @@ impl Book {
             .links(env.storage, start.section, start.offset, to);
     }
 
+    /// The page's links that can be followed (to the web only if a
+    /// browser is there), in reading order: indexes into `links`.
+    fn followable(&self, env: &Env<'_>) -> Vec<usize> {
+        let web = env.has_slot(&slots::BROWSER);
+        let mut order: Vec<usize> = (0..self.links.len())
+            .filter(|&i| web || !quireink_sdk::document::is_external(&self.links[i].href))
+            .collect();
+        order.sort_by_key(|&i| self.links[i].start);
+        order
+    }
+
     /// The link `word` is part of, if any.
     fn link_of(&self, word: &WordBox) -> Option<&Link> {
         if word.start.section != self.page.start.section {
@@ -1372,6 +1472,79 @@ impl Book {
     }
 }
 
+/// The link being chosen, framed like selected text, and a bar at the
+/// bottom saying where it leads and what the buttons do.
+fn draw_linking(
+    canvas: &mut Canvas<'_>,
+    env: &Env<'_>,
+    book: &Book,
+    words: &[WordBox],
+    linking: Linking,
+) {
+    let link = linking
+        .focus
+        .and_then(|i| book.followable(env).get(i).copied())
+        .map(|i| &book.links[i]);
+    if let Some(link) = link {
+        let line = env.metrics.tenth_mm(4).max(2);
+        let inside = |i: usize| {
+            words[i].start.section == book.page.start.section
+                && words[i].end.offset > link.start
+                && words[i].start.offset < link.end
+        };
+        for b in selection::line_boxes(words, inside) {
+            canvas.stroke_rect(
+                i32::from(b.x) - 4,
+                i32::from(b.y) - 2,
+                u32::from(b.width) + 8,
+                u32::from(b.height) + 4,
+                line,
+                Color::BLACK,
+            );
+        }
+    }
+    let style = UiStyle::new(env);
+    let bar = selection::bar_area(env, &style);
+    ui::fill(canvas, bar, Color::WHITE);
+    canvas.fill_rect(
+        i32::from(bar.x),
+        i32::from(bar.y),
+        u32::from(bar.width),
+        style.line.max(2),
+        Color::BLACK,
+    );
+    let Some(font) = style.font(env) else {
+        return;
+    };
+    let text = match link {
+        Some(link) => {
+            let place = if quireink_sdk::document::is_external(&link.href) {
+                quireink_sdk::web::host(&link.href).to_string()
+            } else {
+                env.i18n.tr("reader.link.in-book").to_string()
+            };
+            format!("{place} · {}", env.i18n.tr("reader.link.hint"))
+        }
+        None => env.i18n.tr("reader.link.none").to_string(),
+    };
+    let margin = style.margin as f32;
+    let text = ui::fit(
+        &font,
+        style.small,
+        &text,
+        f32::from(bar.width) - 2.0 * margin,
+    );
+    ui::draw_label(
+        canvas,
+        &font,
+        style.small,
+        f32::from(bar.x) + margin,
+        bar,
+        &text,
+        Color::BLACK,
+    );
+}
+
 impl Screen for ReaderScreen {
     fn draw(&mut self, canvas: &mut Canvas<'_>, env: &Env<'_>) {
         let book = match &self.book {
@@ -1382,6 +1555,7 @@ impl Screen for ReaderScreen {
         let has_highlights = book.marks.iter().any(|m| m.kind == Kind::Highlight);
         let words = if has_highlights
             || self.selection.is_some()
+            || self.linking.is_some()
             || book.found.is_some()
             || !book.links.is_empty()
         {
@@ -1410,6 +1584,14 @@ impl Screen for ReaderScreen {
                     Color::BLACK,
                 );
             }
+        }
+        // A bar at the bottom hides the status line under it entirely.
+        let bar = self.linking.is_some() || self.selection.is_some_and(|s| s.mode == Mode::Bar);
+        if let Some(status) = book.typography.status.filter(|_| bar) {
+            ui::fill(canvas, status, Color::WHITE);
+        }
+        if let Some(linking) = self.linking {
+            draw_linking(canvas, env, book, &words, linking);
         }
         let Some(selection) = self.selection else {
             return;
@@ -1465,6 +1647,17 @@ impl Screen for ReaderScreen {
     fn on_action(&mut self, action: &Id, cx: &mut Cx<'_, '_>) -> Handled {
         if let Some(selection) = self.selection {
             return self.on_selection(action, selection, cx);
+        }
+        if let Some(linking) = self.linking {
+            return self.on_linking(action, linking, cx);
+        }
+        if *action == crate::actions::LINKS {
+            let env = *cx.env();
+            if let Ok(book) = &self.book {
+                let focus = (!book.followable(&env).is_empty()).then_some(0);
+                self.set_linking(Some(Linking { focus }), cx);
+            }
+            return Handled::Yes;
         }
         if *action == crate::actions::SELECT {
             // Choose text with the buttons, starting at the first word.
@@ -1544,6 +1737,10 @@ impl Screen for ReaderScreen {
     /// the finger; while text is selected, taps extend the selection or
     /// choose an item of the bar.
     fn on_gesture(&mut self, gesture: Gesture, cx: &mut Cx<'_, '_>) -> Handled {
+        if self.linking.is_some() {
+            self.set_linking(None, cx);
+            return Handled::Yes;
+        }
         let env = *cx.env();
         let Ok(book) = &self.book else {
             return Handled::No;

@@ -51,6 +51,7 @@ pub(crate) const ICONS: &[(&str, char)] = &[
     ("language", '\u{ebbe}'),
     ("layout", '\u{eadb}'),
     ("letter-case", '\u{eea5}'),
+    ("link", '\u{eade}'),
     ("list", '\u{eb6b}'),
     ("list-details", '\u{ef40}'),
     ("lock", '\u{eae2}'),
