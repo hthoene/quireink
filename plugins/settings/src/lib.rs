@@ -1,12 +1,14 @@
 //! The settings screens, generated from the settings every plugin declares
 //! (`Registrar::add_setting`), so no plugin needs its own settings UI.
 //!
-//! - The main page lists the setting groups, pages other plugins add to
-//!   the `core.settings-pages` menu (e.g. the plugin manager), and a
-//!   switch for advanced settings.
+//! - The main page lists the setting groups and pages other plugins add
+//!   to the `core.settings-pages` menu (e.g. the plugin manager) with
+//!   their icons, under the headings of the sections in that menu (by
+//!   order), and a switch for advanced settings.
 //! - A group page lists its settings with their values and units, each
 //!   with its description below it, so nothing has to be tapped (and
-//!   changed) to find out what it does.
+//!   changed) to find out what it does; settings that name a section
+//!   are listed under its heading.
 //! - Choices and languages open a list to pick from.
 //!
 //! Changes apply immediately and are saved to `quireink.ini` by the
@@ -29,11 +31,11 @@ use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use quireink_sdk::builtin::{actions, events, groups, menus, params, slots};
+use quireink_sdk::builtin::{actions, events, groups, menus, params, setting_sections, slots};
 use quireink_sdk::ui::{self, ListChange, ListView, UiStyle};
 use quireink_sdk::{
-    Canvas, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Level, Manifest, Params, Plugin,
-    Priority, Rect, RefreshMode, RegisterError, Registrar, SDK_VERSION, Screen, ScreenSpec,
+    Canvas, Color, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Level, Manifest, Params,
+    Plugin, Priority, Rect, RefreshMode, RegisterError, Registrar, SDK_VERSION, Screen, ScreenSpec,
     SettingKind, SettingSpec, SettingValue, Version,
 };
 
@@ -135,14 +137,19 @@ fn visible(env: &Env<'_>, spec: &SettingSpec) -> bool {
 /// The header, list area and list for a screen; rows have notes if
 /// `noted`.
 fn frame(env: &Env<'_>, noted: bool) -> (UiStyle, ui::Header, ListView) {
+    let (style, header, area) = page(env);
+    let row = if noted { style.noted_row() } else { style.row };
+    (style, header, ListView::new(area, row))
+}
+
+/// The style, header and the area below it for the list of a page.
+fn page(env: &Env<'_>) -> (UiStyle, ui::Header, Rect) {
     let style = UiStyle::new(env);
     let display = env.device.display;
     let header = ui::Header::new(env, &style, true);
     let top = header.area.height + style.gap as u16;
     let height = display.height.saturating_sub(top);
-    let area = Rect::new(0, top, display.width, height);
-    let row = if noted { style.noted_row() } else { style.row };
-    (style, header, ListView::new(area, row))
+    (style, header, Rect::new(0, top, display.width, height))
 }
 
 fn moved(change: ListChange, cx: &mut Cx<'_, '_>) {
@@ -175,70 +182,182 @@ fn navigate(list: &mut ListView, len: usize, action: &Id) -> Option<ListChange> 
     Some(list.move_focus(delta, len))
 }
 
+/// Moves the focus of `rows` (lists with headings) by the navigation
+/// actions; `None` if `action` is another. The first press on a touch
+/// screen only shows the focus (`keys`), which taps hide.
+fn navigate_rows(rows: &mut ui::Rows, keys: &mut bool, action: &Id) -> Option<ListChange> {
+    let forward =
+        if *action == actions::UP || *action == actions::LEFT || *action == actions::PREVIOUS {
+            Some(false)
+        } else if *action == actions::DOWN || *action == actions::RIGHT || *action == actions::NEXT
+        {
+            Some(true)
+        } else {
+            None
+        };
+    let page = if *action == actions::NEXT_PAGE {
+        Some(true)
+    } else if *action == actions::PREV_PAGE {
+        Some(false)
+    } else {
+        None
+    };
+    if let Some(forward) = page {
+        // Pages turn whether the focus shows or not.
+        return Some(rows.turn(forward));
+    }
+    let forward = forward?;
+    if !*keys {
+        *keys = true;
+        return Some(ListChange::Focus);
+    }
+    Some(rows.step(forward))
+}
+
+/// The page shown in a header: its number and the number of pages.
+fn paging(rows: &ui::Rows) -> Option<(usize, usize)> {
+    Some(rows.paging())
+}
+
 // ---- Main page: groups -------------------------------------------------
+
+/// What an entry of the main page opens.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Link {
+    Group(Id),
+    /// A page of another plugin: its action.
+    Page(Id),
+    /// The switch for advanced settings.
+    Advanced,
+}
+
+#[derive(Debug)]
+struct Entry {
+    /// `None` for a section's heading.
+    link: Option<Link>,
+    title: String,
+    icon: Option<String>,
+}
 
 #[derive(Debug)]
 struct GroupList {
-    /// Groups with visible settings, by order.
-    groups: Vec<(Id, String)>,
-    /// Pages of other plugins: `(action, title)`.
-    pages: Vec<(Id, String)>,
+    /// Groups with visible settings and pages of other plugins, by order
+    /// under the headings of their sections, then the advanced switch.
+    entries: Vec<Entry>,
     style: UiStyle,
     header: ui::Header,
-    list: ListView,
+    rows: ui::Rows,
+    /// The focus shows (buttons were used).
+    keys: bool,
+    /// Room for icons at the start of rows.
+    icon_room: u16,
 }
 
 impl GroupList {
     fn new(env: &Env<'_>) -> Self {
-        let (style, header, list) = frame(env, false);
-        let groups = env
-            .settings
-            .groups()
-            .filter(|group| {
-                env.settings
-                    .specs()
-                    .any(|spec| env.settings.group_of(spec) == group.id && visible(env, spec))
-            })
-            .map(|group| (group.id.clone(), env.i18n.tr(&group.title).to_string()))
-            .collect();
-        let pages = env
+        let (style, header, area) = page(env);
+        let settings_menu = menus::SETTINGS;
+        let menu = settings_menu.as_str();
+        // (order, headings before entries of the same order, entry)
+        let mut placed: Vec<(i32, bool, Entry)> = env
             .menus
-            .items(menus::SETTINGS.as_str())
+            .items(menu)
             .iter()
-            .map(|item| (item.id.clone(), env.i18n.tr(item.title).to_string()))
+            .map(|item| {
+                let order = env.menus.order_of(menu, item.id.as_str());
+                (
+                    order.map_or(i32::from(i16::MAX), i32::from),
+                    !item.section,
+                    Entry {
+                        link: (!item.section).then(|| Link::Page(item.id.clone())),
+                        title: env.i18n.tr(item.title).to_string(),
+                        icon: item.icon.map(String::from),
+                    },
+                )
+            })
             .collect();
+        placed.extend(
+            env.settings
+                .groups()
+                .filter(|group| {
+                    env.settings
+                        .specs()
+                        .any(|spec| env.settings.group_of(spec) == group.id && visible(env, spec))
+                })
+                .map(|group| {
+                    (
+                        group.order,
+                        true,
+                        Entry {
+                            link: Some(Link::Group(group.id.clone())),
+                            title: env.i18n.tr(&group.title).to_string(),
+                            icon: env.menus.icon(group.id.as_str()).map(String::from),
+                        },
+                    )
+                }),
+        );
+        placed.push((
+            i32::MAX,
+            true,
+            Entry {
+                link: Some(Link::Advanced),
+                title: env.i18n.tr("settings.advanced").to_string(),
+                icon: Some(String::from("eye")),
+            },
+        ));
+        placed.sort_by_key(|(order, entry, _)| (*order, *entry));
+        let mut entries: Vec<Entry> = placed.into_iter().map(|(_, _, entry)| entry).collect();
+        // Headings with nothing under them go.
+        let empty: Vec<bool> = (0..entries.len())
+            .map(|i| {
+                entries[i].link.is_none()
+                    && entries.get(i + 1).is_none_or(|next| next.link.is_none())
+            })
+            .collect();
+        let mut index = 0;
+        entries.retain(|_| {
+            index += 1;
+            !empty[index - 1]
+        });
+        let heading = ui::heading_height(env, &style);
+        let heights = entries
+            .iter()
+            .map(|e| {
+                if e.link.is_none() {
+                    heading
+                } else {
+                    style.row as u16
+                }
+            })
+            .collect();
+        let headings = entries.iter().map(|e| e.link.is_none()).collect();
+        let icon_room = ui::icon_room(
+            env,
+            &style,
+            entries.iter().any(|e| e.link.is_some() && e.icon.is_some()),
+        );
         Self {
-            groups,
-            pages,
+            entries,
             style,
             header,
-            list,
+            rows: ui::Rows::new(area, heights, headings),
+            keys: !env.device.input.touch,
+            icon_room,
         }
     }
 
-    /// Groups, pages, then the switch for advanced settings.
-    fn len(&self) -> usize {
-        self.groups.len() + self.pages.len() + 1
-    }
-
-    /// The group or page at `index`; `None` for the advanced switch.
-    fn link(&self, index: usize) -> Option<&(Id, String)> {
-        self.groups
-            .get(index)
-            .or_else(|| self.pages.get(index - self.groups.len()))
-    }
-
     fn choose(&self, index: usize, cx: &mut Cx<'_, '_>) {
-        if let Some((id, _)) = self.groups.get(index) {
-            cx.command(Command::OpenScreen(
+        match self.entries.get(index).and_then(|e| e.link.as_ref()) {
+            Some(Link::Group(id)) => cx.command(Command::OpenScreen(
                 GROUP_SCREEN,
                 Params::new().with(ID, id.as_str().to_string()),
-            ));
-        } else if let Some((action, _)) = self.link(index) {
-            cx.command(Command::RunAction(action.clone()));
-        } else {
-            let advanced = cx.env().settings.bool(ADVANCED.as_str());
-            cx.command(Command::SetSetting(ADVANCED, SettingValue::Bool(!advanced)));
+            )),
+            Some(Link::Page(action)) => cx.command(Command::RunAction(action.clone())),
+            Some(Link::Advanced) => {
+                let advanced = cx.env().settings.bool(ADVANCED.as_str());
+                cx.command(Command::SetSetting(ADVANCED, SettingValue::Bool(!advanced)));
+            }
+            None => {}
         }
     }
 }
@@ -246,53 +365,39 @@ impl GroupList {
 impl Screen for GroupList {
     fn draw(&mut self, canvas: &mut Canvas<'_>, env: &Env<'_>) {
         let style = self.style;
-        let len = self.len();
         self.header.draw(
             canvas,
             env,
             &style,
             env.i18n.tr("settings.title"),
             None,
-            self.list.paging(len),
+            paging(&self.rows),
         );
-        let advanced = if env.settings.bool(ADVANCED.as_str()) {
-            env.i18n.tr("settings.on")
-        } else {
-            env.i18n.tr("settings.off")
-        };
-        let (groups, pages) = (&self.groups, &self.pages);
-        let link = |index: usize| {
-            groups
-                .get(index)
-                .or_else(|| pages.get(index - groups.len()))
-        };
-        self.list.draw(
-            canvas,
-            &style,
-            len,
-            |canvas, index, rect, focused| match link(index) {
-                Some((_, title)) => {
-                    ui::draw_value_row(canvas, env, &style, rect, focused, title, "›");
+        let (entries, room) = (&self.entries, self.icon_room);
+        self.rows
+            .draw(canvas, &style, self.keys, |canvas, index, rect, focused| {
+                let entry = &entries[index];
+                let Some(link) = &entry.link else {
+                    ui::draw_heading(canvas, env, &style, rect, &entry.title);
+                    return;
+                };
+                let ink = if focused { Color::WHITE } else { Color::BLACK };
+                let icon = entry.icon.as_deref();
+                let rect = ui::draw_row_icon(canvas, env, &style, rect, room, icon, ink);
+                if *link == Link::Advanced {
+                    let on = env.settings.bool(ADVANCED.as_str());
+                    ui::draw_switch_row(canvas, env, &style, rect, focused, &entry.title, "", on);
+                } else {
+                    ui::draw_value_row(canvas, env, &style, rect, focused, &entry.title, "›");
                 }
-                None => ui::draw_value_row(
-                    canvas,
-                    env,
-                    &style,
-                    rect,
-                    focused,
-                    env.i18n.tr("settings.advanced"),
-                    advanced,
-                ),
-            },
-        );
+            });
     }
 
     fn on_action(&mut self, action: &Id, cx: &mut Cx<'_, '_>) -> Handled {
-        let len = self.len();
-        if let Some(change) = navigate(&mut self.list, len, action) {
+        if let Some(change) = navigate_rows(&mut self.rows, &mut self.keys, action) {
             moved(change, cx);
         } else if *action == actions::CONFIRM {
-            self.choose(self.list.focus, cx);
+            self.choose(self.rows.focus, cx);
         } else {
             return Handled::No;
         }
@@ -303,17 +408,17 @@ impl Screen for GroupList {
         if gesture.kind != GestureKind::Tap {
             return Handled::No;
         }
-        let paging = self.list.paging(self.len());
         let tapped = self
             .header
-            .tap(cx.env(), &self.style, gesture.start, paging);
+            .tap(cx.env(), &self.style, gesture.start, paging(&self.rows));
         if let Some(action) = tapped {
             cx.command(Command::RunAction(action));
             return Handled::Yes;
         }
-        match self.list.hit(gesture.start, self.len()) {
+        match self.rows.hit(gesture.start) {
             Some(index) => {
-                self.list.focus = index;
+                self.rows.focus = index;
+                self.keys = !cx.env().device.input.touch;
                 self.choose(index, cx);
                 Handled::Yes
             }
@@ -325,24 +430,46 @@ impl Screen for GroupList {
         if *event == events::SETTING_CHANGED {
             // Language, UI size or the advanced switch may have changed.
             let env = *cx.env();
-            let focus = self.list.focus;
+            let (focus, keys) = (self.rows.focus, self.keys);
             *self = Self::new(&env);
-            self.list.focus = focus.min(self.len() - 1);
+            self.keys = keys;
+            refocus(&mut self.rows, focus);
             cx.request_redraw();
         }
     }
 }
 
+/// Puts the focus of rebuilt `rows` back at `focus`, or the nearest entry.
+fn refocus(rows: &mut ui::Rows, focus: usize) {
+    if rows.is_empty() {
+        return;
+    }
+    rows.focus = focus.min(rows.len() - 1);
+    if rows.is_heading(rows.focus) && rows.step(true) == ListChange::None {
+        rows.step(false);
+    }
+}
+
 // ---- Group page: settings ----------------------------------------------
+
+/// A row of a group page.
+#[derive(Debug)]
+enum Row {
+    /// A section's heading: its title.
+    Heading(String),
+    Setting(Box<SettingSpec>),
+}
 
 #[derive(Debug)]
 struct GroupPage {
     group: Id,
     title: String,
-    specs: Vec<SettingSpec>,
+    entries: Vec<Row>,
     style: UiStyle,
     header: ui::Header,
-    list: ListView,
+    rows: ui::Rows,
+    /// The focus shows (buttons were used, or a number was tapped).
+    keys: bool,
     /// The focused number is being edited.
     editing: bool,
     /// Rows have room for descriptions.
@@ -362,15 +489,61 @@ impl GroupPage {
             .filter(|spec| env.settings.group_of(spec) == group && visible(env, spec))
             .cloned()
             .collect::<Vec<SettingSpec>>();
+        // Sections: settings without one first, then the standard ones,
+        // then the others as they come.
+        let mut sections: Vec<Option<&str>> = Vec::new();
+        for spec in &specs {
+            let section = spec.section.as_deref();
+            if !sections.contains(&section) {
+                sections.push(section);
+            }
+        }
+        let rank = |section: &Option<&str>| match section {
+            None => 0,
+            Some(key) => setting_sections::ORDER
+                .iter()
+                .position(|s| s == key)
+                .map_or(setting_sections::ORDER.len() + 1, |p| p + 1),
+        };
+        sections.sort_by_key(rank);
+        // Headings only where there is more than one part.
+        let headed = sections.len() > 1;
+        let mut entries = Vec::new();
+        for section in &sections {
+            if let Some(key) = section.filter(|_| headed) {
+                entries.push(Row::Heading(env.i18n.tr(key).to_string()));
+            }
+            entries.extend(
+                specs
+                    .iter()
+                    .filter(|spec| spec.section.as_deref() == *section)
+                    .cloned()
+                    .map(|spec| Row::Setting(Box::new(spec))),
+            );
+        }
         let noted = specs.iter().any(|spec| spec.description.is_some());
-        let (style, header, list) = frame(env, noted);
+        let (style, header, area) = page(env);
+        let heading = ui::heading_height(env, &style);
+        let row = if noted { style.noted_row() } else { style.row } as u16;
+        let heights = entries
+            .iter()
+            .map(|e| match e {
+                Row::Heading(_) => heading,
+                Row::Setting(_) => row,
+            })
+            .collect();
+        let headings = entries
+            .iter()
+            .map(|e| matches!(e, Row::Heading(_)))
+            .collect();
         Self {
             group,
             title,
-            specs,
+            entries,
             style,
             header,
-            list,
+            rows: ui::Rows::new(area, heights, headings),
+            keys: !env.device.input.touch,
             editing: false,
             noted,
         }
@@ -385,8 +558,15 @@ impl GroupPage {
         }
     }
 
+    fn spec(&self, index: usize) -> Option<&SettingSpec> {
+        match self.entries.get(index) {
+            Some(Row::Setting(spec)) => Some(spec),
+            _ => None,
+        }
+    }
+
     fn focused(&self) -> Option<&SettingSpec> {
-        self.specs.get(self.list.focus)
+        self.spec(self.rows.focus)
     }
 
     /// Changes a number by `step` or toggles a switch.
@@ -453,35 +633,43 @@ impl GroupPage {
 impl Screen for GroupPage {
     fn draw(&mut self, canvas: &mut Canvas<'_>, env: &Env<'_>) {
         let style = self.style;
-        let len = self.specs.len();
-        self.header.draw(
-            canvas,
-            env,
-            &style,
-            &self.title,
-            None,
-            self.list.paging(len),
-        );
-        let specs = &self.specs;
+        self.header
+            .draw(canvas, env, &style, &self.title, None, paging(&self.rows));
+        let entries = &self.entries;
         let editing = self.editing;
         let noted = self.noted;
-        self.list
-            .draw(canvas, &style, len, |canvas, index, rect, focused| {
-                let spec = &specs[index];
+        self.rows
+            .draw(canvas, &style, self.keys, |canvas, index, rect, focused| {
+                let spec = match &entries[index] {
+                    Row::Heading(title) => {
+                        ui::draw_heading(canvas, env, &style, rect, title);
+                        return;
+                    }
+                    Row::Setting(spec) => spec,
+                };
                 let title = env.i18n.tr(&spec.title);
                 let note = spec.description.as_deref().map_or("", |d| env.i18n.tr(d));
+                let note = if noted { note } else { "" };
                 let mut value = ui::setting_value(env, spec);
-                if focused && matches!(spec.kind, SettingKind::Int { .. }) {
-                    let area = if noted {
-                        ui::title_area(&style, rect)
-                    } else {
-                        rect
-                    };
-                    ui::draw_stepper(canvas, env, &style, area, title, &value, editing);
-                    if noted && !note.is_empty() {
-                        ui::draw_note(canvas, env, &style, rect, true, note);
+                match spec.kind {
+                    SettingKind::Int { .. } if focused => {
+                        let area = if noted {
+                            ui::title_area(&style, rect)
+                        } else {
+                            rect
+                        };
+                        ui::draw_stepper(canvas, env, &style, area, title, &value, editing);
+                        if !note.is_empty() {
+                            ui::draw_note(canvas, env, &style, rect, true, note);
+                        }
+                        return;
                     }
-                    return;
+                    SettingKind::Bool if spec.editor.is_none() => {
+                        let on = env.settings.bool(spec.id.as_str());
+                        ui::draw_switch_row(canvas, env, &style, rect, focused, title, note, on);
+                        return;
+                    }
+                    _ => {}
                 }
                 if spec.editor.is_some()
                     || matches!(spec.kind, SettingKind::Choice(_) | SettingKind::Language)
@@ -494,7 +682,6 @@ impl Screen for GroupPage {
 
     fn on_action(&mut self, action: &Id, cx: &mut Cx<'_, '_>) -> Handled {
         let env = *cx.env();
-        let len = self.specs.len();
         if self.editing {
             let decrease = [
                 actions::LEFT,
@@ -521,7 +708,7 @@ impl Screen for GroupPage {
             }
             return Handled::Yes;
         }
-        if let Some(change) = navigate(&mut self.list, len, action) {
+        if let Some(change) = navigate_rows(&mut self.rows, &mut self.keys, action) {
             moved(change, cx);
         } else if *action == actions::CONFIRM {
             self.activate(&env, 1, cx);
@@ -535,36 +722,36 @@ impl Screen for GroupPage {
         if gesture.kind != GestureKind::Tap {
             return Handled::No;
         }
-        let paging = self.list.paging(self.specs.len());
         let tapped = self
             .header
-            .tap(cx.env(), &self.style, gesture.start, paging);
+            .tap(cx.env(), &self.style, gesture.start, paging(&self.rows));
         if let Some(action) = tapped {
             cx.command(Command::RunAction(action));
             return Handled::Yes;
         }
-        let Some(index) = self.list.hit(gesture.start, self.specs.len()) else {
+        let Some(index) = self.rows.hit(gesture.start) else {
             return Handled::No;
         };
         let env = *cx.env();
         let is_number = matches!(
-            self.specs.get(index).map(|s| &s.kind),
+            self.spec(index).map(|s| &s.kind),
             Some(SettingKind::Int { .. })
         );
         if is_number {
             // The first tap selects a number; then its − and + buttons
             // change it, so a value never changes by accident.
-            if index != self.list.focus {
-                self.list.focus = index;
+            if index != self.rows.focus || !self.keys {
+                self.rows.focus = index;
+                self.keys = true;
                 self.editing = false;
                 cx.request_redraw();
                 cx.request_refresh(RefreshMode::Fast);
                 return Handled::Yes;
             }
-            let Some(spec) = self.focused() else {
+            let (Some(spec), Some(rect)) = (self.focused(), self.rows.rect_of(index)) else {
                 return Handled::Yes;
             };
-            let rect = self.title_area(self.list.row_rect(index % self.list.rows()));
+            let rect = self.title_area(rect);
             let value = ui::setting_value(&env, spec);
             if let Some((minus, plus)) = ui::stepper(&env, &self.style, rect, &value) {
                 let x = gesture.start.x;
@@ -577,8 +764,11 @@ impl Screen for GroupPage {
             }
             return Handled::Yes;
         }
-        if index != self.list.focus {
-            self.list.focus = index;
+        // Anything else acts at once; the focus hides again.
+        let keys = !env.device.input.touch;
+        if index != self.rows.focus || keys != self.keys {
+            self.rows.focus = index;
+            self.keys = keys;
             self.editing = false;
             cx.request_redraw();
         }
@@ -589,9 +779,10 @@ impl Screen for GroupPage {
     fn on_event(&mut self, event: &Id, _: &Params, cx: &mut Cx<'_, '_>) {
         if *event == events::SETTING_CHANGED {
             let env = *cx.env();
-            let (focus, editing) = (self.list.focus, self.editing);
+            let (focus, keys, editing) = (self.rows.focus, self.keys, self.editing);
             *self = Self::new(&env, self.group.clone());
-            self.list.focus = focus.min(self.specs.len().saturating_sub(1));
+            refocus(&mut self.rows, focus);
+            self.keys = keys;
             self.editing = editing;
             cx.request_redraw();
         }

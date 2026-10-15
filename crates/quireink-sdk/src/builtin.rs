@@ -254,6 +254,20 @@ pub mod groups {
     pub const OTHER: Id = Id::new_static("core.group.other");
 }
 
+/// Sections of the settings' main page, with the setting groups and the
+/// pages in [`menus::SETTINGS`] placed by their order: reading 1 to 49,
+/// the device 51 to 199, customising QuireInk from 201.
+pub mod settings_sections {
+    use crate::Id;
+
+    /// Text, status bars, library, statistics, synchronisation.
+    pub const READING: Id = Id::new_static("core.settings-section.reading");
+    /// Display, controls, language and the system.
+    pub const DEVICE: Id = Id::new_static("core.settings-section.device");
+    /// Menus, plugins, advanced settings.
+    pub const CUSTOMISE: Id = Id::new_static("core.settings-section.customise");
+}
+
 /// Parts of setting groups shared by plugins, in the order shown: a
 /// setting names one with
 /// [`SettingSpec::section`](crate::SettingSpec::section). Other parts

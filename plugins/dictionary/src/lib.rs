@@ -76,6 +76,7 @@ impl Plugin for DictionaryPlugin {
                 SettingValue::Text(Cow::Borrowed("dictionaries")),
             )
             .group(groups::READING)
+            .section("dictionary.section")
             .editor(CHOOSE_FOLDER)
             .description("dictionary.setting.folder.help"),
         )?;

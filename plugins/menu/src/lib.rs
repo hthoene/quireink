@@ -176,12 +176,11 @@ impl MenuScreen {
             let area = Rect::new(0, region.y + region.height - bar, display.width, bar);
             pager = Some(ui::Pager::new(env, area));
         }
-        let icons = ui::has_icons(env) && items.iter().any(|i| i.icon.is_some() && !i.heading);
-        let icon_width = if icons {
-            (style.text * ICON_SCALE) as u16 + style.gap as u16
-        } else {
-            0
-        };
+        let icon_width = ui::icon_room(
+            env,
+            &style,
+            items.iter().any(|i| i.icon.is_some() && !i.heading),
+        );
         let headings = items.iter().map(|i| i.heading).collect();
         Self {
             items,
@@ -282,19 +281,22 @@ impl MenuScreen {
             return;
         };
         let ink = if focused { Color::WHITE } else { Color::BLACK };
-        if let Some(icon) = item.icon.as_deref().filter(|_| self.icon_width > 0) {
-            let size = style.text * ICON_SCALE;
-            ui::draw_icon(canvas, env, icon, size, style.margin as f32, rect, ink);
-        }
         // The label and value right of the icons.
-        let rect = Rect::new(
-            rect.x + self.icon_width,
-            rect.y,
-            rect.width.saturating_sub(self.icon_width),
-            rect.height,
+        let rect = ui::draw_row_icon(
+            canvas,
+            env,
+            &style,
+            rect,
+            self.icon_width,
+            item.icon.as_deref(),
+            ink,
         );
         let label = env.i18n.tr(&item.title);
         match Self::setting(env, &item.id) {
+            Some(spec) if matches!(spec.kind, SettingKind::Bool) => {
+                let on = env.settings.bool(spec.id.as_str());
+                ui::draw_switch_row(canvas, env, &style, rect, focused, label, "", on);
+            }
             Some(spec) if focused && matches!(spec.kind, SettingKind::Int { .. }) => {
                 let value = ui::setting_value(env, spec);
                 ui::draw_stepper(canvas, env, &style, rect, label, &value, self.editing);
@@ -320,9 +322,6 @@ impl MenuScreen {
         }
     }
 }
-
-/// Icons are this much larger than the text beside them.
-const ICON_SCALE: f32 = 1.25;
 
 /// Whether `id` names a menu with entries (a submenu).
 pub(crate) fn is_menu(env: &Env<'_>, id: &Id) -> bool {
@@ -357,31 +356,16 @@ impl Screen for MenuScreen {
             );
             return;
         }
-        let visible = self.rows.visible();
-        for (n, &(index, rect)) in visible.iter().enumerate() {
-            let item = &self.items[index];
-            if item.heading {
-                ui::draw_heading(canvas, env, &style, rect, env.i18n.tr(&item.title));
-                continue;
-            }
-            let focused = self.keys && index == self.rows.focus;
-            if focused {
-                ui::fill(canvas, rect, Color::BLACK);
-            } else if visible
-                .get(n + 1)
-                .is_some_and(|&(next, _)| !self.items[next].heading)
-            {
-                // Lines between entries, not before a heading.
-                let line = Rect::new(
-                    rect.x + style.margin as u16,
-                    rect.y + rect.height - style.line as u16,
-                    rect.width.saturating_sub(2 * style.margin as u16),
-                    style.line as u16,
-                );
-                ui::fill(canvas, line, Color::gray(190));
-            }
-            self.draw_entry(canvas, env, item, rect, focused);
-        }
+        let items = &self.items;
+        self.rows
+            .draw(canvas, &style, self.keys, |canvas, index, rect, focused| {
+                let item = &items[index];
+                if item.heading {
+                    ui::draw_heading(canvas, env, &style, rect, env.i18n.tr(&item.title));
+                } else {
+                    self.draw_entry(canvas, env, item, rect, focused);
+                }
+            });
         if let Some(pager) = &self.pager {
             pager.draw(canvas, env, &style, self.rows.paging());
         }

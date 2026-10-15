@@ -6,8 +6,8 @@
 use alloc::vec::Vec;
 use core::ops::Range;
 
-use crate::ui::ListChange;
-use crate::{Point, Rect};
+use crate::ui::{ListChange, UiStyle, fill};
+use crate::{Canvas, Color, Point, Rect};
 
 #[derive(Debug)]
 pub struct Rows {
@@ -101,6 +101,39 @@ impl Rows {
 
     pub fn is_heading(&self, index: usize) -> bool {
         self.headings.get(index).copied().unwrap_or(false)
+    }
+
+    /// Draws the rows of the focused page with `draw_row(canvas, index,
+    /// rect, focused)`, headings included: the focused entry (if `focus`
+    /// shows) on black, thin lines between entries but not above a
+    /// heading.
+    pub fn draw(
+        &self,
+        canvas: &mut Canvas<'_>,
+        style: &UiStyle,
+        focus: bool,
+        mut draw_row: impl FnMut(&mut Canvas<'_>, usize, Rect, bool),
+    ) {
+        let visible = self.visible();
+        for (n, &(index, rect)) in visible.iter().enumerate() {
+            let focused = focus && index == self.focus && !self.is_heading(index);
+            if focused {
+                fill(canvas, rect, Color::BLACK);
+            } else if !self.is_heading(index)
+                && visible
+                    .get(n + 1)
+                    .is_some_and(|&(next, _)| !self.is_heading(next))
+            {
+                let line = Rect::new(
+                    rect.x + style.margin as u16,
+                    rect.y + rect.height - style.line as u16,
+                    rect.width.saturating_sub(2 * style.margin as u16),
+                    style.line as u16,
+                );
+                fill(canvas, line, Color::gray(190));
+            }
+            draw_row(canvas, index, rect, focused);
+        }
     }
 
     /// The entry at `point`, if any (headings are not hit).

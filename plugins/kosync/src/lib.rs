@@ -409,8 +409,9 @@ impl Plugin for Kosync {
         r.add_setting_group(SettingGroupSpec {
             id: GROUP,
             title: Cow::Borrowed("kosync.group"),
-            order: 45,
+            order: 28,
         })?;
+        r.add_icon(GROUP, Cow::Borrowed("refresh"))?;
         for spec in [
             SettingSpec::new(
                 USER,

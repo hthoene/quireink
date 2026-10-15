@@ -208,6 +208,73 @@ pub fn draw_switch(canvas: &mut Canvas<'_>, style: &UiStyle, row: Rect, on: bool
     );
 }
 
+/// Icons in lists are this much larger than the text beside them.
+pub const ICON_SCALE: f32 = 1.25;
+
+/// The room icons take at the start of list rows (icon and gap), or 0
+/// without an icon font or when `any` row has none.
+pub fn icon_room(env: &Env<'_>, style: &UiStyle, any: bool) -> u16 {
+    if any && has_icons(env) {
+        (style.text * ICON_SCALE) as u16 + style.gap as u16
+    } else {
+        0
+    }
+}
+
+/// Draws a list row's icon at the margin, centred on the row's first
+/// line (`rect`), and returns the rest of the row for its label: the
+/// label starts where it would after any icon, so rows line up.
+pub fn draw_row_icon(
+    canvas: &mut Canvas<'_>,
+    env: &Env<'_>,
+    style: &UiStyle,
+    rect: Rect,
+    room: u16,
+    icon: Option<&str>,
+    ink: Color,
+) -> Rect {
+    if let Some(icon) = icon.filter(|_| room > 0) {
+        let size = style.text * ICON_SCALE;
+        let x = f32::from(rect.x) + style.margin as f32;
+        draw_icon(canvas, env, icon, size, x, rect, ink);
+    }
+    Rect::new(
+        rect.x + room,
+        rect.y,
+        rect.width.saturating_sub(room),
+        rect.height,
+    )
+}
+
+/// Draws a row with `title` and a switch for `on` at its end, with
+/// `note` below when `noted` (see [`draw_noted_row`]).
+#[allow(clippy::too_many_arguments)]
+pub fn draw_switch_row(
+    canvas: &mut Canvas<'_>,
+    env: &Env<'_>,
+    style: &UiStyle,
+    rect: Rect,
+    focused: bool,
+    title: &str,
+    note: &str,
+    on: bool,
+) {
+    let band = if note.is_empty() {
+        rect
+    } else {
+        title_area(style, rect)
+    };
+    let switch = switch_rect(style, band);
+    // The title ends a gap before the switch.
+    let room = (switch.x + style.margin as u16).saturating_sub(band.x + style.gap as u16);
+    let title_rect = Rect::new(band.x, band.y, room, band.height);
+    draw_value_row(canvas, env, style, title_rect, focused, title, "");
+    if !note.is_empty() {
+        draw_note(canvas, env, style, rect, focused, note);
+    }
+    draw_switch(canvas, style, band, on, focused);
+}
+
 /// Whether icons can be drawn (an icon font is there).
 pub fn has_icons(env: &Env<'_>) -> bool {
     env.fonts

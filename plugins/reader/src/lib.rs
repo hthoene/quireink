@@ -30,7 +30,8 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use quireink_sdk::builtin::{
-    actions as core_actions, events, groups, params, settings as core_settings, slots,
+    actions as core_actions, events, groups, params, setting_sections, settings as core_settings,
+    slots,
 };
 use quireink_sdk::{
     Command, Env, Id, Manifest, Params, Plugin, Priority, RegisterError, Registrar, SDK_VERSION,
@@ -245,6 +246,7 @@ impl Plugin for Reader {
                 (6, 40, 11),
                 "core.unit.pt",
             )
+            .section(setting_sections::FONT)
             .description("reader.setting.font-size.help"),
             int(
                 settings::LINE_SPACING,
@@ -253,6 +255,7 @@ impl Plugin for Reader {
                 "core.unit.percent",
             )
             .step(5)
+            .section(setting_sections::PAGE)
             .description("reader.setting.line-spacing.help"),
             int(
                 settings::FONT_WEIGHT,
@@ -260,6 +263,7 @@ impl Plugin for Reader {
                 (0, 4, 0),
                 "reader.unit.weight",
             )
+            .section(setting_sections::FONT)
             .description("reader.setting.font-weight.help"),
             int(
                 settings::WORD_SPACING,
@@ -268,6 +272,7 @@ impl Plugin for Reader {
                 "core.unit.percent",
             )
             .step(10)
+            .section(setting_sections::FONT)
             .description("reader.setting.word-spacing.help"),
             int(
                 settings::MARGIN,
@@ -275,12 +280,15 @@ impl Plugin for Reader {
                 (0, 30, 4),
                 "core.unit.mm",
             )
+            .section(setting_sections::PAGE)
             .description("reader.setting.margin.help"),
             flag(settings::JUSTIFY, "reader.setting.justify", true)
                 .scoped()
+                .section(setting_sections::PAGE)
                 .description("reader.setting.justify.help"),
             flag(settings::HYPHENATE, "reader.setting.hyphenate", true)
                 .scoped()
+                .section(setting_sections::PAGE)
                 .description("reader.setting.hyphenate.help"),
             flag(
                 settings::PUBLISHER_STYLES,
@@ -288,12 +296,15 @@ impl Plugin for Reader {
                 true,
             )
             .scoped()
+            .section(setting_sections::PAGE)
             .description("reader.setting.publisher-styles.help"),
             flag(settings::INDENT, "reader.setting.indent", true)
                 .advanced()
                 .scoped()
+                .section(setting_sections::PAGE)
                 .description("reader.setting.indent.help"),
             flag(settings::OPEN_LAST, "reader.setting.open-last", true)
+                .section(setting_sections::BEHAVIOUR)
                 .description("reader.setting.open-last.help"),
             flag(
                 settings::CORNER_BOOKMARK,

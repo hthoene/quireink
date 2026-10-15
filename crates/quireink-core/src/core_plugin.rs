@@ -7,7 +7,8 @@ use alloc::boxed::Box;
 use alloc::vec::Vec;
 
 use quireink_sdk::builtin::{
-    actions, fonts, groups, keymap_presets, menus, params, screens, settings, slots, status_items,
+    actions, fonts, groups, keymap_presets, menus, params, screens, setting_sections, settings,
+    settings_sections, slots, status_items,
 };
 use quireink_sdk::time::{self, AUTO, CLOCK_12H, CLOCK_24H, TIME_ZONES};
 use quireink_sdk::{
@@ -185,19 +186,45 @@ impl Plugin for CorePlugin {
             r.add_icon(action, Cow::Borrowed(icon))?;
         }
 
+        // The settings' main page: reading, the device, customising.
         for (id, title, order) in [
-            (groups::READING, "core.group.reading", 10),
-            (groups::DISPLAY, "core.group.display", 20),
-            (groups::CONTROLS, "core.group.controls", 30),
-            (groups::LIBRARY, "core.group.library", 40),
-            (groups::SYSTEM, "core.group.system", 90),
-            (groups::OTHER, "core.group.other", 100),
+            (
+                settings_sections::READING,
+                "core.settings-section.reading",
+                0,
+            ),
+            (
+                settings_sections::DEVICE,
+                "core.settings-section.device",
+                50,
+            ),
+            (
+                settings_sections::CUSTOMISE,
+                "core.settings-section.customise",
+                200,
+            ),
+        ] {
+            r.add_menu_section(quireink_sdk::MenuSection {
+                id,
+                title: Cow::Borrowed(title),
+                menu: menus::SETTINGS,
+                order,
+            })?;
+        }
+        for (id, title, order, icon) in [
+            (groups::READING, "core.group.reading", 10, "book"),
+            (groups::LIBRARY, "core.group.library", 20, "books"),
+            (groups::DISPLAY, "core.group.display", 60, "contrast"),
+            (groups::CONTROLS, "core.group.controls", 70, "adjustments"),
+            (groups::SYSTEM, "core.group.system", 90, "device-tablet"),
+            (groups::OTHER, "core.group.other", 100, "dots"),
         ] {
             r.add_setting_group(SettingGroupSpec {
-                id,
+                id: id.clone(),
                 title: Cow::Borrowed(title),
                 order,
             })?;
+            r.add_icon(id, Cow::Borrowed(icon))?;
         }
 
         r.add_setting(
@@ -279,6 +306,7 @@ impl Plugin for CorePlugin {
                 SettingValue::Text(Cow::Borrowed(settings::DEFAULT_FONT)),
             )
             .group(groups::READING)
+            .section(setting_sections::FONT)
             .scoped()
             .description("core.setting.reading-font.help"),
         )?;

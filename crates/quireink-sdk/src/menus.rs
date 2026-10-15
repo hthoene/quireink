@@ -154,6 +154,15 @@ impl Menus {
         });
     }
 
+    /// The position of `item` in `menu` as plugins contribute it, e.g. to
+    /// place it among other things listed with the menu's entries.
+    pub fn order_of(&self, menu: &str, item: &str) -> Option<i16> {
+        self.entries
+            .iter()
+            .find(|e| e.menu.as_str() == menu && e.item.as_str() == item)
+            .map(|e| e.order)
+    }
+
     /// Whether `item` is a heading.
     pub fn is_section(&self, item: &str) -> bool {
         self.sections.iter().any(|s| s.as_str() == item)

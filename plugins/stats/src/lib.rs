@@ -253,8 +253,9 @@ impl Plugin for Stats {
         r.add_setting_group(SettingGroupSpec {
             id: GROUP,
             title: Cow::Borrowed("stats.group"),
-            order: 40,
+            order: 25,
         })?;
+        r.add_icon(GROUP, Cow::Borrowed("chart-bar"))?;
         let seconds = |id, title: &'static str, (min, max, default), step| {
             SettingSpec::new(
                 id,
