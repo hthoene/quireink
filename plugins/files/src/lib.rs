@@ -55,6 +55,11 @@ pub const SORT: Id = Id::new_static("files.sort");
 pub const SORT_RECENT: &str = "files.sort.recent";
 /// By file name.
 pub const SORT_NAME: &str = "files.sort.name";
+/// How books are shown: as a list ([`VIEW_LIST`]) or a grid of covers
+/// ([`VIEW_COVERS`]).
+pub const VIEW: Id = Id::new_static("files.view");
+pub const VIEW_LIST: &str = "files.view.list";
+pub const VIEW_COVERS: &str = "files.view.covers";
 /// Chooses a folder for the setting named by the parameter `id`.
 pub const CHOOSE_FOLDER: Id = Id::new_static("files.choose-folder");
 /// The library's menu.
@@ -166,6 +171,19 @@ impl Plugin for Files {
         )?;
         r.add_setting(
             SettingSpec::new(
+                VIEW,
+                "files.setting.view",
+                SettingKind::Choice(alloc::vec![
+                    Cow::Borrowed(VIEW_LIST),
+                    Cow::Borrowed(VIEW_COVERS),
+                ]),
+                SettingValue::Text(Cow::Borrowed(VIEW_LIST)),
+            )
+            .group(groups::LIBRARY)
+            .description("files.setting.view.help"),
+        )?;
+        r.add_setting(
+            SettingSpec::new(
                 SORT,
                 "files.setting.sort",
                 SettingKind::Choice(alloc::vec![
@@ -233,6 +251,7 @@ impl Plugin for Files {
         }
         for (item, order) in [
             (SORT, 10),
+            (VIEW, 10),
             (SEARCH, 11),
             (SHELVES_MENU, 12),
             (ROOT, 20),
@@ -303,7 +322,7 @@ impl Browser {
             first: 0,
             page: Vec::new(),
             fresh: true,
-            list: ListView::new(area, style.noted_row()).focus_on_keys(env),
+            list: list_view(env, &style, area),
             style,
             header,
         };
@@ -479,6 +498,7 @@ impl Browser {
         let env = *cx.env();
         let path = self.path_of(&entry);
         let favourite = books::favourites(env.storage).contains(&path);
+        let finished = book.as_ref().and_then(|b| b.progress) == Some(100);
         let mut options = alloc::vec![
             "open",
             if favourite {
@@ -486,6 +506,7 @@ impl Browser {
             } else {
                 "favourite"
             },
+            if finished { "unfinished" } else { "finished" },
             "info",
         ];
         if !env.device.input.touch {
@@ -522,6 +543,11 @@ impl Browser {
                     "files.favourite-removed"
                 };
                 cx.command(Command::Notify(env.i18n.tr(key).to_string()));
+            }
+            "finished" | "unfinished" => {
+                books::set_finished(env.storage, path, option == "finished");
+                self.load(&env);
+                cx.request_redraw();
             }
             "info" => cx.command(Command::OpenScreen(
                 INFO_SCREEN,
@@ -609,6 +635,114 @@ fn draw_row(
         None => format,
     };
     ui::draw_noted_row(canvas, env, style, text, focused, title, &progress, &note);
+}
+
+/// The library's list, or its grid of covers ([`VIEW`]): as many columns
+/// as covers about 3 cm wide fit, at least three.
+fn list_view(env: &Env<'_>, style: &UiStyle, area: Rect) -> ListView {
+    if env.settings.text(VIEW.as_str()) != VIEW_COVERS {
+        return ListView::new(area, style.noted_row()).focus_on_keys(env);
+    }
+    // Covers line up with the margins, as text does.
+    let inset = style.margin.saturating_sub(style.gap) as u16;
+    let area = Rect::new(
+        area.x + inset,
+        area.y,
+        area.width.saturating_sub(2 * inset),
+        area.height,
+    );
+    let columns = (u32::from(area.width) / env.metrics.mm(30).max(1)).max(3);
+    let cell = u32::from(area.width) / columns;
+    let cover = cell.saturating_sub(2 * style.gap) * 4 / 3;
+    let title = style.font(env).map_or(style.row / 2, |f| {
+        f.line_metrics(style.small).line_height as u32
+    });
+    let row = (cover + title * 2 + style.gap * 2).min(u32::from(area.height));
+    ListView::new(area, row).columns(columns).focus_on_keys(env)
+}
+
+/// One cover of the grid: the cover (or folder, or a stand-in) and the
+/// title below it, shortened to its width.
+fn draw_cell(
+    canvas: &mut Canvas<'_>,
+    env: &Env<'_>,
+    style: &UiStyle,
+    rect: Rect,
+    focused: bool,
+    entry: &Entry,
+    book: Option<&Book>,
+) {
+    let fg = if focused { Color::WHITE } else { Color::BLACK };
+    let gap = style.gap as u16;
+    let Some(font) = style.font(env) else {
+        return;
+    };
+    let line = font.line_metrics(style.small).line_height as u16;
+    let width = rect.width.saturating_sub(2 * gap);
+    let cover = Rect::new(
+        rect.x + gap,
+        rect.y + gap,
+        width,
+        rect.height.saturating_sub(2 * gap + 2 * line),
+    );
+    let label_area =
+        |n: u16| Rect::new(rect.x + gap, cover.y + cover.height + n * line, width, line);
+    if entry.is_dir {
+        draw_folder(canvas, style, cover, fg);
+        let x = f32::from(rect.x + gap);
+        ui::draw_label(
+            canvas,
+            &font,
+            style.small,
+            x,
+            label_area(0),
+            &entry.name,
+            fg,
+        );
+        return;
+    }
+    let name = entry.name.as_str();
+    let (stem, extension) = name.rsplit_once('.').unwrap_or((name, ""));
+    let title = book.and_then(|b| b.title.as_deref()).unwrap_or(stem);
+    match book.and_then(|b| b.cover.as_ref()) {
+        Some(image) => {
+            let (w, h) = ui::fit_image(image, cover.width, cover.height);
+            // On the line its title starts, at the bottom of its place.
+            let area = Rect::new(cover.x, cover.y + (cover.height - h), w, h);
+            ui::draw_image(canvas, env.storage, image, area);
+        }
+        None => draw_placeholder(
+            canvas,
+            env,
+            style,
+            cover,
+            title,
+            &extension.to_uppercase(),
+            fg,
+        ),
+    }
+    // The title, then how far it is read.
+    let x = f32::from(rect.x + gap);
+    ui::draw_label(canvas, &font, style.small, x, label_area(0), title, fg);
+    let progress = match book.and_then(|b| b.progress) {
+        Some(100) => env.i18n.tr("files.finished").to_string(),
+        Some(p) if p > 0 => format!("{p} %"),
+        _ => book.and_then(|b| b.author.clone()).unwrap_or_default(),
+    };
+    let gray = if focused {
+        Color::gray(215)
+    } else {
+        Color::gray(80)
+    };
+    ui::draw_label(
+        canvas,
+        &font,
+        style.small,
+        x,
+        label_area(1),
+        &progress,
+        gray,
+    );
 }
 
 /// A simple folder outline with a tab.
@@ -715,10 +849,15 @@ impl Screen for Browser {
             return;
         }
         let (first, page) = (self.first, &self.page);
+        let grid = self.list.column_count() > 1;
         self.list
             .draw(canvas, &style, len, |canvas, index, rect, focused| {
                 if let Some((entry, book)) = index.checked_sub(first).and_then(|i| page.get(i)) {
-                    draw_row(canvas, env, &style, rect, focused, entry, book.as_ref());
+                    if grid {
+                        draw_cell(canvas, env, &style, rect, focused, entry, book.as_ref());
+                    } else {
+                        draw_row(canvas, env, &style, rect, focused, entry, book.as_ref());
+                    }
                 }
             });
     }
@@ -761,13 +900,15 @@ impl Screen for Browser {
         let len = self.len;
         let rows = self.list.rows() as isize;
         let a = action;
-        let delta = if *a == core_actions::UP
-            || *a == core_actions::LEFT
-            || *a == core_actions::PREVIOUS
-        {
+        // In a grid, up and down go a row of covers.
+        let row = self.list.column_count() as isize;
+        let delta = if *a == core_actions::UP {
+            Some(-row)
+        } else if *a == core_actions::DOWN {
+            Some(row)
+        } else if *a == core_actions::LEFT || *a == core_actions::PREVIOUS {
             Some(-1)
-        } else if *a == core_actions::DOWN || *a == core_actions::RIGHT || *a == core_actions::NEXT
-        {
+        } else if *a == core_actions::RIGHT || *a == core_actions::NEXT {
             Some(1)
         } else if *a == core_actions::NEXT_PAGE {
             Some(rows)

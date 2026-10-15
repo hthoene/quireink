@@ -825,9 +825,9 @@ not yet. Each idea stays simple by default and replaceable by plugins.
 | I9 | Vocabulary: words looked up, with their sentence, to review later | KOReader (vocabulary builder) | ⬜ |
 | I10 | Translating selected text online, by a plugin | KOReader | ⬜ |
 | L1 | Favourites: a star on a book, a shelf of them | KOReader | ✅ (hold a book; "Shelves > Favourites") |
-| L2 | The library as a grid of covers | KOReader (cover browser), CrossPoint | ⬜ |
+| L2 | The library as a grid of covers | KOReader (cover browser), CrossPoint | ✅ (setting "Show books as": list or covers; `ListView::columns` for any grid) |
 | L3 | Searching the library by title and author | KOReader | ✅ (library menu: "Search the library", by title, author, series, tag or file name) |
-| L4 | Marking a book finished, moving it to an archive folder | KOReader | ⬜ |
+| L4 | Marking a book finished, moving it to an archive folder | KOReader | 🔶 (hold a book: "Mark as finished" / "Mark as unread"; archive folder open) |
 | F1 | More formats: FB2, Markdown, CBZ, Xteink's own XTC/XTCH, pictures; PDF on Android through the system's renderer | KOReader, CrossPoint | 🔶 (FB2, FB2.zip, CBZ, XTC/XTCH done: `format-epub.fb2`, `format-epub.cbz`, `format-xtc`, Markdown (`format-epub.markdown`), comics and XTC shown edge to edge; PDF open) |
 | D1 | Sleep screen: the cover, own pictures, minimal, today's reading (C9) | CrossPoint, CrossInk, KOReader | ⬜ |
 | D2 | Sleeping and switching off by themselves after a while | KOReader, X4 firmware | ⬜ |

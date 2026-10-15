@@ -217,6 +217,16 @@ pub(crate) fn record(env: &Env<'_>, params: &Params, opened: bool) {
     }
 }
 
+/// Marks the book at `path` as read to the end, or as not read at all.
+pub(crate) fn set_finished(storage: &dyn Storage, path: &str, finished: bool) {
+    let mut book = load(storage, path).unwrap_or_else(|| Book {
+        size: storage.size(path).unwrap_or_default(),
+        ..Book::default()
+    });
+    book.progress = finished.then_some(100);
+    save(storage, path, &book);
+}
+
 /// Paths of the books opened last, most recent first.
 pub(crate) fn load_opened(storage: &dyn Storage) -> Vec<String> {
     let max = MAX_OPENED * 512;

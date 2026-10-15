@@ -789,6 +789,8 @@ pub struct ListView {
     /// Whether the focus shows at all: on touch screens only once a
     /// button moved it (see [`ListView::focus_on_keys`]), as in menus.
     pub shown: bool,
+    /// Items side by side in a row (a grid, e.g. of covers); 1 for a list.
+    columns: u32,
 }
 
 impl ListView {
@@ -799,12 +801,25 @@ impl ListView {
             focus: 0,
             active: true,
             shown: true,
+            columns: 1,
         }
     }
 
-    /// Rows per page.
+    /// A grid of `columns` items a row instead of a list (rows are then
+    /// `row` high and items as wide as a column).
+    pub fn columns(mut self, columns: u32) -> Self {
+        self.columns = columns.max(1);
+        self
+    }
+
+    /// Items side by side in a row.
+    pub fn column_count(&self) -> usize {
+        self.columns as usize
+    }
+
+    /// Items per page (rows times columns).
     pub fn rows(&self) -> usize {
-        (u32::from(self.area.height) / self.row).max(1) as usize
+        ((u32::from(self.area.height) / self.row).max(1) * self.columns) as usize
     }
 
     /// The page containing the focus (0-based).
@@ -853,22 +868,27 @@ impl ListView {
         }
     }
 
-    /// The rectangle of visible row `slot` (0 = top of the page).
+    /// The rectangle of visible item `slot` (0 = top left of the page).
     pub fn row_rect(&self, slot: usize) -> Rect {
+        let columns = self.columns as usize;
+        let width = self.area.width / self.columns as u16;
         Rect::new(
-            self.area.x,
-            self.area.y + (slot as u32 * self.row) as u16,
-            self.area.width,
+            self.area.x + (slot % columns) as u16 * width,
+            self.area.y + ((slot / columns) as u32 * self.row) as u16,
+            width,
             self.row as u16,
         )
     }
 
-    /// The index of the row at `point`, if any.
+    /// The index of the item at `point`, if any.
     pub fn hit(&self, point: Point, len: usize) -> Option<usize> {
         if !self.area.contains(point) {
             return None;
         }
-        let slot = ((point.y - i32::from(self.area.y)) as u32 / self.row) as usize;
+        let line = ((point.y - i32::from(self.area.y)) as u32 / self.row) as usize;
+        let width = u32::from(self.area.width / self.columns as u16).max(1);
+        let column = ((point.x - i32::from(self.area.x)) as u32 / width) as usize;
+        let slot = line * self.columns as usize + column.min(self.columns as usize - 1);
         let index = self.page() * self.rows() + slot;
         (slot < self.rows() && index < len).then_some(index)
     }
@@ -889,7 +909,7 @@ impl ListView {
             let focused = self.active && self.shown && index == self.focus;
             if focused {
                 fill(canvas, rect, Color::BLACK);
-            } else {
+            } else if self.columns == 1 {
                 let separator = Rect::new(
                     rect.x + style.margin as u16,
                     rect.y + rect.height - style.line as u16,
