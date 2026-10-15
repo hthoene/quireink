@@ -1024,8 +1024,12 @@ pub fn draw_value_row(
     draw_label(canvas, &font, style.text, title_x, rect, &title, color);
 }
 
-/// The − and + buttons of a focused number row, with room for `value`
-/// between them.
+/// Room a number's value always gets between its − and +, so the
+/// buttons of rows above each other line up.
+const STEPPER_VALUE: &str = "000 %";
+
+/// The − and + buttons of a number row, with room for `value` between
+/// them (at least [`STEPPER_VALUE`], so rows line up).
 pub fn stepper(env: &Env<'_>, style: &UiStyle, rect: Rect, value: &str) -> Option<(Rect, Rect)> {
     let font = style.font(env)?;
     let size = button_height(rect);
@@ -1034,7 +1038,9 @@ pub fn stepper(env: &Env<'_>, style: &UiStyle, rect: Rect, value: &str) -> Optio
     let gap = style.gap as u16;
     let right = rect.x + rect.width - margin;
     let plus = Rect::new(right.saturating_sub(size), y, size, size);
-    let value_width = font.measure(style.text, value) as u16;
+    let value_width = font
+        .measure(style.text, value)
+        .max(font.measure(style.text, STEPPER_VALUE)) as u16;
     let minus_x = plus.x.saturating_sub(2 * gap + value_width + size);
     Some((Rect::new(minus_x, y, size, size), plus))
 }
@@ -1132,7 +1138,7 @@ pub fn draw_number(
         &title,
         Color::BLACK,
     );
-    let value_x = f32::from(minus.x + minus.width + style.gap as u16);
+    let value_x = centred(&font, style.text, value, minus, plus);
     draw_label(
         canvas,
         &font,
@@ -1144,6 +1150,13 @@ pub fn draw_number(
     );
     draw_button(canvas, env, style, minus, "−", false, focus == Some(false));
     draw_button(canvas, env, style, plus, "+", false, focus == Some(true));
+}
+
+/// Where `value` starts, centred between the buttons `minus` and `plus`.
+fn centred(font: &FontHandle<'_>, size: f32, value: &str, minus: Rect, plus: Rect) -> f32 {
+    let left = f32::from(minus.x + minus.width);
+    let room = f32::from(plus.x) - left;
+    left + (room - font.measure(size, value)) / 2.0
 }
 
 /// A focused number: title, then `[−] value [+]`. While editing with
@@ -1172,7 +1185,7 @@ pub fn draw_stepper(
         &title,
         Color::WHITE,
     );
-    let value_x = f32::from(minus.x + minus.width + style.gap as u16);
+    let value_x = centred(&font, style.text, value, minus, plus);
     draw_label(
         canvas,
         &font,

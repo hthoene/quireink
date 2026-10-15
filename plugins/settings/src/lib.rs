@@ -17,8 +17,8 @@
 //! Buttons: move to an item, *confirm* opens a group, toggles a switch,
 //! opens a choice or starts editing a number; while editing, left/right
 //! (or up/down, page buttons) change it and *confirm*/*back* finish.
-//! Touch: tap an item to open, toggle or choose it; a tapped number shows
-//! − and + buttons that change it.
+//! Touch: tap an item to open, toggle or choose it; numbers show their −
+//! and + buttons all the time, a tap on one changes the number at once.
 //!
 //! The main page is bound to the `core.settings` slot.
 
@@ -589,7 +589,12 @@ impl GroupPage {
         if Some(&value) != current {
             cx.command(Command::SetSetting(spec.id.clone(), value));
             cx.request_redraw();
-            cx.request_refresh(RefreshMode::Fast);
+            // Quick while editing with buttons; else with its grays.
+            cx.request_refresh(if self.editing {
+                RefreshMode::Fast
+            } else {
+                RefreshMode::Partial
+            });
         }
     }
 
@@ -649,6 +654,7 @@ impl Screen for GroupPage {
         let entries = &self.entries;
         let editing = self.editing;
         let noted = self.noted;
+        let touch = env.device.input.touch;
         self.rows
             .draw(canvas, &style, self.keys, |canvas, index, rect, focused| {
                 let spec = match &entries[index] {
@@ -672,6 +678,19 @@ impl Screen for GroupPage {
                         ui::draw_stepper(canvas, env, &style, area, title, &value, editing);
                         if !note.is_empty() {
                             ui::draw_note(canvas, env, &style, rect, true, note);
+                        }
+                        return;
+                    }
+                    // On touch screens − and + are always there.
+                    SettingKind::Int { .. } if touch => {
+                        let area = if noted {
+                            ui::title_area(&style, rect)
+                        } else {
+                            rect
+                        };
+                        ui::draw_number(canvas, env, &style, area, title, &value, None);
+                        if !note.is_empty() {
+                            ui::draw_note(canvas, env, &style, rect, false, note);
                         }
                         return;
                     }
@@ -748,6 +767,30 @@ impl Screen for GroupPage {
             self.spec(index).map(|s| &s.kind),
             Some(SettingKind::Int { .. })
         );
+        if is_number && env.device.input.touch {
+            // − and + are always there: a tap on one changes the number,
+            // elsewhere on the row nothing happens.
+            self.rows.focus = index;
+            self.keys = false;
+            self.editing = false;
+            let (Some(spec), Some(rect)) = (self.focused(), self.rows.rect_of(index)) else {
+                return Handled::Yes;
+            };
+            let rect = self.title_area(rect);
+            let value = ui::setting_value(&env, spec);
+            if let Some((minus, plus)) = ui::stepper(&env, &self.style, rect, &value) {
+                let x = gesture.start.x;
+                // A little room around the buttons: easier to hit.
+                let slack = i32::from(self.style.gap as u16);
+                let within = |r: Rect| x >= i32::from(r.x) - slack && x < r.right() as i32 + slack;
+                if within(minus) {
+                    self.change(&env, -1, cx);
+                } else if within(plus) {
+                    self.change(&env, 1, cx);
+                }
+            }
+            return Handled::Yes;
+        }
         if is_number {
             // The first tap selects a number; then its − and + buttons
             // change it, so a value never changes by accident.
