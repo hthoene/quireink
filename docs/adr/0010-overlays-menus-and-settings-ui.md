@@ -16,7 +16,7 @@ ESP32-C3 there is no memory for an off-screen compositing buffer.
 - **Overlays are screens with a region.** `Screen::region` returns `None`
   for full screens and the covered area for overlays. The kernel redraws
   only invalidated regions: the topmost full screen and all overlays above
-  it are drawn clipped to the region — no compositing buffer. Opening or
+  it are drawn clipped to the region, without a compositing buffer. Opening or
   closing an overlay refreshes just its area (partial refresh); tapping
   outside an overlay closes it.
 - **Menus are contributions.** `Registrar::add_menu_entry` puts an action

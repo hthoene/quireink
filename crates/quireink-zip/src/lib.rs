@@ -1,6 +1,6 @@
 //! A streaming ZIP reader.
 //!
-//! Only an index of the central directory is kept in memory — 8 bytes per
+//! Only an index of the central directory is kept in memory: 8 bytes per
 //! entry (name hash and directory offset); details are read from storage
 //! on lookup. Entries are inflated chunk by chunk, so a large EPUB never has
 //! to fit into RAM. Supports the "stored" and
@@ -258,7 +258,7 @@ impl ZipArchive {
         Ok(None)
     }
 
-    /// The entry whose [`Entry::record`] is `offset` — a compact way to
+    /// The entry whose [`Entry::record`] is `offset`, a compact way to
     /// remember entries without their names.
     pub fn entry_by_record(&self, storage: &dyn Storage, offset: u32) -> Result<Entry, ZipError> {
         let bad = ZipError::Invalid("bad central directory entry");
@@ -427,7 +427,7 @@ impl ZipArchive {
     }
 }
 
-/// Builds ZIP archives in memory — for tests of ZIP-based formats.
+/// Builds ZIP archives in memory, for tests of ZIP-based formats.
 #[cfg(any(test, feature = "testing"))]
 pub mod testing {
     use alloc::string::String;

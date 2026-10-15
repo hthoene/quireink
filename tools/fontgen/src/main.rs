@@ -1,4 +1,4 @@
-//! `quireink-fontgen` — converts fonts into QuireInk bitmap font packs.
+//! `quireink-fontgen`: converts fonts into QuireInk bitmap font packs.
 //!
 //! Devices without runtime font rendering (ESP32-C3) read `.qifp` packs
 //! directly from flash or storage. Packs are rendered with the same
@@ -7,7 +7,7 @@
 use std::process::ExitCode;
 
 const USAGE: &str = "\
-quireink-fontgen — build QuireInk bitmap font packs
+quireink-fontgen: build QuireInk bitmap font packs
 
 USAGE:
     quireink-fontgen <font.ttf|otf> <output.qifp> [OPTIONS]

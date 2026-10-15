@@ -9,7 +9,7 @@
 //! whose action is named like a menu with entries opens that menu as a
 //! submenu above this one.
 //!
-//! Bound to the `core.menu` slot — replace it to get a different menu style
+//! Bound to the `core.menu` slot; replace it to get a different menu style
 //! (radial, side bar, …) for every menu at once. The same plugin shows
 //! menus as panels of controls (`core.panel`, see `panel`).
 

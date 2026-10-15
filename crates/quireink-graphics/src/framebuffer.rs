@@ -198,7 +198,7 @@ impl Framebuffer {
         self.mark_dirty(rect);
     }
 
-    /// Blends `color` with coverage `alpha` (0–255) over the pixel at
+    /// Blends `color` with coverage `alpha` (0 to 255) over the pixel at
     /// `(x, y)`, which must lie inside the framebuffer. Does not mark the
     /// pixel dirty; callers mark whole areas.
     pub(crate) fn blend_pixel(&mut self, x: u16, y: u16, color: Color, alpha: u8) {

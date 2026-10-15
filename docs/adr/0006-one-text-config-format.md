@@ -25,4 +25,4 @@ a separate ADR.
 
 - Users learn one format; editors highlight it.
 - A tiny parser with good error messages (line numbers) on every device.
-- Limited expressiveness by design — complex data belongs in plugins.
+- Limited expressiveness by design: complex data belongs in plugins.

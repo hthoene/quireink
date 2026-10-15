@@ -15,7 +15,7 @@
 //! library.books.other = {count} Bücher
 //! ```
 //!
-//! Adding a language means adding files — no code changes, unless the
+//! Adding a language means adding files, no code changes, unless the
 //! language needs a plural rule that [`PluralRule`] does not know yet.
 //! Every plugin ships its own catalogs with keys in its namespace; language
 //! packs may add catalogs for many plugins at once.

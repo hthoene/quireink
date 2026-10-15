@@ -1,6 +1,6 @@
 [package]
 name = "quireink-sdk"
-description = "The QuireInk plugin SDK — the only API plugins (including first-party ones) use"
+description = "The QuireInk plugin SDK, the only API plugins (including first-party ones) use"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

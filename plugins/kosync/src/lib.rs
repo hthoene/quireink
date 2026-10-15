@@ -1,5 +1,5 @@
 //! Reading progress synced with KOReader's sync server ("kosync"), so a
-//! book opens where one stopped on another device — QuireInk or KOReader.
+//! book opens where one stopped on another device, QuireInk or KOReader.
 //!
 //! - Books are identified as KOReader does (a partial MD5 of the file), so
 //!   the same file matches on every device.

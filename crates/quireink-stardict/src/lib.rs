@@ -277,10 +277,10 @@ mod tests {
     #[test]
     fn parses_ifo() {
         let info = Info::parse(
-            "StarDict's dict ifo file\nversion=2.4.2\nbookname=Test – Wörter\nwordcount=3\nsynwordcount=2\nsametypesequence=h\n",
+            "StarDict's dict ifo file\nversion=2.4.2\nbookname=Test: Wörter\nwordcount=3\nsynwordcount=2\nsametypesequence=h\n",
         )
         .unwrap();
-        assert_eq!(info.name, "Test – Wörter");
+        assert_eq!(info.name, "Test: Wörter");
         assert_eq!((info.word_count, info.syn_count), (3, 2));
         assert_eq!(info.types.as_deref(), Some("h"));
         assert!(Info::parse("hello").is_err());

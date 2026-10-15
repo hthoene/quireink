@@ -193,7 +193,7 @@ mod tests {
             Value::Int(1 << 40),
             Value::Int(i64::MIN),
             Value::Real(1.5),
-            Value::Text("Darlah – ø".to_string()),
+            Value::Text("Darlah: ø".to_string()),
             Value::Blob(vec![1, 2, 3]),
         ];
         let data = encode_record(&values);

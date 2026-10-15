@@ -1,7 +1,7 @@
 //! A global allocator that enforces a device's heap budget on the kernel.
 //!
-//! Only allocations made while [`track`] is active — i.e. inside kernel and
-//! plugin calls — are counted, so the emulator's own window and graphics
+//! Only allocations made while [`track`] is active (i.e. inside kernel and
+//! plugin calls) are counted, so the emulator's own window and graphics
 //! code does not distort the numbers. When a tracked allocation would exceed
 //! the budget it fails, exactly as it would on the device.
 //!
@@ -10,7 +10,7 @@
 //! modelled, so keep a safety margin.
 //!
 //! Each allocation remembers whether it was charged (in a byte before
-//! it), so memory is credited back exactly when charged memory is freed —
+//! it), so memory is credited back exactly when charged memory is freed,
 //! wherever that happens: the shell's memory freed by the kernel (e.g. a
 //! received part of a request) does not lower the count.
 

@@ -1,5 +1,5 @@
 //! The list of recently read books, kept up to date from the standard
-//! reading events — independent of which reader plugin is used.
+//! reading events, independent of which reader plugin is used.
 
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
@@ -16,7 +16,7 @@ const LIMIT: usize = 8;
 pub(crate) struct Recent {
     pub path: String,
     pub title: String,
-    /// Percent, 0–100.
+    /// Percent, 0 to 100.
     pub progress: f32,
 }
 

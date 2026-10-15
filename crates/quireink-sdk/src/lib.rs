@@ -1,7 +1,7 @@
 //! The QuireInk plugin SDK.
 //!
 //! QuireInk is a small kernel plus plugins. Every screen, action, setting,
-//! key map and translation — including those QuireInk ships with — is
+//! key map and translation (including those QuireInk ships with) is
 //! contributed by a plugin through this SDK. Anything a built-in plugin does,
 //! a community plugin can do too, and replace it.
 //!

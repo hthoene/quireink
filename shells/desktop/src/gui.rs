@@ -96,7 +96,7 @@ impl App {
                 .map(ToString::to_string)
                 .unwrap_or_default();
             window.set_title(&format!(
-                "QuireInk Emulator — {} — {} — {}",
+                "QuireInk Emulator | {} | {} | {}",
                 self.device.profile.device.name,
                 screen,
                 budget::stats()
@@ -326,7 +326,7 @@ impl ApplicationHandler for App {
 
         let mut deadline: Option<StdInstant> = None;
         let animating = self.device.panel.is_animating();
-        // Keep drawing while the panel animates — and once more when it has
+        // Keep drawing while the panel animates, and once more when it has
         // finished, or the last flash phase (white) would stay visible.
         if (animating || self.animating)
             && let Some(window) = &self.window

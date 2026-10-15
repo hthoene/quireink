@@ -33,7 +33,7 @@ maintained (RUSTSEC-2026-0192).
 ## Consequences
 
 - Any device can show any font; small devices are limited to the sizes and
-  character sets in their packs (default: Latin, 20–48 px).
+  character sets in their packs (default: Latin, 20 to 48 px).
 - No kerning or complex shaping yet; a shaping step (e.g. HarfRust) can be
   added for Tier L later without changing the font API.
 - Variable-font features such as optical size are not yet applied per size.

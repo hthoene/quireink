@@ -6,7 +6,7 @@ use core::cell::RefCell;
 use quireink_platform::storage::is_valid_path;
 use quireink_platform::{DirEntry, Storage, StorageError};
 
-/// A storage kept in memory — for tests of plugins and for devices or
+/// A storage kept in memory, for tests of plugins and for devices or
 /// demos without a file system.
 #[derive(Debug, Default)]
 pub struct MemoryStorage {

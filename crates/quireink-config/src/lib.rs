@@ -258,7 +258,7 @@ fn parse_value(text: &str) -> Result<Value<'_>, ErrorKind> {
     Err(ErrorKind::UnterminatedString)
 }
 
-/// Parses `{XXXX}` (1–6 hex digits) and returns the char and consumed bytes.
+/// Parses `{XXXX}` (1 to 6 hex digits) and returns the char and consumed bytes.
 fn parse_unicode_escape(s: &str) -> Option<(char, usize)> {
     let body = s.strip_prefix('{')?;
     let end = body.find('}')?;

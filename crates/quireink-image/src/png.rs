@@ -129,7 +129,7 @@ impl Rows<'_> {
         Ok(())
     }
 
-    /// Sample `index` of the row, scaled to 0–255.
+    /// Sample `index` of the row, scaled to 0 to 255.
     fn sample(row: &[u8], depth: u8, index: usize) -> u32 {
         match depth {
             8 => u32::from(row[index]),

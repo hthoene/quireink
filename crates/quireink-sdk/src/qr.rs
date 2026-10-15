@@ -2,7 +2,7 @@
 //! with error correction level M, versions 1 to 10 (up to 213 bytes).
 //!
 //! Follows ISO/IEC 18004: finder, timing and alignment patterns, format
-//! and version information, Reed–Solomon error correction over GF(256),
+//! and version information, Reed-Solomon error correction over GF(256),
 //! interleaved blocks and the mask with the lowest penalty.
 
 use alloc::vec;
@@ -172,7 +172,7 @@ fn gf_mul(x: u8, y: u8) -> u8 {
     z as u8
 }
 
-/// The Reed–Solomon generator polynomial of `degree` (highest term
+/// The Reed-Solomon generator polynomial of `degree` (highest term
 /// first, the leading 1 left out).
 fn rs_divisor(degree: usize) -> Vec<u8> {
     let mut result = vec![0u8; degree];

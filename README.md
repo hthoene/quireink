@@ -1,10 +1,10 @@
 # QuireInk
 
-**A lean, fast and endlessly customizable e-reader for e-ink devices — from a
+**A lean, fast and endlessly customizable e-reader for e-ink devices, from a
 380 KB microcontroller to Linux and Android e-readers, from one codebase.**
 
 > **Status: early development.** EPUB and plain text books can be read in
-> the emulator and on Android e-readers (tested on a Boox Go 7) — with a
+> the emulator and on Android e-readers (tested on a Boox Go 7), with a
 > table of contents, menus, a settings screen, page index, saved reading
 > position and reopening of the last book. See the
 > [project plan](docs/PLANNING.md)
@@ -17,7 +17,7 @@
   devices get a fast, battery-friendly reader for free.
 - **Everything is a plugin.** The core is a small kernel. The home screen,
   library, reader, menus, file formats, themes, key maps and translations are
-  plugins — first-party ones use exactly the same SDK as community plugins.
+  plugins. First-party ones use exactly the same SDK as community plugins.
   Anything can be added, replaced, reconfigured or removed.
 - **Simple by default.** Turn it on and keep reading. Every function is at
   most two steps away, and it works with buttons only or with touch.
@@ -105,7 +105,7 @@ menu, a long press on back goes back. Try it with
 `--profile two-buttons`.
 
 Settings changed in the UI are saved to `quireink.ini` in the library
-folder — the same file you can edit by hand.
+folder, the same file you can edit by hand.
 
 The emulator uses `samples/library` as the device storage; two
 public-domain books are included as EPUB and TXT. Put your own `.epub` and
@@ -137,7 +137,7 @@ cargo run -p quireink-emulator -- --headless --profile boox-go-7 --set core.lang
 | `crates/quireink-zip` | Streaming ZIP reader with small, bounded memory use |
 | `crates/quireink-xml` | Incremental XML/XHTML tokenizer |
 | `crates/quireink-stardict` | StarDict dictionaries looked up in place (dictzip, synonyms) |
-| `crates/quireink-sdk` | **The plugin SDK** — the only API plugins use |
+| `crates/quireink-sdk` | **The plugin SDK**: the only API plugins use |
 | `crates/quireink-core` | The kernel: plugin host, registries, input routing, refresh policy |
 | `crates/quireink-app` | The standard app: the first-party plugin set shells install |
 | `crates/quireink-fs` | Storage in a host directory, for shells with an operating system |
@@ -150,12 +150,12 @@ cargo run -p quireink-emulator -- --headless --profile boox-go-7 --set core.lang
 
 ## Contributing
 
-Contributions are very welcome — code, translations, device profiles and
+Contributions are very welcome: code, translations, device profiles and
 testing on real hardware. Please read [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
 QuireInk is licensed under the [Apache License, Version 2.0](LICENSE).
-The bundled fonts — [Literata](https://github.com/googlefonts/literata) and
-[Atkinson Hyperlegible Next](https://github.com/googlefonts/atkinson-hyperlegible-next) —
+The bundled fonts, [Literata](https://github.com/googlefonts/literata) and
+[Atkinson Hyperlegible Next](https://github.com/googlefonts/atkinson-hyperlegible-next),
 are licensed under the [SIL Open Font License 1.1](plugins/fonts-default/fonts/).

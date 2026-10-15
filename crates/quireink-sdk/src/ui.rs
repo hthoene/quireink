@@ -213,7 +213,7 @@ pub fn draw_header(
 
 /// A screen's header bar for touch screens too: a back arrow on the left
 /// and, for lists with several pages, arrows around the page number on the
-/// right — so every screen can be left and paged without buttons or hidden
+/// right, so every screen can be left and paged without buttons or hidden
 /// gestures. Without touch the arrows are left out (the buttons do that).
 ///
 /// Screens draw it with [`Header::draw`] and pass taps to [`Header::tap`],
@@ -588,7 +588,7 @@ pub enum ListChange {
     Page,
 }
 
-/// A paged, focusable list — the basic building block of menus, the
+/// A paged, focusable list: the basic building block of menus, the
 /// library and settings. Works with buttons (focus) and touch (hit tests).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ListView {

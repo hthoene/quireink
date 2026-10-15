@@ -11,7 +11,7 @@ authors.workspace = true
 categories = ["no-std"]
 
 [dependencies]
-# Plugins depend on the SDK only — never on the kernel.
+# Plugins depend on the SDK only, never on the kernel.
 quireink-sdk.workspace = true
 
 [dev-dependencies]

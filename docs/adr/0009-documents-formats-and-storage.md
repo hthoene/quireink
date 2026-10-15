@@ -6,7 +6,7 @@
 ## Context
 
 Reading books needs file access, a way for plugins to support file formats,
-and a document model that layout engines can work with — on a device with
+and a document model that layout engines can work with, on a device with
 a few hundred kilobytes of RAM and on devices with gigabytes. ADR 0003 keeps
 the kernel free of I/O.
 
@@ -15,7 +15,7 @@ the kernel free of I/O.
 - **Storage is a platform service.** Shells implement the `Storage` trait
   (`quireink-platform`): random-access reads, atomic whole-file writes,
   appends, listing and removal on relative, `/`-separated paths. Local
-  storage is accessed synchronously — reading kilobytes from an SD card is
+  storage is accessed synchronously: reading kilobytes from an SD card is
   fast enough everywhere and keeps plugins simple. Slow, remote resources
   (network) will be asynchronous effects. Plugins reach storage through
   `Env::storage`, kernel and plugins never touch a file system directly.

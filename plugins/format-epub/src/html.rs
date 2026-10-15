@@ -1,4 +1,4 @@
-//! HTML files — web pages, saved or downloaded — as documents of one
+//! HTML files (web pages, saved or downloaded) as documents of one
 //! section, converted like EPUB chapters (see [`crate::convert`]) and read
 //! as browsers read HTML: only the reading matter, links made absolute
 //! with the page's address (from its `<base href>`).

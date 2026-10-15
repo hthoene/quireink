@@ -35,7 +35,7 @@ impl Storage for OneFile {
 }
 
 fn archive() -> Vec<u8> {
-    let text: String = (0..2000).map(|i| format!("Zeile {i} – Größe\n")).collect();
+    let text: String = (0..2000).map(|i| format!("Zeile {i}: Größe\n")).collect();
     ZipBuilder::new()
         .stored("mimetype", "application/epub+zip")
         .deflated("a/ü.txt", text.clone())

@@ -15,7 +15,7 @@ const ZIGZAG: [u8; 64] = [
 
 #[derive(Clone)]
 struct Huffman {
-    /// Largest code of each length (1–16), -1 if none.
+    /// Largest code of each length (1 to 16), -1 if none.
     max_code: [i32; 18],
     /// Index into `values` of the first code of each length, minus that code.
     offset: [i32; 17],
@@ -157,7 +157,7 @@ impl<'r, 'a> Bits<'r, 'a> {
 }
 
 /// Inverse DCT of one block (dequantized coefficients in natural order),
-/// written to `out` with stride `stride`, clamped to 0–255.
+/// written to `out` with stride `stride`, clamped to 0 to 255.
 fn idct(coef: &[i32; 64], out: &mut [u8], stride: usize) {
     // c[u][x] = C(u) cos((2x+1)uπ/16) / 2, scaled by 2^12.
     const C: [[i32; 8]; 8] = {

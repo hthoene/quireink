@@ -80,7 +80,7 @@ impl<'a> Canvas<'a> {
     }
 
     /// Blends `color` over a `width`×`height` area at `(x, y)` using
-    /// `coverage(dx, dy)` (0 = transparent, 255 = opaque) — used for
+    /// `coverage(dx, dy)` (0 = transparent, 255 = opaque), used for
     /// anti-aliased glyphs and icons.
     pub fn draw_mask(
         &mut self,

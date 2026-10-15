@@ -1,6 +1,6 @@
 //! QuireInk desktop emulator.
 //!
-//! Runs the real kernel and plugins against an emulated e-ink device —
+//! Runs the real kernel and plugins against an emulated e-ink device,
 //! interactively in a window, or headless for screenshots and CI.
 
 mod budget;

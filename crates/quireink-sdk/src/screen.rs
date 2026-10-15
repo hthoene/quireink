@@ -84,7 +84,7 @@ pub trait Screen {
         Handled::No
     }
 
-    /// Called whenever the screen becomes the visible one — after it was
+    /// Called whenever the screen becomes the visible one: after it was
     /// opened and when the screens above it were closed. A good place to
     /// start background work with [`Cx::wake_at`].
     fn on_show(&mut self, cx: &mut Cx<'_, '_>) {
@@ -92,7 +92,7 @@ pub trait Screen {
     }
 
     /// Called for every emitted event (after its subscribers), on every
-    /// open screen — e.g. `core.setting-changed` to re-layout.
+    /// open screen, e.g. `core.setting-changed` to re-layout.
     fn on_event(&mut self, event: &Id, params: &Params, cx: &mut Cx<'_, '_>) {
         let _ = (event, params, cx);
     }

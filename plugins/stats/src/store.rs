@@ -7,7 +7,7 @@
 //!   its path here.
 //! - `pages.bin`: every stay on a page, 16 bytes each, appended as they
 //!   happen: book id (u16), page (u32, from 1), start (u32, Unix seconds),
-//!   duration (u16, seconds) and the book's pages then (u32) — KOReader's
+//!   duration (u16, seconds) and the book's pages then (u32), like KOReader's
 //!   `page_stat_data`.
 //! - `days.bin`: reading time per local day for quick views, derived from
 //!   `pages.bin`: how many bytes of the log it covers (u64), then 12 bytes

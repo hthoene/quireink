@@ -1,8 +1,8 @@
 //! Pre-rendered bitmap font packs (`.qifp`).
 //!
 //! Packs hold glyph bitmaps for a set of pixel sizes ("strikes"). They are
-//! read in place — on devices that map flash into the address space they use
-//! no RAM at all — and need no floating-point work at runtime.
+//! read in place (on devices that map flash into the address space they use
+//! no RAM at all) and need no floating-point work at runtime.
 //!
 //! # Format (version 1, little endian)
 //!

@@ -77,7 +77,7 @@ const MAX_FONT_FILE: u64 = 48 * 1024 * 1024;
 /// All registered fonts, the role bindings and the glyph cache.
 ///
 /// Fonts are bound to *roles* such as
-/// [`builtin::fonts::UI`](crate::builtin::fonts::UI) — like screens to slots.
+/// [`builtin::fonts::UI`](crate::builtin::fonts::UI), like screens to slots.
 /// Plugins propose fonts for roles; a chosen reading family
 /// ([`Fonts::set_family`]) fills the reading roles, and the user's
 /// `[fonts]` configuration overrides everything.

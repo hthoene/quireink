@@ -90,7 +90,7 @@ impl Registry {
 }
 
 /// Contributions of one plugin, collected during `register` and merged only
-/// if the whole registration succeeds — a failing plugin leaves no traces.
+/// if the whole registration succeeds; a failing plugin leaves no traces.
 #[derive(Default)]
 pub(crate) struct Staging {
     actions: Vec<ActionSpec>,

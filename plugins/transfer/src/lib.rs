@@ -1,6 +1,6 @@
 //! Transfer by browser: while the screen is open, the device serves a
 //! web page to the local network for putting books and other files on
-//! it, fetching them and tidying up — from a phone or a computer, no
+//! it, fetching them and tidying up, from a phone or a computer, no
 //! cable or app needed.
 //!
 //! The screen shows the page's address as text and as a QR code. The

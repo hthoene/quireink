@@ -3,8 +3,8 @@
 //! taking over the statistics of KOReader on the same device.
 //!
 //! A sync downloads `statistics.sqlite3` from the folder, merges it (see
-//! [`merge`]), uploads the result — only if nobody changed the file in
-//! between (`If-Match` with its ETag; else it starts over) — and keeps
+//! [`merge`]), uploads the result (only if nobody changed the file in
+//! between: `If-Match` with its ETag, else it starts over) and keeps
 //! what it uploaded, to tell later what was deleted. KOReader does the
 //! same, so either may sync first.
 

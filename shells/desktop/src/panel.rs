@@ -158,7 +158,7 @@ fn rgb([r, g, b]: [u8; 3]) -> u32 {
     (u32::from(r) << 16) | (u32::from(g) << 8) | u32::from(b)
 }
 
-/// Maps a colour onto the ink–paper range of a real panel.
+/// Maps a colour onto the range from ink to paper of a real panel.
 fn on_paper(value: [u8; 3]) -> u32 {
     let channel = |i: usize| {
         let (ink, paper) = (u32::from(INK[i]), u32::from(PAPER[i]));

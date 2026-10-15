@@ -40,7 +40,7 @@ pub mod slots {
     use crate::Id;
 
     /// The start screen. The default is a dashboard, but any screen can be
-    /// bound here — a file browser, a bookshelf, a single "continue" button.
+    /// bound here: a file browser, a bookshelf, a single "continue" button.
     pub const HOME: Id = Id::new_static("core.home");
     /// Shows a book. Opened with the parameter [`PATH`](super::params::PATH).
     pub const READER: Id = Id::new_static("core.reader");
@@ -66,7 +66,7 @@ pub mod slots {
     /// initial text), [`MODE`](super::params::MODE) and
     /// [`REPLY`](super::params::REPLY). When the text is confirmed the
     /// screen closes and emits the event named by `reply` with all of its
-    /// parameters, `text` set to what was entered — so the asking plugin
+    /// parameters, `text` set to what was entered, so the asking plugin
     /// can pass along anything it needs to know (e.g. which setting). Bind
     /// another screen here for a different keyboard, handwriting or voice.
     pub const KEYBOARD: Id = Id::new_static("core.keyboard");

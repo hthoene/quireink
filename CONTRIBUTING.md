@@ -5,7 +5,7 @@ expect from contributions.
 
 ## Ground rules
 
-- Be kind and constructive — see the [Code of Conduct](CODE_OF_CONDUCT.md).
+- Be kind and constructive; see the [Code of Conduct](CODE_OF_CONDUCT.md).
 - Everything in the repository is written in **English**: code, comments,
   documentation, commit messages, issues and pull requests.
 - Discuss larger changes in an issue first, especially changes to the SDK
@@ -59,7 +59,7 @@ Each plugin keeps its catalogs in `i18n/<language>.ini`. To add a language:
    `crates/quireink-i18n/src/plural.rs` for the available rules).
 3. Translate the messages; keep `{placeholders}` unchanged.
 4. Register the catalog in the plugin's `register` function and run
-   `cargo test` — the tests report missing, unknown and mismatched messages.
+   `cargo test`: the tests report missing, unknown and mismatched messages.
 
 ## Adding a device profile
 

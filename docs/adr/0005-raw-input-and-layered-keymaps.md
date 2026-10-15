@@ -28,5 +28,5 @@ made gestures, long-press tuning and pen input impossible to customize.
 
 - Identical, user-editable input behaviour on every device.
 - Shells become simpler.
-- The kernel needs time (`now`) and timers (`WakeAt`) for long presses —
+- The kernel needs time (`now`) and timers (`WakeAt`) for long presses,
   which other features (statistics, schedules) need anyway.

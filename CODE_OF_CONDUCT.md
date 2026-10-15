@@ -5,7 +5,7 @@ QuireInk adopts the
 as its code of conduct.
 
 In short: be welcoming, respectful and constructive. Harassment,
-discrimination and personal attacks are not tolerated in any project space —
+discrimination and personal attacks are not tolerated in any project space:
 issues, pull requests, discussions and any other channel.
 
 ## Reporting

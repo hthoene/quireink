@@ -206,7 +206,7 @@ impl Popup {
                 if !text.is_empty() {
                     text.push_str("\n\n");
                 }
-                text.push_str(&format!("— {} —", dictionary.info.name));
+                text.push_str(&format!("({})", dictionary.info.name));
             }
             for definition in found {
                 if !text.is_empty() {

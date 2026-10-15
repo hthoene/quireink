@@ -1,7 +1,7 @@
 //! Raw, device-neutral input events.
 //!
-//! Shells report *what happened physically* — a named button went down, a
-//! finger or pen touched the screen — never *what it means*. The kernel
+//! Shells report *what happened physically* (a named button went down, a
+//! finger or pen touched the screen), never *what it means*. The kernel
 //! recognizes long presses and gestures and resolves them to actions
 //! through user-configurable key maps, so input works the same way on every
 //! device and can be customized completely.

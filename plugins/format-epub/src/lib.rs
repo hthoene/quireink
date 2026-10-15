@@ -3,15 +3,15 @@
 //! - Metadata (title, authors, language) from the package document.
 //! - Reading order from the spine; table of contents from the EPUB 3
 //!   navigation document or the EPUB 2 NCX.
-//! - Chapters are converted on first use — streamed from the ZIP archive
-//!   through an XHTML tokenizer — into a compact block format stored in the
+//! - Chapters are converted on first use, streamed from the ZIP archive
+//!   through an XHTML tokenizer, into a compact block format stored in the
 //!   plugin's cache. Reading afterwards needs only the block at hand, so
 //!   books of any size work on small devices.
 //!
 //! Supported markup: paragraphs, headings, lists, block quotes, line
 //! breaks, preformatted text, anchors and links, styles and images.
 //!
-//! HTML files (`.html`, `.htm`, `.xhtml`) — e.g. saved web pages — open
+//! HTML files (`.html`, `.htm`, `.xhtml`), e.g. saved web pages, open
 //! the same way, showing only a page's reading matter (see
 //! [`HtmlDocument`]).
 

@@ -3,7 +3,7 @@
 //! touch focus navigation, and demonstrates partial versus full refreshes.
 //!
 //! It binds itself to the home slot with the lowest regular priority, so it
-//! only appears until a real home screen plugin is installed — or when a
+//! only appears until a real home screen plugin is installed, or when a
 //! user binds it explicitly:
 //!
 //! ```ini

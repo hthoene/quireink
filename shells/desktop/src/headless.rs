@@ -129,7 +129,7 @@ fn touch(device: &mut Device, start: Point, end: Option<Point>, hold_ms: u64) {
 
 /// Lets time pass in small steps so due long presses fire on time.
 /// Lets `millis` of simulated time pass, waking the kernel at every time it
-/// asked for — exactly like a device would.
+/// asked for, exactly like a device would.
 fn hold(device: &mut Device, millis: u64) {
     let end = device.now().add_millis(millis);
     loop {

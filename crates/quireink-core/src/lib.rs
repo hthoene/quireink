@@ -3,7 +3,7 @@
 //! The kernel hosts plugins and connects them: it keeps the registries of
 //! contributions, resolves slots to screens, turns raw input into gestures
 //! and actions through layered key maps, applies plugin commands and decides
-//! how the e-ink panel is refreshed. It contains no product UI — even its own
+//! how the e-ink panel is refreshed. It contains no product UI: even its own
 //! contributions are registered as the `core` plugin.
 //!
 //! The kernel is *sans-I/O*: shells feed it [`InputEvent`]s and time, and
@@ -13,7 +13,7 @@
 //!
 //! Drawing is separate from event handling: after a call whose effects
 //! contain a refresh, the shell calls [`Kernel::render`], which draws what
-//! changed and hands it over as rows of pixels — the whole region at once,
+//! changed and hands it over as rows of pixels: the whole region at once,
 //! or band by band on devices that cannot hold a full frame in RAM
 //! ([`KernelBuilder::frame_rows`]). The panel controller keeps the frame.
 //!
@@ -1244,7 +1244,7 @@ impl Kernel {
         }
     }
 
-    /// Merges a plugin's contributions — all of them or none.
+    /// Merges a plugin's contributions: all of them or none.
     fn merge(&mut self, plugin: &Id, mut staging: Staging) -> Result<(), RegisterError> {
         for setting in &staging.settings {
             if self.shared.settings.get(setting.id.as_str()).is_some() {

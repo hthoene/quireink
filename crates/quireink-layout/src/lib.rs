@@ -1,7 +1,7 @@
 //! Page layout: turns a [`Document`] into pages.
 //!
 //! Layout is deterministic and starts at any [`Locator`] that begins a line,
-//! so a reader only needs to remember where pages start — never the pages
+//! so a reader only needs to remember where pages start, never the pages
 //! themselves. Text is broken greedily per paragraph; because greedy breaking
 //! is stable, laying out from the middle of a paragraph yields exactly the
 //! same lines as laying out the whole paragraph.

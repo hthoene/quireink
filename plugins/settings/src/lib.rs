@@ -1,5 +1,5 @@
 //! The settings screens, generated from the settings every plugin declares
-//! (`Registrar::add_setting`) — no plugin needs its own settings UI.
+//! (`Registrar::add_setting`), so no plugin needs its own settings UI.
 //!
 //! - The main page lists the setting groups, pages other plugins add to
 //!   the `core.settings-pages` menu (e.g. the plugin manager), and a

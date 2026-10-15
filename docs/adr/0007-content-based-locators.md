@@ -20,5 +20,5 @@ Pagination caches map locators to pages per device and settings.
 ## Consequences
 
 - Positions survive font and layout changes and sync across devices.
-- Layout must keep a mapping from rendered content back to locators — which
+- Layout must keep a mapping from rendered content back to locators, which
   also enables hit testing, selection and annotations.

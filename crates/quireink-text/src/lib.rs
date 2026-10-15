@@ -1,8 +1,8 @@
 //! Text rendering for QuireInk.
 //!
 //! - [`Font`]: either a pre-rendered bitmap font pack ([`BitmapFont`], read
-//!   in place, works everywhere including the ESP32-C3) or — with the
-//!   `outline` feature — a scalable OpenType/TrueType font rendered at
+//!   in place, works everywhere including the ESP32-C3) or, with the
+//!   `outline` feature, a scalable OpenType/TrueType font rendered at
 //!   runtime ([`OutlineFont`], via `skrifa`).
 //! - A built-in anti-aliasing rasterizer producing 4-bit glyph bitmaps. Packs
 //!   are produced with the same rasterizer, so both look identical.

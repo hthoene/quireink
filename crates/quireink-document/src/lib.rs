@@ -7,7 +7,7 @@
 //!   for EPUB).
 //! - Each section is a sequence of **blocks** (paragraphs, headings, …)
 //!   with normalized text.
-//! - A [`Locator`] identifies a position by section and *source offset* — a
+//! - A [`Locator`] identifies a position by section and *source offset*, a
 //!   position in the original file data, which stays valid regardless of
 //!   fonts, screen size or text normalization (see ADR 0007).
 //!

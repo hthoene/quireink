@@ -5,7 +5,7 @@ use core::fmt;
 /// A namespaced identifier such as `core.home` or `diagnostics.screen`.
 ///
 /// Ids consist of one or more segments of lowercase ASCII letters, digits
-/// and `-`, separated by `.`. The first segment is the namespace — the id of
+/// and `-`, separated by `.`. The first segment is the namespace: the id of
 /// the plugin that owns the contribution.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Id(Cow<'static, str>);
