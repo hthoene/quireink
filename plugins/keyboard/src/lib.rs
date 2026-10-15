@@ -16,7 +16,8 @@
 //!   a long press on confirm) shows its variants, e.g. `é è ê ë` for `e`,
 //!   and German quotes on `"`.
 //! - When there is text on the clipboard, *Paste* in the text field
-//!   inserts it (with buttons: up from the first row).
+//!   inserts it, and so does a long press in the field (with buttons: up
+//!   from the first row).
 //!
 //! Bind another screen to `core.keyboard` for a different keyboard
 //! altogether.
@@ -849,6 +850,12 @@ impl Screen for KeyboardScreen {
         }
         match (gesture.kind, key) {
             (GestureKind::Tap, Some((PASTE_ROW, _))) => self.paste(cx),
+            // A long press in the text field pastes too, as elsewhere.
+            (GestureKind::LongPress, _)
+                if self.paste.is_some() && self.field.contains(gesture.start) =>
+            {
+                self.paste(cx);
+            }
             (GestureKind::Tap, Some((row, index))) => self.press(self.rows[row][index].0, cx),
             // A long press on *Delete* clears the text.
             (GestureKind::LongPress, Some((row, index)))
