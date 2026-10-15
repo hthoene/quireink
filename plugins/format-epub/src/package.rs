@@ -10,6 +10,8 @@
 //! - `toc.dat`: table of contents records (level u8, section u32, fragment
 //!   length u16, title length u16, fragment, title); `toc.idx` holds the
 //!   offset of each record as u32.
+//! - `pages.txt`: the printed edition's pages (EPUB 3 `page-list`), as
+//!   `section<TAB>fragment<TAB>label` lines in reading order.
 //! - `styles.txt`: the rules of all the book's stylesheets (see `css`).
 //! - `fonts.txt`: the embedded fonts: first `id<TAB>identifier`, then per
 //!   font `family<TAB>bold<TAB>italic<TAB>obfuscation<TAB>path`.
@@ -30,7 +32,7 @@ use crate::css;
 use crate::obfuscation::Method;
 
 /// Bump when the cache format or the conversion changes.
-pub(crate) const CACHE_VERSION: u32 = 17;
+pub(crate) const CACHE_VERSION: u32 = 18;
 
 /// A chapter: where it is in the archive and its uncompressed size.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -736,10 +738,35 @@ pub(crate) fn build(
                 toc.push(level, section as u32, fragment, &title);
             }
         };
+    let pages_path = path(cache, "pages.txt");
+    storage.write(&pages_path, &[])?;
     if let Some(nav) = &nav {
-        let _ = read_nav(storage, archive, nav, &mut |t, l, f, fr| {
-            add(&mut toc, t, l, f, fr)
-        });
+        let mut pages = String::new();
+        let mut add_page = |label: String, file: &str, fragment: Option<&str>| {
+            let (Ok(Some(entry)), Some(fragment)) = (archive.entry(storage, file), fragment) else {
+                return;
+            };
+            if let Some(section) = spine.iter().position(|c| c.record == entry.record()) {
+                let one = |s: &str| s.replace(['\t', '\n'], " ");
+                pages.push_str(&alloc::format!(
+                    "{section}\t{}\t{}\n",
+                    one(fragment),
+                    one(&label)
+                ));
+                if pages.len() >= 1024 {
+                    let _ = storage.append(&pages_path, pages.as_bytes());
+                    pages.clear();
+                }
+            }
+        };
+        let _ = read_nav(
+            storage,
+            archive,
+            nav,
+            &mut |t, l, f, fr| add(&mut toc, t, l, f, fr),
+            &mut add_page,
+        );
+        let _ = storage.append(&pages_path, pages.as_bytes());
     }
     let ncx = ncx.or(ncx_by_type);
     if let Some(ncx) = &ncx
@@ -830,15 +857,19 @@ pub(crate) fn build(
 
 type AddToc<'a> = dyn FnMut(String, u8, &str, Option<&str>) + 'a;
 
-/// EPUB 3: `<nav epub:type="toc">` with nested `<ol><li><a href>`.
+/// EPUB 3: `<nav epub:type="toc">` with nested `<ol><li><a href>`, and
+/// the printed pages of `<nav epub:type="page-list">` for `page`.
 fn read_nav(
     storage: &dyn Storage,
     archive: &ZipArchive,
     path: &str,
     add: &mut AddToc<'_>,
+    page: &mut dyn FnMut(String, &str, Option<&str>),
 ) -> Result<(), DocumentError> {
     let base = String::from(dir_of(path));
     let mut in_toc = false;
+    let mut in_pages = false;
+    let mut page_link: Option<(String, Option<String>)> = None;
     let mut ol_depth = 0u8;
     let mut link: Option<(String, Option<String>)> = None;
     let mut text = String::new();
@@ -857,6 +888,12 @@ fn read_nav(
                     in_toc = true;
                     ol_depth = 0;
                 }
+                in_pages = kind.is_some_and(|k| k.split_whitespace().any(|t| t == "page-list"));
+            }
+            "a" if in_pages && !self_closing => {
+                let href = attrs.get("href").unwrap_or_default();
+                page_link = Some(resolve(&base, &href));
+                text.clear();
             }
             "ol" if in_toc => ol_depth += 1,
             "a" if in_toc && !self_closing => {
@@ -866,9 +903,20 @@ fn read_nav(
             }
             _ => {}
         },
-        Token::Text(t) if link.is_some() => text.push_str(&decode(&t)),
+        Token::Text(t) if link.is_some() || page_link.is_some() => text.push_str(&decode(&t)),
         Token::End { name } => match local_name(name) {
-            "nav" => in_toc = false,
+            "nav" => {
+                in_toc = false;
+                in_pages = false;
+            }
+            "a" if page_link.is_some() => {
+                if let Some((file, fragment)) = page_link.take() {
+                    let label = clean(&text);
+                    if !label.is_empty() && !file.is_empty() {
+                        page(label, &file, fragment.as_deref());
+                    }
+                }
+            }
             "ol" if in_toc => ol_depth = ol_depth.saturating_sub(1),
             "a" => {
                 if let Some((file, fragment)) = link.take() {

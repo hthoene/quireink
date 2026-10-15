@@ -42,6 +42,8 @@ pub struct EpubDocument {
     styles: bool,
     /// Archive path of the cover image.
     cover: Option<String>,
+    /// The printed pages of one section, resolved: offset and label.
+    pages: core::cell::RefCell<Option<(u32, Vec<(u32, String)>)>>,
 }
 
 fn fnv(text: &str) -> u64 {
@@ -143,6 +145,7 @@ impl EpubDocument {
             cache,
             chapters,
             styles,
+            pages: core::cell::RefCell::new(None),
         })
     }
 
@@ -212,9 +215,65 @@ impl EpubDocument {
     }
 }
 
+impl EpubDocument {
+    /// The printed pages listed for `section`, with their offsets; the
+    /// label of the last page before it.
+    fn section_pages(
+        &self,
+        storage: &dyn Storage,
+        section: u32,
+    ) -> (Option<String>, Vec<(u32, String)>) {
+        let Ok(data) = quireink_sdk::read_file(
+            storage,
+            &alloc::format!("{}/pages.txt", self.cache),
+            1 << 20,
+        ) else {
+            return (None, Vec::new());
+        };
+        let text = String::from_utf8_lossy(&data);
+        let mut before = None;
+        let mut here = Vec::new();
+        for line in text.lines() {
+            let mut f = line.splitn(3, '\t');
+            let (Some(s), Some(fragment), Some(label)) = (f.next(), f.next(), f.next()) else {
+                continue;
+            };
+            let Ok(s) = s.parse::<u32>() else {
+                continue;
+            };
+            if s < section {
+                before = Some(String::from(label));
+            } else if s == section
+                && let Some(offset) = self.anchor(storage, section, fragment)
+            {
+                here.push((offset, String::from(label)));
+            }
+        }
+        here.sort_by_key(|(offset, _)| *offset);
+        (before, here)
+    }
+}
+
 impl Document for EpubDocument {
     fn metadata(&self) -> &Metadata {
         &self.metadata
+    }
+
+    fn page_label(&self, storage: &dyn Storage, at: Locator) -> Option<String> {
+        // One section's pages are resolved once.
+        let mut pages = self.pages.borrow_mut();
+        if pages.as_ref().is_none_or(|(s, _)| *s != at.section) {
+            let (before, mut here) = self.section_pages(storage, at.section);
+            if let Some(before) = before {
+                here.insert(0, (0, before));
+            }
+            *pages = Some((at.section, here));
+        }
+        let (_, here) = pages.as_ref()?;
+        here.iter()
+            .take_while(|(offset, _)| *offset <= at.offset)
+            .last()
+            .map(|(_, label)| label.clone())
     }
 
     fn cover(&self, storage: &dyn Storage) -> Result<Option<ImageRef>, DocumentError> {

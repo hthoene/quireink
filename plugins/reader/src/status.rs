@@ -86,7 +86,12 @@ pub mod items {
     /// A speaker while the book is read aloud, a clock while its pages
     /// turn by themselves.
     pub const ALOUD: Id = Id::new_static("reader.status.aloud");
+    /// The page of the printed edition, where the book names it.
+    pub const PRINTED_PAGE: Id = Id::new_static("reader.status.printed-page");
 }
+
+/// Context: the printed edition's page.
+pub(crate) const PRINTED_CONTEXT: &str = "reader.printed-page";
 
 /// Context: the icon of what turns the pages by itself (reading aloud,
 /// turning automatically).
@@ -228,6 +233,17 @@ pub(crate) fn register(r: &mut dyn Registrar) -> Result<(), RegisterError> {
         value: Box::new(|_, cx| {
             cx.get(ALOUD_CONTEXT)
                 .map(|icon| StatusValue::Icon(Cow::Owned(icon.to_string())))
+        }),
+    })?;
+    r.add_status_item(StatusItemSpec {
+        id: items::PRINTED_PAGE,
+        title: Cow::Borrowed("reader.status.item.printed-page"),
+        value: Box::new(|env, cx| {
+            let page = cx.get(PRINTED_CONTEXT)?;
+            Some(StatusValue::Text(
+                env.i18n
+                    .format("reader.printed-page", &[("page", Arg::Str(page))]),
+            ))
         }),
     })?;
     r.add_status_item(StatusItemSpec {

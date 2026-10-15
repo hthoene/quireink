@@ -178,7 +178,9 @@ mod tests {
   <li><a href="text/ch1.xhtml">Erstes Kapitel</a>
     <ol><li><a href="text/ch1.xhtml#later">Später</a></li></ol></li>
   <li><a href="text/ch%202.xhtml">Zweites   Kapitel</a></li>
-</ol></nav></body></html>"#;
+</ol></nav>
+<nav epub:type="page-list"><ol><li><a href="text/ch1.xhtml#later">7</a></li></ol></nav>
+</body></html>"#;
 
     const CH1: &str = r#"<?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE html>
@@ -381,6 +383,15 @@ mod tests {
         assert_eq!(metadata.authors, ["Franz Kafka"]);
         assert_eq!(metadata.language.as_deref(), Some("de"));
         assert_eq!(metadata.subjects, ["Novella", "Classics"]);
+        // The printed edition's pages: from the anchor on, also in the
+        // chapters after it.
+        let later = doc.toc_target(&storage, 1).unwrap();
+        assert_eq!(doc.page_label(&storage, Locator::new(0, 0)), None);
+        assert_eq!(doc.page_label(&storage, later).as_deref(), Some("7"));
+        assert_eq!(
+            doc.page_label(&storage, Locator::new(1, 0)).as_deref(),
+            Some("7")
+        );
         assert_eq!(doc.sections(), 2);
         assert_eq!(
             metadata.description.as_deref(),

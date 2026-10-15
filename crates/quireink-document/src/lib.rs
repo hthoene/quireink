@@ -436,6 +436,14 @@ pub trait Document {
     /// Number of sections (at least 1).
     fn sections(&self) -> u32;
 
+    /// The page of the printed edition at `at`, as the book names it
+    /// (an EPUB's `page-list`), e.g. `123` or `xii`; `None` if it names
+    /// none there.
+    fn page_label(&self, storage: &dyn Storage, at: Locator) -> Option<String> {
+        let _ = (storage, at);
+        None
+    }
+
     /// Each section is the picture of a whole page (a comic, pages made
     /// for one screen): readers show them edge to edge, without margins
     /// or status lines.

@@ -2114,6 +2114,9 @@ impl Book {
         if let Some(icon) = self.hands_free {
             context.set(status::ALOUD_CONTEXT, icon);
         }
+        if let Some(page) = self.document.page_label(env.storage, self.page.start) {
+            context.set(status::PRINTED_CONTEXT, page);
+        }
         context
     }
 
