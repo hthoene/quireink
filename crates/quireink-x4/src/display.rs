@@ -559,6 +559,82 @@ mod tests {
     }
 
     #[test]
+    fn the_kernels_bands_make_its_frame() {
+        use quireink_core::Kernel;
+        use quireink_platform::{
+            DeviceInfo, DisplayInfo, InputCaps, Instant, MemoryClass, Rotation,
+        };
+        let device = DeviceInfo {
+            id: "x4",
+            name: "X4",
+            display: DisplayInfo {
+                width: WIDTH,
+                height: HEIGHT,
+                dpi: 220,
+                format: PixelFormat::Gray2,
+                rotation: Rotation::Deg90,
+                color: None,
+            },
+            input: InputCaps {
+                buttons: true,
+                touch: false,
+                pen: false,
+                keys: &[],
+            },
+            memory: MemoryClass::Small,
+        };
+        let build = |banded: bool| {
+            let mut builder = Kernel::builder(device);
+            if banded {
+                builder = builder.frame_rows(96).row_align(8);
+            }
+            let mut kernel = quireink_app::install(builder, quireink_app::Fonts::Packs)
+                .build()
+                .unwrap();
+            kernel.start(Instant(0));
+            kernel
+        };
+        // The whole frame at once, thresholded as the display does.
+        let mut whole = build(false);
+        let mut expected = vec![false; usize::from(WIDTH) * usize::from(HEIGHT)];
+        whole.render(&mut |top, rows| {
+            for y in 0..rows.height {
+                for x in 0..rows.width {
+                    let c = rows.pixel(x, y);
+                    let white = u16::from(c.r) * 77 + u16::from(c.g) * 150 + u16::from(c.b) * 29
+                        >= 128 * 256;
+                    expected[usize::from(top + y) * usize::from(WIDTH) + usize::from(x)] = white;
+                }
+            }
+        });
+        assert!(expected.iter().any(|w| !w), "something is drawn");
+        // In bands, into the controller.
+        let controller = Controller::new();
+        let mut display = Display::new(
+            Spi(controller.clone()),
+            Dc(controller.clone()),
+            Pin,
+            Busy,
+            Delay,
+        );
+        display.init().unwrap();
+        let mut banded = build(true);
+        let mut bands = 0;
+        banded.render(&mut |top, rows| {
+            bands += 1;
+            display.write_rows(top, rows, Planes::NEW).unwrap();
+        });
+        assert!(bands > 1);
+        let c = controller.borrow();
+        for y in 0..HEIGHT {
+            for x in 0..WIDTH {
+                let at = usize::from(y) * usize::from(WIDTH) + usize::from(x);
+                assert_eq!(Controller::white(&c.new, x, y), expected[at], "({x}, {y})");
+            }
+        }
+    }
+
+    #[test]
     fn a_short_last_band_is_white_below() {
         let controller = Controller::new();
         let mut display = Display::new(

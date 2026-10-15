@@ -15,5 +15,9 @@ keywords = ["e-reader", "e-ink", "epaper", "ssd1677", "xteink"]
 embedded-hal = "1.0"
 quireink-platform.workspace = true
 
+[dev-dependencies]
+quireink-core.workspace = true
+quireink-app.workspace = true
+
 [lints]
 workspace = true

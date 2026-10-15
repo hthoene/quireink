@@ -1720,6 +1720,8 @@ name = "quireink-x4"
 version = "0.1.0"
 dependencies = [
  "embedded-hal",
+ "quireink-app",
+ "quireink-core",
  "quireink-platform",
 ]
 
