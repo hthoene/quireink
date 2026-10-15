@@ -1,6 +1,9 @@
 //! Copying a file from one folder storage to another mounted beside it,
 //! in parts, as moving an upload into the shared storage does.
 
+// Tests panic on purpose when something is wrong.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use quireink_fs::DirStorage;
 use quireink_platform::{Mounted, Storage};
 
