@@ -538,10 +538,14 @@ fn draw_row(
         ui::draw_noted_row(canvas, env, style, text, focused, &entry.name, "›", note);
         return;
     }
-    let (stem, extension) = entry
-        .name
-        .rsplit_once('.')
-        .unwrap_or((entry.name.as_str(), ""));
+    // A zipped book is named by what is inside (`book.fb2.zip`: FB2).
+    let name = entry.name.as_str();
+    let unzipped = name
+        .strip_suffix(".zip")
+        .or_else(|| name.strip_suffix(".ZIP"))
+        .filter(|inner| inner.contains('.'))
+        .unwrap_or(name);
+    let (stem, extension) = unzipped.rsplit_once('.').unwrap_or((unzipped, ""));
     let format = extension.to_uppercase();
     match book.and_then(|b| b.cover.as_ref()) {
         Some(cover) => {

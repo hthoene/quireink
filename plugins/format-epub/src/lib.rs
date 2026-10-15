@@ -92,7 +92,7 @@ impl Plugin for EpubFormat {
         r.add_format(FormatSpec {
             id: FB2,
             title: Cow::Borrowed("format-epub.fb2"),
-            extensions: vec![Cow::Borrowed("fb2")],
+            extensions: vec![Cow::Borrowed("fb2"), Cow::Borrowed("fb2.zip")],
             open: Box::new(|storage, path, options| {
                 Fb2Document::open(storage, path, options.publisher_styles)
                     .map(|d| Box::new(d) as Box<dyn Document>)

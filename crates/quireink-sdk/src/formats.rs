@@ -43,7 +43,8 @@ pub struct FormatSpec {
     pub id: Id,
     /// Translation key of the format's display name.
     pub title: Cow<'static, str>,
-    /// Lowercase file extensions without the dot, e.g. `["txt", "text"]`.
+    /// Lowercase file extensions without the dot, e.g. `["txt", "text"]`;
+    /// also double ones such as `fb2.zip`.
     pub extensions: Vec<Cow<'static, str>>,
     pub open: FormatOpener,
 }
@@ -87,15 +88,24 @@ impl Formats {
         self.specs.iter().any(|s| s.id.as_str() == id)
     }
 
-    /// The format handling `path`, by file extension.
+    /// The format handling `path`, by file extension (the longest that
+    /// matches, so `book.fb2.zip` goes to `fb2.zip`).
     pub fn for_path(&self, path: &str) -> Option<&FormatSpec> {
-        let name = path.rsplit('/').next().unwrap_or(path);
-        let (_, extension) = name.rsplit_once('.')?;
-        self.specs.iter().rev().find(|spec| {
-            spec.extensions
-                .iter()
-                .any(|e| e.eq_ignore_ascii_case(extension))
-        })
+        let name = path.rsplit('/').next().unwrap_or(path).to_ascii_lowercase();
+        let matches = |e: &str| {
+            name.len() > e.len()
+                && name.ends_with(&e.to_ascii_lowercase())
+                && name.as_bytes()[name.len() - e.len() - 1] == b'.'
+        };
+        let mut best: Option<(&FormatSpec, usize)> = None;
+        for spec in self.specs.iter().rev() {
+            for e in spec.extensions.iter().filter(|e| matches(e)) {
+                if best.is_none_or(|(_, len)| e.len() > len) {
+                    best = Some((spec, e.len()));
+                }
+            }
+        }
+        best.map(|(spec, _)| spec)
     }
 
     /// Whether any format can open `path`.

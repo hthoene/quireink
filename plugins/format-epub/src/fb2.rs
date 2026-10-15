@@ -16,7 +16,8 @@
 //!   ISO-8859-1, as the XML declaration says.
 //!
 //! What is read once (metadata, contents) is cached beside the converted
-//! text, so opening a book again does not read the whole file.
+//! text, so opening a book again does not read the whole file. Zipped
+//! books (`.fb2.zip`) are unpacked into the cache once.
 
 use alloc::format;
 use alloc::string::{String, ToString};
@@ -380,7 +381,6 @@ impl Fb2Document {
         let size = storage.size(path)?;
         let mut head = [0u8; 4096];
         let n = storage.read_at(path, 0, &mut head)?;
-        let encoding = detect(&head[..n]);
         let mut cache = format!(
             "{}/fb2-{:016x}",
             Env::plugin_dir(PLUGIN.as_str()),
@@ -408,12 +408,27 @@ impl Fb2Document {
         let info_path = format!("{cache}/book.txt");
         let fresh = quireink_sdk::read_file(storage, &stamp_path, 256).ok()
             == Some(stamp.clone().into_bytes());
+        // A zipped book is read from its unpacked copy.
+        let zipped = path.to_ascii_lowercase().ends_with(".zip");
+        let file = if zipped {
+            let unpacked = format!("{cache}/book.fb2");
+            if !fresh || storage.size(&unpacked).is_err() {
+                let _ = storage.create_dir(&cache);
+                unpack(storage, path, &unpacked)?;
+            }
+            unpacked
+        } else {
+            path.to_string()
+        };
+        let mut head = [0u8; 4096];
+        let n = storage.read_at(&file, 0, &mut head)?;
+        let encoding = detect(&head[..n]);
         let found = match fresh.then(|| load_info(storage, &info_path)).flatten() {
             Some(found) => found,
             None => {
                 let _ = storage.remove(&paths.end);
                 let _ = storage.create_dir(&cache);
-                let found = scan(storage, path, encoding)?;
+                let found = scan(storage, &file, encoding)?;
                 storage.write(&info_path, save_info(&found).as_bytes())?;
                 storage.write(&stamp_path, stamp.as_bytes())?;
                 found
@@ -425,7 +440,7 @@ impl Fb2Document {
             metadata.title = Some(name.rsplit_once('.').map_or(name, |(s, _)| s).to_string());
         }
         Ok(Self {
-            path: path.to_string(),
+            path: file,
             paths,
             encoding,
             metadata,
@@ -459,6 +474,32 @@ impl Fb2Document {
         self.length.set(length);
         let blocks = (storage.size(&self.paths.index)? / u64::from(INDEX)) as u32;
         Ok((length, blocks))
+    }
+}
+
+/// Unpacks the first `.fb2` of the archive at `zip` into `to`.
+fn unpack(storage: &dyn Storage, zip: &str, to: &str) -> Result<(), DocumentError> {
+    use quireink_sdk::zip::ZipArchive;
+    let bad = |_| DocumentError::Malformed(alloc::borrow::Cow::Borrowed("zip"));
+    let archive = ZipArchive::open(storage, zip).map_err(bad)?;
+    let entry = archive
+        .entries(storage)
+        .filter_map(Result::ok)
+        .find(|e| e.name.to_ascii_lowercase().ends_with(".fb2"))
+        .ok_or(DocumentError::Malformed(alloc::borrow::Cow::Borrowed(
+            "no FictionBook in the archive",
+        )))?;
+    storage.write(to, &[])?;
+    let mut failed = None;
+    archive
+        .stream(storage, &entry, &mut |chunk| {
+            failed = storage.append(to, chunk).err();
+            failed.is_none()
+        })
+        .map_err(bad)?;
+    match failed {
+        Some(e) => Err(DocumentError::Storage(e)),
+        None => Ok(()),
     }
 }
 
@@ -741,6 +782,18 @@ mod tests {
         let doc = Fb2Document::open(&storage, "r.fb2", true).unwrap();
         assert_eq!(doc.metadata().title.as_deref(), Some("Мир"));
         assert_eq!(texts(&doc, &storage)[0].1, "Мир");
+    }
+
+    #[test]
+    fn zipped_books_open_too() {
+        use quireink_sdk::zip::testing::ZipBuilder;
+        let zip = ZipBuilder::new()
+            .deflated("book.fb2", BOOK.as_bytes())
+            .build();
+        let storage = MemoryStorage::new().with("b/test.fb2.zip", zip);
+        let doc = Fb2Document::open(&storage, "b/test.fb2.zip", true).unwrap();
+        assert_eq!(doc.metadata().title.as_deref(), Some("A Test"));
+        assert_eq!(texts(&doc, &storage)[4].1, "Some text and a note1.");
     }
 
     #[test]
