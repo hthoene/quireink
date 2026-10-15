@@ -117,11 +117,18 @@ impl Storage for DirStorage {
         let target = self.resolve(path)?;
         self.forget(path);
         create_parent(&target)?;
+        // To the end by seeking, not with `O_APPEND`: Android's shared
+        // storage (FUSE) does not always honour it and writes at the
+        // start instead, which broke uploads of more than one part.
         OpenOptions::new()
             .create(true)
-            .append(true)
+            .write(true)
+            .truncate(false)
             .open(&target)
-            .and_then(|mut file| file.write_all(data))
+            .and_then(|mut file| {
+                file.seek(SeekFrom::End(0))?;
+                file.write_all(data)
+            })
             .map_err(error)
     }
 
