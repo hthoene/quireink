@@ -11,7 +11,7 @@ repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
 categories = ["no-std"]
-include = ["src", "fonts", "build.rs", "README.md"]
+include = ["src", "fonts", "i18n", "build.rs"]
 
 [features]
 default = ["outline"]
