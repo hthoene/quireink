@@ -5,7 +5,8 @@ use std::time::Instant as StdInstant;
 use quireink_core::{Effects, Kernel, KernelError, SpeechCall};
 use quireink_graphics::Framebuffer;
 use quireink_platform::{
-    Battery, ButtonState, InputEvent, Instant, SystemStatus, WallClock, buttons,
+    Battery, ButtonState, DeviceInfo, InputEvent, Instant, Rotation, SystemStatus, WallClock,
+    buttons,
 };
 
 use crate::budget;
@@ -38,6 +39,8 @@ pub struct Device {
     /// ends.
     /// Sleeping (see `Effects::sleep`): only the power button wakes it.
     asleep: bool,
+    /// How the screen is turned (see `Kernel::rotation`).
+    rotation: Rotation,
     speech: std::collections::VecDeque<(u32, Instant)>,
 }
 
@@ -57,8 +60,16 @@ impl Device {
     ) -> Result<Self, KernelError> {
         budget::set_limit(profile.heap_budget);
         let root = storage.root().to_path_buf();
-        let kernel = build_kernel(profile, user_config.as_deref(), storage)?;
-        let display = profile.device.display;
+        let mut kernel = build_kernel(profile, user_config.as_deref(), storage, Rotation::Deg0)?;
+        // Turned by the settings: built again for the turned size.
+        let rotation = kernel.rotation();
+        if rotation != Rotation::Deg0
+            && let Ok(storage) = DirStorage::new(&root)
+        {
+            drop(kernel);
+            kernel = build_kernel(profile, user_config.as_deref(), storage, rotation)?;
+        }
+        let display = turned(profile.device, rotation).display;
         let controller = Framebuffer::new(display.width, display.height, display.format)
             .map_err(KernelError::Graphics)?;
         let mut device = Self {
@@ -73,6 +84,7 @@ impl Device {
             servers: quireink_serve::Servers::new(|| {}),
             speech: std::collections::VecDeque::new(),
             asleep: false,
+            rotation,
             clock: if simulated_time {
                 Clock::Simulated(0)
             } else {
@@ -244,6 +256,11 @@ impl Device {
             self.speak(call);
         }
         self.report_warnings();
+        // Turned: built again for the turned size.
+        if self.kernel.rotation() != self.rotation {
+            self.rotation = self.kernel.rotation();
+            self.restart();
+        }
     }
 
     /// Speech, emulated: the text is logged and takes as long as it would
@@ -294,10 +311,24 @@ impl Device {
         if let Err(e) = swapped {
             return eprintln!("restart: {e}");
         }
-        match build_kernel(self.profile, self.user_config.as_deref(), storage) {
+        match build_kernel(
+            self.profile,
+            self.user_config.as_deref(),
+            storage,
+            self.rotation,
+        ) {
             Ok(new) => {
                 let kernel = &mut self.kernel;
                 budget::track(|| drop(std::mem::replace(kernel, new)));
+                let display = turned(self.profile.device, self.rotation).display;
+                if (display.width, display.height) != (self.panel.width(), self.panel.height()) {
+                    if let Ok(controller) =
+                        Framebuffer::new(display.width, display.height, display.format)
+                    {
+                        self.controller = controller;
+                    }
+                    self.panel = Panel::new(display.width, display.height, display.color);
+                }
                 self.report_warnings();
                 self.start();
             }
@@ -319,6 +350,7 @@ fn build_kernel(
     profile: &'static Profile,
     user_config: Option<&str>,
     storage: DirStorage,
+    rotation: Rotation,
 ) -> Result<Kernel, KernelError> {
     budget::track(|| {
         let fonts = if profile.font_packs {
@@ -326,14 +358,15 @@ fn build_kernel(
         } else {
             quireink_app::Fonts::Outline
         };
-        let mut device = profile.device;
+        let mut device = turned(profile.device, rotation);
         device.input.keys = profile.buttons;
         let mut builder = Kernel::builder(device)
             .storage(storage)
             .glyph_cache(profile.glyph_cache)
             .network(true)
             .speech(profile.speech)
-            .sleep(profile.sleep);
+            .sleep(profile.sleep)
+            .rotation(true);
         // Scalable fonts only where the emulated device renders them.
         if !profile.font_packs {
             builder = builder.font_dir("fonts");
@@ -350,4 +383,14 @@ fn build_kernel(
         }
         builder.build()
     })
+}
+
+/// `device` with its screen turned by `rotation`: on its side, width and
+/// height trade places.
+fn turned(mut device: DeviceInfo, rotation: Rotation) -> DeviceInfo {
+    if matches!(rotation, Rotation::Deg90 | Rotation::Deg270) {
+        let display = &mut device.display;
+        (display.width, display.height) = (display.height, display.width);
+    }
+    device
 }

@@ -43,6 +43,10 @@ pub enum MenuNeed {
     /// A device where QuireInk shows the sleep screen
     /// ([`Env::sleep`](crate::Env)), hidden elsewhere.
     Sleep,
+    /// A device whose screen QuireInk can turn
+    /// ([`settings::ROTATION`](crate::builtin::settings::ROTATION)),
+    /// hidden elsewhere.
+    Rotation,
     /// A device without a touch screen, where it is the way to do what a
     /// tap or a long press does elsewhere (e.g. choosing a link). On touch
     /// devices it is left out of the menus plugins define; users can still
@@ -79,6 +83,8 @@ pub struct Menus {
     touch: bool,
     mute: bool,
     sleeps: bool,
+    /// The screen can be turned.
+    turns: bool,
 }
 
 impl Menus {
@@ -111,6 +117,12 @@ impl Menus {
         self.sleeps = sleeps;
     }
 
+    /// Whether the screen can be turned here, for entries that need it
+    /// ([`MenuNeed::Rotation`]).
+    pub fn set_rotation(&mut self, turns: bool) {
+        self.turns = turns;
+    }
+
     /// Offers `item` only where `need` is met.
     pub fn set_need(&mut self, item: Id, need: MenuNeed) {
         self.needs.insert(item, need);
@@ -136,6 +148,7 @@ impl Menus {
         match self.needs.get(item) {
             Some(MenuNeed::Speech) => !self.mute,
             Some(MenuNeed::Sleep) => self.sleeps,
+            Some(MenuNeed::Rotation) => self.turns,
             Some(MenuNeed::NoTouch) => listed || !self.touch,
             None => true,
         }

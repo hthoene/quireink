@@ -366,6 +366,22 @@ impl Plugin for CorePlugin {
         r.set_menu_need(settings::SLEEP_AFTER, quireink_sdk::MenuNeed::Sleep)?;
         r.add_setting(
             SettingSpec::new(
+                settings::ROTATION,
+                "core.setting.rotation",
+                SettingKind::Choice(
+                    settings::ROTATIONS
+                        .iter()
+                        .map(|r| Cow::Borrowed(*r))
+                        .collect(),
+                ),
+                SettingValue::Text(Cow::Borrowed(settings::ROTATIONS[0])),
+            )
+            .group(groups::DISPLAY)
+            .description("core.setting.rotation.help"),
+        )?;
+        r.set_menu_need(settings::ROTATION, quireink_sdk::MenuNeed::Rotation)?;
+        r.add_setting(
+            SettingSpec::new(
                 settings::NOTICE_SECONDS,
                 "core.setting.notice-seconds",
                 SettingKind::Int { min: 1, max: 60 },

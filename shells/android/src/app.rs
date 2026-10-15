@@ -63,6 +63,9 @@ struct Running {
     speech: crate::speech::Speech,
     /// The screen is kept on (while reading aloud).
     awake: bool,
+    /// How the system was asked to turn the screen (see
+    /// `Kernel::rotation`).
+    rotation: Rotation,
 }
 
 /// How often the battery and time zone are read again.
@@ -113,9 +116,21 @@ fn android_main(app: AndroidApp) {
                         }
                     }
                 }
-                MainEvent::RedrawNeeded { .. } | MainEvent::WindowResized { .. } => {
-                    if let (Some(window), Some(running)) = (&window, &running) {
-                        present(window, &running.frame);
+                MainEvent::RedrawNeeded { .. }
+                | MainEvent::WindowResized { .. }
+                | MainEvent::ConfigChanged { .. } => {
+                    if let (Some(window), Some(running)) = (&window, running.as_mut()) {
+                        // Turned: the kernel is built again for the new size.
+                        let size = (window.width(), window.height());
+                        let frame = (
+                            i32::from(running.frame.width()),
+                            i32::from(running.frame.height()),
+                        );
+                        if size == frame {
+                            present(window, &running.frame);
+                        } else {
+                            running.restart = true;
+                        }
                     }
                 }
                 MainEvent::Resume { .. } => {
@@ -352,7 +367,8 @@ fn start_kernel(
         .plugin_dir("plugins")
         .network(true)
         .system_clipboard(true)
-        .speech(true);
+        .speech(true)
+        .rotation(true);
     builder = match shared {
         Some(shared) => builder
             .storage(removable.into_iter().fold(
@@ -416,6 +432,7 @@ fn start_kernel(
         },
         speech: crate::speech::Speech::new(app),
         awake: false,
+        rotation: Rotation::Deg0,
     };
     apply(&mut running, effects);
     Some(running)
@@ -472,6 +489,12 @@ fn apply(state: &mut Running, effects: Effects) -> bool {
         state.speech.apply(call);
     }
     state.restart |= effects.restart();
+    // The system turns the window; its new size comes as an event.
+    let rotation = state.kernel.rotation();
+    if rotation != state.rotation {
+        state.rotation = rotation;
+        turn(&state.app, rotation);
+    }
     if let Some((_, mode)) = effects.refresh() {
         state.refresh = Some(state.refresh.map_or(mode, |m| m.max(mode)));
     }
@@ -483,6 +506,29 @@ fn apply(state: &mut Running, effects: Effects) -> bool {
         .kernel
         .render(&mut |top, rows| frame.write_rows(top, rows));
     true
+}
+
+/// Asks the system to turn the screen.
+fn turn(app: &AndroidApp, rotation: Rotation) {
+    // `ActivityInfo.SCREEN_ORIENTATION_*`.
+    let orientation = match rotation {
+        Rotation::Deg0 => 1,
+        Rotation::Deg90 => 0,
+        Rotation::Deg180 => 9,
+        Rotation::Deg270 => 8,
+    };
+    let turned = access::with_activity(app, |env, activity| {
+        env.call_method(
+            activity,
+            "setRequestedOrientation",
+            "(I)V",
+            &[jni::objects::JValue::Int(orientation)],
+        )?;
+        Ok(())
+    });
+    if turned.is_none() {
+        log::warn!("cannot turn the screen");
+    }
 }
 
 /// Copies the whole frame into the window.

@@ -212,6 +212,7 @@ pub struct KernelBuilder {
     system_clipboard: bool,
     speech: bool,
     sleep: bool,
+    rotation: bool,
     frame_rows: Option<u16>,
     storage: Option<Box<dyn Storage>>,
     setting_defaults: Vec<(String, String)>,
@@ -315,6 +316,14 @@ impl KernelBuilder {
         self
     }
 
+    /// The shell turns the screen as the setting
+    /// [`settings::ROTATION`](quireink_sdk::builtin::settings::ROTATION)
+    /// says (see [`Kernel::rotation`]); without, it is not offered.
+    pub fn rotation(mut self, available: bool) -> Self {
+        self.rotation = available;
+        self
+    }
+
     /// Memory for glyphs rasterized at runtime (default 32 KiB). Bitmap font
     /// packs do not use it.
     pub fn glyph_cache(mut self, bytes: usize) -> Self {
@@ -403,6 +412,7 @@ impl KernelBuilder {
         let (touch, speech) = (kernel.shared.device.input.touch, kernel.shared.speech);
         kernel.shared.menus.set_device(touch, speech);
         kernel.shared.menus.set_sleep(kernel.shared.sleep);
+        kernel.shared.menus.set_rotation(self.rotation);
 
         // Passwords and keys.
         if let Ok(data) = quireink_sdk::read_file(
@@ -664,11 +674,29 @@ impl Kernel {
             system_clipboard: false,
             speech: false,
             sleep: false,
+            rotation: false,
             frame_rows: None,
             storage: None,
             setting_defaults: Vec::new(),
             plugin_dirs: Vec::new(),
             font_dirs: Vec::new(),
+        }
+    }
+
+    /// How the screen should be turned, by the setting
+    /// [`settings::ROTATION`](quireink_sdk::builtin::settings::ROTATION):
+    /// quarter turns from upright. Shells that turn it (see
+    /// [`KernelBuilder::rotation`]) check it after changes and build the
+    /// kernel anew for the turned size.
+    pub fn rotation(&self) -> quireink_platform::Rotation {
+        use quireink_platform::Rotation;
+        use quireink_sdk::builtin::settings;
+        let value = self.shared.settings.text(settings::ROTATION.as_str());
+        match settings::ROTATIONS.iter().position(|r| *r == value) {
+            Some(1) => Rotation::Deg90,
+            Some(2) => Rotation::Deg180,
+            Some(3) => Rotation::Deg270,
+            _ => Rotation::Deg0,
         }
     }
 

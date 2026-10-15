@@ -270,6 +270,17 @@ pub mod settings {
     /// ([`Env::sleep`](crate::Env)). Turning pages, also by themselves,
     /// counts as use; reading aloud, downloads and servers keep it awake.
     pub const SLEEP_AFTER: Id = Id::new_static("core.sleep-after");
+    /// How the screen is turned: one of [`ROTATIONS`], where the shell
+    /// can turn it (see [`MenuNeed::Rotation`](crate::MenuNeed)).
+    pub const ROTATION: Id = Id::new_static("core.rotation");
+    /// The values of [`ROTATION`]: upright, on its side (landscape),
+    /// upside down, on its other side.
+    pub const ROTATIONS: [&str; 4] = [
+        "core.rotation.upright",
+        "core.rotation.landscape",
+        "core.rotation.upside-down",
+        "core.rotation.landscape-flipped",
+    ];
     /// Margin of menus and lists, in millimetres.
     pub const UI_MARGIN: Id = Id::new_static("core.ui-margin");
     /// Height of list rows, in percent of a line of text.
