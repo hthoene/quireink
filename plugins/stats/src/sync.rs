@@ -22,13 +22,17 @@ use quireink_sdk::{
     RefreshMode, Screen, SettingValue, http_params,
 };
 
+use quireink_sdk::secrets::SecretChange;
+
 use crate::merge::{self, Outcome};
 
-/// The folder (its address) and the user; the password is kept in the
-/// plugin's folder.
+/// The folder (its address) and the user; the password is kept with the
+/// other passwords and keys (see `quireink_sdk::secrets`) as [`SECRET`].
 pub const URL: Id = Id::new_static("stats.webdav-url");
 pub const USER: Id = Id::new_static("stats.webdav-user");
 pub(crate) const SCREEN: Id = Id::new_static("stats.sync");
+/// The password.
+pub(crate) const SECRET: &str = "stats.webdav";
 
 const DOWNLOADED: Id = Id::new_static("stats.downloaded");
 const UPLOADED: Id = Id::new_static("stats.uploaded");
@@ -77,31 +81,37 @@ pub(crate) fn folder(text: &str) -> String {
     }
 }
 
-fn password(env: &Env<'_>) -> String {
+fn password<'a>(env: &Env<'a>) -> &'a str {
+    env.secrets.get(SECRET).unwrap_or_default()
+}
+
+/// Keeps the password, or removes it if empty.
+fn save_password(password: &str) -> Command {
+    let password = password.trim();
+    Command::SetSecret(if password.is_empty() {
+        SecretChange::remove(SECRET)
+    } else {
+        SecretChange::keep(SECRET, "stats.secret", password)
+    })
+}
+
+/// Moves a password kept in the plugin's folder by earlier versions to
+/// the other passwords and keys.
+pub(crate) fn move_password(env: &Env<'_>, out: &mut Vec<Command>) {
     let path = file("webdav.ini");
     let Ok(data) = quireink_sdk::read_file(env.storage, &path, 4096) else {
-        return String::new();
+        return;
     };
     let text = core::str::from_utf8(&data).unwrap_or_default();
-    quireink_sdk::config::parse(text)
+    let old = quireink_sdk::config::parse(text)
         .filter_map(Result::ok)
         .find(|e| e.key == "password")
         .map(|e| e.value.as_str().into_owned())
-        .unwrap_or_default()
-}
-
-fn save_password(env: &Env<'_>, password: &str) {
-    let mut quoted = String::from("\"");
-    for c in password.chars() {
-        match c {
-            '"' => quoted.push_str("\\\""),
-            '\\' => quoted.push_str("\\\\"),
-            c => quoted.push(c),
-        }
+        .unwrap_or_default();
+    if !old.is_empty() && env.secrets.get(SECRET).is_none() {
+        out.push(save_password(&old));
     }
-    quoted.push('"');
-    let text = format!("[webdav]\npassword = {quoted}\n");
-    let _ = env.storage.write(&file("webdav.ini"), text.as_bytes());
+    let _ = env.storage.remove(&path);
 }
 
 fn request(env: &Env<'_>, method: &str, reply: Id) -> HttpRequest {
@@ -111,7 +121,7 @@ fn request(env: &Env<'_>, method: &str, reply: Id) -> HttpRequest {
     if !user.is_empty() {
         request.headers.push((
             String::from("Authorization"),
-            quireink_sdk::web::basic_auth(user, &password(env)),
+            quireink_sdk::web::basic_auth(user, password(env)),
         ));
     }
     request
@@ -280,6 +290,12 @@ pub(crate) fn register(
     sync: SharedSync,
 ) -> Result<(), quireink_sdk::RegisterError> {
     use quireink_sdk::{ScreenSpec, SettingKind, SettingSpec};
+    r.subscribe(
+        quireink_sdk::builtin::events::STARTED,
+        alloc::boxed::Box::new(|env: &Env<'_>, _: &Params, out: &mut Vec<Command>| {
+            move_password(env, out)
+        }),
+    )?;
     r.add_setting(
         SettingSpec::new(
             URL,
@@ -514,7 +530,6 @@ impl Screen for SyncScreen {
 
     fn on_event(&mut self, event: &Id, params: &Params, cx: &mut Cx<'_, '_>) {
         let text = params.get(params::TEXT).unwrap_or_default();
-        let env = *cx.env();
         if *event == URL_ENTERED {
             let value = SettingValue::Text(Cow::Owned(folder(text)));
             cx.command(Command::SetSetting(URL, value));
@@ -524,7 +539,7 @@ impl Screen for SyncScreen {
             cx.command(Command::SetSetting(USER, value));
             self.list.focus = 2;
         } else if *event == PASSWORD_ENTERED {
-            save_password(&env, text);
+            cx.command(save_password(text));
             self.list.focus = 3;
         } else if *event == DONE {
             return self.show(text.to_string(), cx);

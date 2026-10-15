@@ -33,7 +33,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::cell::RefCell;
 
-use quireink_sdk::builtin::{groups, menus, params};
+use quireink_sdk::builtin::{events, groups, menus, params};
 use quireink_sdk::ui::choice::Choice;
 use quireink_sdk::{
     ActionSpec, Command, Env, HttpRequest, Id, Manifest, MenuEntry, Params, Plugin, RegisterError,
@@ -127,10 +127,7 @@ fn read_list(
 
 /// The catalogs marked for syncing.
 fn marked(env: &Env<'_>) -> Vec<Catalog> {
-    catalogs::load(env.storage)
-        .into_iter()
-        .filter(|c| c.sync)
-        .collect()
+    catalogs::load(env).into_iter().filter(|c| c.sync).collect()
 }
 
 /// The OPDS plugin.
@@ -195,6 +192,12 @@ impl Plugin for Opds {
         })?;
         r.add_icon(OPEN, Cow::Borrowed("cloud-download"))?;
         r.add_icon(SYNC, Cow::Borrowed("refresh"))?;
+        r.subscribe(
+            events::STARTED,
+            Box::new(|env: &Env<'_>, _: &Params, out: &mut Vec<Command>| {
+                catalogs::move_passwords(env, out);
+            }),
+        )?;
         for (event, book) in [(sync::FEED_LOADED, false), (sync::BOOK_LOADED, true)] {
             let shared = state.clone();
             r.subscribe(

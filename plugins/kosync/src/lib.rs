@@ -38,6 +38,7 @@ use core::cell::RefCell;
 use quireink_sdk::builtin::{events, params};
 use quireink_sdk::document::Locator;
 use quireink_sdk::json;
+use quireink_sdk::secrets::SecretChange;
 use quireink_sdk::{
     ActionSpec, Arg, Command, Env, HttpRequest, Id, Instant, Manifest, MenuEntry, Params, Plugin,
     RegisterError, Registrar, SDK_VERSION, ScreenSpec, SettingGroupSpec, SettingKind, SettingSpec,
@@ -90,8 +91,6 @@ struct Position {
 #[derive(Debug, Default)]
 struct State {
     loaded: bool,
-    /// MD5 of the password, from the account file.
-    key: Option<String>,
     device_id: String,
     current: Option<Position>,
     /// The position last sent.
@@ -111,9 +110,12 @@ fn dir() -> String {
     Env::plugin_dir(PLUGIN.as_str())
 }
 
-/// The file with the account's key.
-fn key_file() -> String {
-    format!("{}/account.ini", dir())
+/// The account's key (the MD5 of its password), kept with the other
+/// passwords and keys (see `quireink_sdk::secrets`).
+pub(crate) const SECRET: &str = "kosync.key";
+
+fn key<'a>(env: &Env<'a>) -> Option<&'a str> {
+    env.secrets.get(SECRET).filter(|k| !k.is_empty())
 }
 
 fn read_value(env: &Env<'_>, file: &str, key: &str) -> Option<String> {
@@ -125,17 +127,29 @@ fn read_value(env: &Env<'_>, file: &str, key: &str) -> Option<String> {
         .map(|e| e.value.as_str().into_owned())
 }
 
-/// Saves the key of a signed-in account; `None` signs out.
-pub(crate) fn save_key(env: &Env<'_>, key: Option<&str>) {
-    match key {
-        Some(key) => {
-            let text = format!("[account]\nkey = {key}\n");
-            let _ = env.storage.write(&key_file(), text.as_bytes());
-        }
-        None => {
-            let _ = env.storage.remove(&key_file());
-        }
+/// Keeps the key of a signed-in account; `None` signs out. It cannot be
+/// typed anew in the list of passwords and keys: it is no password.
+pub(crate) fn save_key(key: Option<&str>) -> Command {
+    Command::SetSecret(match key {
+        Some(key) => SecretChange {
+            changeable: false,
+            ..SecretChange::keep(SECRET, "kosync.secret", key)
+        },
+        None => SecretChange::remove(SECRET),
+    })
+}
+
+/// Moves a key kept in the plugin's folder by earlier versions to the
+/// other passwords and keys.
+fn move_key(env: &Env<'_>, out: &mut Vec<Command>) {
+    let file = format!("{}/account.ini", dir());
+    let Some(old) = read_value(env, &file, "key") else {
+        return;
+    };
+    if !old.is_empty() && key(env).is_none() {
+        out.push(save_key(Some(&old)));
     }
+    let _ = env.storage.remove(&file);
 }
 
 impl State {
@@ -144,7 +158,6 @@ impl State {
             return;
         }
         self.loaded = true;
-        self.key = read_value(env, &key_file(), "key").filter(|k| !k.is_empty());
         if !self.device_id.is_empty() {
             return;
         }
@@ -170,7 +183,7 @@ impl State {
     }
 
     fn signed_in(&self, env: &Env<'_>) -> bool {
-        !env.settings.text(USER.as_str()).is_empty() && self.key.is_some()
+        !env.settings.text(USER.as_str()).is_empty() && key(env).is_some()
     }
 
     fn digest(&mut self, env: &Env<'_>, path: &str) -> Option<String> {
@@ -193,8 +206,7 @@ impl State {
         params: Params,
     ) -> Option<Command> {
         let user = env.settings.text(USER.as_str());
-        let key = self.key.as_ref()?;
-        let auth = Some((user, key.as_str()));
+        let auth = Some((user, key(env)?));
         Some(Command::Http(server_request(
             env, method, path, body, reply, params, auth,
         )))
@@ -450,6 +462,10 @@ impl Plugin for Kosync {
             factory: Box::new(|env, params| Box::new(confirm::ConfirmScreen::new(env, params))),
         })?;
 
+        r.subscribe(
+            events::STARTED,
+            Box::new(|env: &Env<'_>, _: &Params, out: &mut Vec<Command>| move_key(env, out)),
+        )?;
         let s = state.clone();
         r.subscribe(
             events::BOOK_OPENED,

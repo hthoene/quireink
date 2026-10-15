@@ -4,7 +4,8 @@
 //!
 //! DeepL needs an API key of one's own: free at deepl.com for up to
 //! 500,000 characters a month. Without one, the panel says so and a tap
-//! asks for it; it is kept as a secret setting (shown as dots). The text
+//! asks for it; it is kept with the other passwords and keys (see
+//! `quireink_sdk::secrets`), where it can be changed or removed. The text
 //! is translated into the language chosen (setting `translate.to`), by
 //! default QuireInk's own.
 //!
@@ -22,6 +23,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use quireink_sdk::builtin::{actions, groups, params, slots};
+use quireink_sdk::secrets::SecretChange;
 use quireink_sdk::ui::{self, UiStyle};
 use quireink_sdk::web::encode;
 use quireink_sdk::{
@@ -179,18 +181,6 @@ impl Plugin for Translate {
             .group(groups::READING)
             .section(SECTION)
             .description("translate.setting.to.help"),
-        )?;
-        r.add_setting(
-            SettingSpec::new(
-                KEY,
-                "translate.setting.key",
-                SettingKind::Text,
-                SettingValue::Text(Cow::Borrowed("")),
-            )
-            .group(groups::READING)
-            .section(SECTION)
-            .secret()
-            .description("translate.setting.key.help"),
         )?;
         r.add_screen(ScreenSpec {
             id: SCREEN,
@@ -426,7 +416,11 @@ impl Screen for Panel {
         }
         self.asked = true;
         let env = *cx.env();
-        let key = env.settings.text(KEY.as_str()).trim().to_string();
+        let key = env
+            .secrets
+            .get(KEY.as_str())
+            .unwrap_or_default()
+            .to_string();
         self.ask(&env, &key, cx);
     }
 
@@ -443,10 +437,11 @@ impl Screen for Panel {
             if key.is_empty() {
                 return;
             }
-            cx.command(Command::SetSetting(
-                KEY,
-                SettingValue::Text(Cow::Owned(key.clone())),
-            ));
+            cx.command(Command::SetSecret(SecretChange::keep(
+                KEY.as_str(),
+                "translate.key",
+                &key,
+            )));
             let loading = env.i18n.tr("translate.loading").to_string();
             self.set_text(&env, loading);
             self.ask(&env, &key, cx);

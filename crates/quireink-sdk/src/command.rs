@@ -207,6 +207,9 @@ pub enum Command {
     /// once the frame is drawn (so a menu that ran this is closed by
     /// then); a message tells where.
     Screenshot(alloc::string::String),
+    /// Keeps or removes a password or key (see
+    /// [`secrets`](crate::secrets)), saved at once.
+    SetSecret(crate::secrets::SecretChange),
     /// Asks the shell to sleep once the frame is shown, where it can
     /// ([`Env::sleep`](crate::Env)); the kernel is told when it wakes.
     Sleep,

@@ -358,6 +358,7 @@ impl KernelBuilder {
                 sleep: self.sleep,
                 slots: Vec::new(),
                 font_dirs: Vec::new(),
+                secrets: Default::default(),
                 storage: self.storage.unwrap_or_else(|| Box::new(NoStorage)),
                 keymap: Keymap::default(),
             },
@@ -402,6 +403,16 @@ impl KernelBuilder {
         let (touch, speech) = (kernel.shared.device.input.touch, kernel.shared.speech);
         kernel.shared.menus.set_device(touch, speech);
         kernel.shared.menus.set_sleep(kernel.shared.sleep);
+
+        // Passwords and keys.
+        if let Ok(data) = quireink_sdk::read_file(
+            kernel.shared.storage.as_ref(),
+            quireink_sdk::secrets::FILE,
+            64 * 1024,
+        ) {
+            let text = String::from_utf8_lossy(&data);
+            kernel.shared.secrets = quireink_sdk::secrets::Secrets::decode(&text);
+        }
 
         // The configuration file on the device, then the shell's overrides.
         let stored = read_config(kernel.shared.storage.as_ref());
@@ -1914,6 +1925,22 @@ impl Kernel {
             Command::SetPluginEnabled(id, enabled) => self.set_plugin_enabled(&id, enabled),
             Command::Restart => self.restart = true,
             Command::Sleep => self.sleep = self.shared.sleep,
+            Command::SetSecret(change) => {
+                use quireink_sdk::secrets;
+                self.shared.secrets.apply(change);
+                let text = self.shared.secrets.encode();
+                let storage = self.shared.storage.as_ref();
+                let _ = storage.create_dir(".quireink");
+                let saved = if self.shared.secrets.is_empty() {
+                    storage.remove(secrets::FILE).or(Ok(()))
+                } else {
+                    storage.write(secrets::FILE, text.as_bytes())
+                };
+                if let Err(error) = saved {
+                    let message = format!("{}: {error}", secrets::FILE);
+                    self.warn(WarningSource::Runtime, None, message);
+                }
+            }
             Command::Screenshot(path) => {
                 // The whole screen is drawn anew, and saved as it is.
                 self.screenshot = Some(path);
@@ -2576,6 +2603,8 @@ struct Shared {
     slots: Vec<Id>,
     /// Folders fonts are read from.
     font_dirs: Vec<String>,
+    /// Passwords and keys (see [`quireink_sdk::secrets`]).
+    secrets: quireink_sdk::secrets::Secrets,
     storage: Box<dyn Storage>,
     keymap: Keymap,
 }
@@ -2604,6 +2633,7 @@ impl Shared {
             sleep: self.sleep,
             slots: &self.slots,
             font_dirs: &self.font_dirs,
+            secrets: &self.secrets,
             storage: self.storage.as_ref(),
             keys: &self.keymap,
         }

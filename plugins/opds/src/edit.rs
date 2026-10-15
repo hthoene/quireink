@@ -91,10 +91,7 @@ impl EditScreen {
             .get(ID)
             .and_then(|i| i.parse().ok())
             .unwrap_or(usize::MAX);
-        let catalog = catalogs::load(env.storage)
-            .get(index)
-            .cloned()
-            .unwrap_or_default();
+        let catalog = catalogs::load(env).get(index).cloned().unwrap_or_default();
         Self {
             list: ListView::new(area, style.noted_row()).focus_on_keys(env),
             style,
@@ -104,11 +101,15 @@ impl EditScreen {
         }
     }
 
-    fn save(&self, env: &Env<'_>) {
-        let mut all = catalogs::load(env.storage);
+    fn save(&self, env: &Env<'_>, cx: &mut Cx<'_, '_>) {
+        let mut all = catalogs::load(env);
         if let Some(slot) = all.get_mut(self.index) {
             *slot = self.catalog.clone();
-            catalogs::save(env.storage, &all);
+            let mut out = Vec::new();
+            catalogs::save(env, &all, &mut out);
+            for command in out {
+                cx.command(command);
+            }
         }
     }
 
@@ -132,14 +133,14 @@ impl EditScreen {
         };
         if field == Field::WebDav {
             self.catalog.webdav = !self.catalog.webdav;
-            self.save(&env);
+            self.save(&env, cx);
             cx.request_redraw();
             cx.request_refresh(RefreshMode::Fast);
             return;
         }
         if field == Field::Sync {
             self.catalog.sync = !self.catalog.sync;
-            self.save(&env);
+            self.save(&env, cx);
             cx.request_redraw();
             cx.request_refresh(RefreshMode::Fast);
             return;
@@ -249,7 +250,7 @@ impl Screen for EditScreen {
         if *event == FOLDER_CHOSEN {
             let folder = params.get(params::PATH).unwrap_or_default();
             self.catalog.folder = folder.trim_matches('/').to_string();
-            self.save(&env);
+            self.save(&env, cx);
             cx.request_redraw();
             cx.request_refresh(RefreshMode::Fast);
             return;
@@ -272,7 +273,7 @@ impl Screen for EditScreen {
             Field::Folder => c.folder = trimmed.trim_matches('/').to_string(),
             _ => return,
         }
-        self.save(&env);
+        self.save(&env, cx);
         cx.request_redraw();
         cx.request_refresh(RefreshMode::Fast);
     }

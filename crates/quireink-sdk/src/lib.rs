@@ -46,6 +46,7 @@ pub mod json;
 pub mod keys;
 pub mod md5;
 pub mod qr;
+pub mod secrets;
 /// Reading and writing SQLite database files.
 pub mod sqlite {
     pub use quireink_sqlite::*;

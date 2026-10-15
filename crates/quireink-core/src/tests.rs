@@ -1290,6 +1290,47 @@ fn copied_text_reaches_plugins_and_the_shell() {
 }
 
 #[test]
+fn secrets_are_kept_apart_and_read_at_start() {
+    use quireink_sdk::secrets::{FILE, SecretChange};
+    let mut kernel = Kernel::builder(DEVICE)
+        .storage(quireink_sdk::MemoryStorage::new())
+        .build()
+        .unwrap();
+    kernel.start(Instant(0));
+    kernel
+        .output
+        .commands
+        .push(Command::SetSecret(SecretChange::keep(
+            "a.key", "a.label", "hunter2",
+        )));
+    kernel.run_commands();
+    assert_eq!(
+        kernel.shared.env(Instant(0)).secrets.get("a.key"),
+        Some("hunter2")
+    );
+    let data = quireink_sdk::read_file(kernel.shared.storage.as_ref(), FILE, 4096).unwrap();
+    assert!(!String::from_utf8_lossy(&data).contains("hunter2"));
+    // Read again at the next start.
+    let mut kernel = Kernel::builder(DEVICE)
+        .storage(quireink_sdk::MemoryStorage::new().with(FILE, data))
+        .build()
+        .unwrap();
+    kernel.start(Instant(0));
+    assert_eq!(
+        kernel.shared.env(Instant(0)).secrets.get("a.key"),
+        Some("hunter2")
+    );
+    // The last one removed, the file goes.
+    kernel
+        .output
+        .commands
+        .push(Command::SetSecret(SecretChange::remove("a.key")));
+    kernel.run_commands();
+    assert!(kernel.shared.env(Instant(0)).secrets.is_empty());
+    assert!(!kernel.shared.storage.exists(FILE));
+}
+
+#[test]
 fn changed_settings_are_saved_and_announced() {
     let log = log();
     let storage = quireink_sdk::MemoryStorage::new()

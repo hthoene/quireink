@@ -119,7 +119,7 @@ impl BrowseScreen {
         let catalog = params
             .get(ID)
             .and_then(|i| i.parse::<usize>().ok())
-            .and_then(|i| catalogs::load(env.storage).get(i).cloned())
+            .and_then(|i| catalogs::load(env).get(i).cloned())
             .unwrap_or_default();
         Self {
             list: ListView::new(area, style.noted_row()).focus_on_keys(env),

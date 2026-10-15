@@ -62,6 +62,9 @@ pub struct Env<'a> {
     /// QuireInk's own (where new fonts go); empty where the device has
     /// only its built-in fonts.
     pub font_dirs: &'a [alloc::string::String],
+    /// Passwords and keys, kept for every plugin in one place (see
+    /// [`secrets`](crate::secrets)).
+    pub secrets: &'a crate::secrets::Secrets,
     /// The device's storage. Plugins keep their own files below
     /// [`Env::plugin_dir`].
     pub storage: &'a dyn Storage,

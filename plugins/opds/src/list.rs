@@ -60,7 +60,7 @@ impl ListScreen {
         Self {
             list: ListView::new(area, style.noted_row()).focus_on_keys(env),
             status,
-            catalogs: catalogs::load(env.storage),
+            catalogs: catalogs::load(env),
             sync,
             message: None,
             style,
@@ -83,8 +83,12 @@ impl ListScreen {
         cx.request_refresh(RefreshMode::Partial);
     }
 
-    fn save(&self, env: &Env<'_>) {
-        catalogs::save(env.storage, &self.catalogs);
+    fn save(&self, env: &Env<'_>, cx: &mut Cx<'_, '_>) {
+        let mut out = Vec::new();
+        catalogs::save(env, &self.catalogs, &mut out);
+        for command in out {
+            cx.command(command);
+        }
     }
 
     fn activate(&mut self, index: usize, cx: &mut Cx<'_, '_>) {
@@ -172,7 +176,7 @@ impl ListScreen {
             )),
             "remove" => {
                 self.catalogs.remove(i);
-                self.save(&env);
+                self.save(&env, cx);
                 let len = self.rows().len();
                 self.list.focus = self.list.focus.min(len - 1);
                 self.redraw(cx);
@@ -315,7 +319,7 @@ impl Screen for ListScreen {
 
     fn on_show(&mut self, cx: &mut Cx<'_, '_>) {
         // Back from editing a catalog.
-        self.catalogs = catalogs::load(cx.env().storage);
+        self.catalogs = catalogs::load(cx.env());
         let len = self.rows().len();
         self.list.focus = self.list.focus.min(len - 1);
         self.redraw(cx);
@@ -386,7 +390,7 @@ impl Screen for ListScreen {
                 format!("https://{text}")
             };
             self.catalogs.push(Catalog::new(&url));
-            self.save(&env);
+            self.save(&env, cx);
             let i = self.catalogs.len() - 1;
             cx.command(Command::OpenScreen(
                 EDIT_SCREEN,

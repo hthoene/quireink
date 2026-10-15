@@ -200,7 +200,7 @@ impl AccountScreen {
     }
 
     fn sign_out(&mut self, cx: &mut Cx<'_, '_>) {
-        save_key(cx.env(), None);
+        cx.command(save_key(None));
         self.signed_in.clear();
         cx.command(Command::SetSetting(
             USER,
@@ -216,7 +216,7 @@ impl AccountScreen {
         let ok = if created { "201" } else { "200" };
         if status == ok {
             let key = self.key.clone().unwrap_or_default();
-            save_key(&env, Some(&key));
+            cx.command(save_key(Some(&key)));
             self.signed_in = self.user.clone();
             let user = SettingValue::Text(Cow::Owned(self.user.clone()));
             cx.command(Command::SetSetting(USER, user));

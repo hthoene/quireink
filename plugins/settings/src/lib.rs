@@ -26,6 +26,8 @@
 
 extern crate alloc;
 
+mod secrets;
+
 use alloc::borrow::Cow;
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
@@ -33,6 +35,7 @@ use alloc::vec::Vec;
 
 use quireink_sdk::builtin::{actions, events, groups, menus, params, setting_sections, slots};
 use quireink_sdk::ui::{self, ListChange, ListView, UiStyle};
+use quireink_sdk::{ActionSpec, MenuEntry};
 use quireink_sdk::{
     Canvas, Color, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Level, Manifest, Params,
     Plugin, Priority, Rect, RefreshMode, RegisterError, Registrar, SDK_VERSION, Screen, ScreenSpec,
@@ -93,6 +96,31 @@ impl Plugin for SettingsPlugin {
                 Box::new(Chooser::new(env, id))
             }),
         })?;
+        r.add_screen(ScreenSpec {
+            id: secrets::SCREEN,
+            title: Cow::Borrowed("settings.secrets"),
+            factory: Box::new(|env, _| Box::new(secrets::SecretList::new(env))),
+        })?;
+        r.add_screen(ScreenSpec {
+            id: secrets::SECRET_SCREEN,
+            title: Cow::Borrowed("settings.secrets"),
+            factory: Box::new(|env, params| Box::new(secrets::SecretPage::new(env, params))),
+        })?;
+        r.add_action(ActionSpec {
+            id: secrets::OPEN,
+            title: Cow::Borrowed("settings.secrets"),
+            handler: Some(Box::new(|_: &Env<'_>, out: &mut Vec<Command>| {
+                out.push(Command::OpenScreen(secrets::SCREEN, Params::new()));
+            })),
+        })?;
+        // In the device's part, after the system.
+        r.add_menu_entry(MenuEntry {
+            menu: menus::SETTINGS,
+            item: secrets::OPEN,
+            order: 95,
+        })?;
+        r.add_icon(secrets::OPEN, Cow::Borrowed("lock"))?;
+        r.subscribe(secrets::ENTERED, Box::new(secrets::entered))?;
         r.bind_slot(slots::SETTINGS, SCREEN, Priority::DEFAULT)?;
         r.add_setting(
             SettingSpec::new(
@@ -267,6 +295,8 @@ impl GroupList {
             .menus
             .items(menu)
             .iter()
+            // Passwords and keys only once there are some.
+            .filter(|item| *item.id != secrets::OPEN || !env.secrets.is_empty())
             .map(|item| {
                 let order = env.menus.order_of(menu, item.id.as_str());
                 (
@@ -637,6 +667,7 @@ impl GroupPage {
                                 ui::setting_value(env, spec)
                             },
                         )
+                        .with(params::MODE, if spec.secret { "password" } else { "text" })
                         .with(params::REPLY, TEXT_ENTERED.as_str())
                         .with(ID, spec.id.as_str().to_string()),
                 ));
