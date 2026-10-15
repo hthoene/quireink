@@ -1513,9 +1513,26 @@ impl Screen for ReaderScreen {
             book.go_back(cx);
             Handled::Yes
         } else if *action == actions::MENU || *action == actions::CONFIRM {
+            // As a bar at the top, with the book and where one is in it.
+            let env = *cx.env();
+            let chapter = book
+                .chapter
+                .as_ref()
+                .map(|(_, _, title)| title.clone())
+                .unwrap_or_default();
+            let event = book.event_params(&env);
+            let page = match (event.get(params::PAGE), event.get(params::PAGES)) {
+                (Some(page), Some(pages)) => format!("{page} / {pages}"),
+                _ => format!("{} %", event.get(params::PROGRESS).unwrap_or("0")),
+            };
             cx.command(Command::OpenSlot(
                 slots::MENU,
-                Params::new().with(params::MENU, crate::MENU.as_str()),
+                Params::new()
+                    .with(params::MENU, crate::MENU.as_str())
+                    .with(params::MODE, "bar")
+                    .with(params::TITLE, book.title.clone())
+                    .with(params::TEXT, chapter)
+                    .with(params::PAGE, page),
             ));
             Handled::Yes
         } else {

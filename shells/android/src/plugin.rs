@@ -22,7 +22,8 @@ pub const WARMTH: Id = Id::new_static("android.warmth");
 /// The home screen's shortcuts (see the `home` plugin).
 const HOME_ACTIONS: Id = Id::new_static("home.actions");
 /// The reader's menu (see the `reader` plugin).
-const READER_MENU: Id = Id::new_static("reader.menu");
+/// The reader's quick panel (font, layout and light).
+const READER_PANEL: Id = Id::new_static("reader.layout");
 
 /// The device's frontlight and its levels when QuireInk started.
 #[derive(Clone, Copy)]
@@ -98,7 +99,8 @@ impl AndroidPlugin {
                 SettingValue::Int(i64::from(frontlight.brightness)),
             )
             .group(groups::DISPLAY)
-            .description("android.frontlight.help"),
+            .description("android.frontlight.help")
+            .slider(),
         )?;
         let mut items = vec![FRONTLIGHT];
         if lights.has_warmth() {
@@ -113,12 +115,15 @@ impl AndroidPlugin {
                     SettingValue::Int(i64::from(frontlight.warmth)),
                 )
                 .group(groups::DISPLAY)
-                .description("android.warmth.help"),
+                .description("android.warmth.help")
+                .slider(),
             )?;
             items.push(WARMTH);
         }
+        // In the reader's quick panel, first, and with the device's
+        // settings in the main menu.
         for (n, item) in items.into_iter().enumerate() {
-            for (menu, order) in [(READER_MENU, 32), (menus::MAIN, 35)] {
+            for (menu, order) in [(READER_PANEL, -10), (menus::MAIN, 82)] {
                 r.add_menu_entry(MenuEntry {
                     menu,
                     item: item.clone(),
@@ -126,6 +131,8 @@ impl AndroidPlugin {
                 })?;
             }
         }
+        r.add_icon(FRONTLIGHT, Cow::Borrowed("sun"))?;
+        r.add_icon(WARMTH, Cow::Borrowed("temperature"))?;
         let app = self.app.clone();
         r.subscribe(
             events::SETTING_CHANGED,

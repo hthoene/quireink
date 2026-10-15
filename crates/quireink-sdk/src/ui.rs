@@ -111,6 +111,17 @@ pub fn draw_icon(
     draw_label(canvas, &font, size, x, area, text, color)
 }
 
+/// The width of icon `name` at `size` pixels, 0 if it cannot be drawn.
+pub fn icon_width(env: &Env<'_>, name: &str, size: f32) -> f32 {
+    match (
+        env.fonts.bound(crate::builtin::fonts::ICONS.as_str()),
+        crate::icons::char(name),
+    ) {
+        (Some(font), Some(ch)) => font.advance(size, ch),
+        _ => 0.0,
+    }
+}
+
 /// Whether icons can be drawn (an icon font is there).
 pub fn has_icons(env: &Env<'_>) -> bool {
     env.fonts

@@ -35,6 +35,7 @@ pub const SCREEN: Id = Id::new_static("menu.list");
 /// A menu as a panel of controls.
 pub const PANEL: Id = Id::new_static("menu.panel");
 
+mod bar;
 mod panel;
 mod rows;
 
@@ -59,7 +60,13 @@ impl Plugin for Menu {
         r.add_screen(ScreenSpec {
             id: SCREEN,
             title: Cow::Borrowed("menu.title"),
-            factory: Box::new(|env, params| Box::new(MenuScreen::new(env, params))),
+            factory: Box::new(|env, params| {
+                if params.get(params::MODE) == Some(bar::MODE) {
+                    Box::new(bar::BarScreen::new(env, params))
+                } else {
+                    Box::new(MenuScreen::new(env, params))
+                }
+            }),
         })?;
         r.bind_slot(slots::MENU, SCREEN, Priority::DEFAULT)?;
         r.add_screen(ScreenSpec {
@@ -105,7 +112,7 @@ struct MenuScreen {
 }
 
 /// Parameter: the depth of a submenu.
-const DEPTH: &str = "depth";
+pub(crate) const DEPTH: &str = "depth";
 
 /// The settings plugin's list for choosing a value.
 pub(crate) const CHOOSE_SCREEN: Id = Id::new_static("settings.choose");

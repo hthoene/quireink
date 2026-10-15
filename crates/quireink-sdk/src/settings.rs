@@ -103,6 +103,9 @@ pub struct SettingSpec {
     pub scoped: bool,
     /// How much one step changes a number (e.g. 10 for percentages).
     pub step: i64,
+    /// A number better set by eye than by its value, such as a light's
+    /// brightness: panels show a slider.
+    pub slider: bool,
 }
 
 impl SettingSpec {
@@ -126,7 +129,14 @@ impl SettingSpec {
             editor: None,
             scoped: false,
             step: 1,
+            slider: false,
         }
+    }
+
+    /// A number set with a slider in panels (see [`SettingSpec::slider`]).
+    pub fn slider(mut self) -> Self {
+        self.slider = true;
+        self
     }
 
     /// How much one step (a `+` or `−`) changes a number.

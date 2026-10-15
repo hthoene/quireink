@@ -1,6 +1,8 @@
 //! A menu shown as a panel of controls at the bottom of the screen, for
 //! quick changes while reading: switches become buttons (several to a
-//! row), numbers get `−` and `+`, choices with few options become segments,
+//! row), numbers get `−` and `+` (those marked as sliders, such as the
+//! frontlight, a slider between them), choices with few options become
+//! segments,
 //! other choices open their list, actions become buttons. Changes apply at
 //! once and the panel stays open.
 //!
@@ -34,6 +36,8 @@ enum Control {
     Toggle(Id),
     /// Changes a number by a step down (`-1`) or up (`1`).
     Step(Id, i64),
+    /// A number's slider: a tap sets the value where it lands.
+    Slide(Id),
     /// Sets a choice to this option.
     Option(Id, String),
     /// Opens the setting's list or editor.
@@ -162,6 +166,25 @@ impl PanelScreen {
                 inner.height,
             );
             let controls = match spec(env, &id).map(|s| &s.kind) {
+                // A wide range: − slider +.
+                Some(SettingKind::Int { .. }) if setting.is_some_and(|s| s.slider) => {
+                    let size = ui::button_height(area);
+                    let y = area.y + (area.height - size) / 2;
+                    let minus = Rect::new(rest.x, y, size, size);
+                    let plus = Rect::new(rest.x + rest.width - size, y, size, size);
+                    let gap = style.gap as u16;
+                    let track = Rect::new(
+                        minus.x + size + gap,
+                        y,
+                        rest.width.saturating_sub(2 * (size + gap)),
+                        size,
+                    );
+                    alloc::vec![
+                        (Control::Step(id.clone(), -1), minus),
+                        (Control::Slide(id.clone()), track),
+                        (Control::Step(id.clone(), 1), plus),
+                    ]
+                }
                 // The − and + are placed by the value, as in menus.
                 Some(SettingKind::Int { .. }) if setting.is_some() => alloc::vec![
                     (Control::Step(id.clone(), -1), area),
@@ -268,6 +291,7 @@ impl PanelScreen {
         let steps = row.label.as_ref().and_then(|id| spec(env, id)).filter(|s| {
             matches!(s.kind, SettingKind::Int { .. })
                 && matches!(row.controls.first(), Some((Control::Step(..), _)))
+                && row.controls.len() == 2
         });
         match steps {
             Some(spec) => {
@@ -304,6 +328,8 @@ impl PanelScreen {
             Control::Option(id, option) => {
                 set(cx, id, SettingValue::Text(option.clone().into()));
             }
+            // Set by where it is tapped (see `on_gesture`).
+            Control::Slide(_) => {}
             Control::Open(id) => {
                 let screen = spec(&env, id)
                     .and_then(|s| s.editor.clone())
@@ -358,6 +384,9 @@ impl PanelScreen {
                 )
             }
             Control::Step(_, step) => (false, String::from(if *step < 0 { "−" } else { "+" })),
+            Control::Slide(id) => {
+                return draw_slider(canvas, env, &style, id, rect, focused);
+            }
             Control::Option(id, option) => (
                 env.settings.text(id.as_str()) == option,
                 env.i18n.tr(option).to_string(),
@@ -408,6 +437,59 @@ impl PanelScreen {
         };
         ui::draw_button(canvas, env, &style, rect, &label, on, focused);
     }
+}
+
+/// A slider: a thin track, filled up to the value, with a knob there.
+fn draw_slider(
+    canvas: &mut Canvas<'_>,
+    env: &Env<'_>,
+    style: &UiStyle,
+    id: &Id,
+    rect: Rect,
+    focused: bool,
+) {
+    let Some(SettingKind::Int { min, max }) = spec(env, id).map(|s| s.kind.clone()) else {
+        return;
+    };
+    let value = env.settings.int(id.as_str()).clamp(min, max);
+    let share = (value - min) as f32 / (max - min).max(1) as f32;
+    let knob = (rect.height / 2).max(4);
+    let track = (style.line * 2).max(2) as u16;
+    let mid = rect.y + rect.height / 2;
+    let left = rect.x + knob / 2;
+    let width = rect.width.saturating_sub(knob);
+    let filled = (f32::from(width) * share) as u16;
+    ui::fill(
+        canvas,
+        Rect::new(left, mid - track / 2, width, track),
+        Color::gray(170),
+    );
+    ui::fill(
+        canvas,
+        Rect::new(left, mid - track, filled, track * 2),
+        Color::BLACK,
+    );
+    let knob_rect = Rect::new(left + filled - knob / 2, mid - knob / 2, knob, knob);
+    ui::fill(canvas, knob_rect, Color::BLACK);
+    if focused {
+        canvas.stroke_rect(
+            i32::from(rect.x),
+            i32::from(rect.y),
+            u32::from(rect.width),
+            u32::from(rect.height),
+            ui::button_border(style),
+            Color::BLACK,
+        );
+    }
+}
+
+/// The value of a slider for a tap at `x`.
+fn slider_value(min: i64, max: i64, rect: Rect, x: i32) -> i64 {
+    let knob = i32::from((rect.height / 2).max(4));
+    let left = i32::from(rect.x) + knob / 2;
+    let width = (i32::from(rect.width) - knob).max(1);
+    let share = ((x - left) as f32 / width as f32).clamp(0.0, 1.0);
+    min + ((max - min) as f32 * share + 0.5) as i64
 }
 
 /// Whether a choice's options fit side by side in `area`, readably.
@@ -474,8 +556,11 @@ impl Screen for PanelScreen {
         }
         for (first, row) in self.visible_rows() {
             let label = row.label.as_ref().and_then(|id| spec(env, id));
-            let number =
-                label.filter(|_| matches!(row.controls.first(), Some((Control::Step(..), _))));
+            // A number with − and + by its value (a slider row has three).
+            let number = label.filter(|_| {
+                matches!(row.controls.first(), Some((Control::Step(..), _)))
+                    && row.controls.len() == 2
+            });
             if let Some(spec) = number {
                 // As in menus: title, then [−] value [+].
                 let focus = match self.focus {
@@ -580,7 +665,21 @@ impl Screen for PanelScreen {
                 .map(|(c, _)| c);
             if let Some(control) = control {
                 self.focus = None;
-                self.activate(&control, cx);
+                if let Control::Slide(id) = &control
+                    && let Some((SettingKind::Int { min, max }, rect)) =
+                        spec(&env, id).map(|s| s.kind.clone()).zip(
+                            self.controls()
+                                .find(|(c, _)| *c == control)
+                                .map(|(_, r)| *r),
+                        )
+                {
+                    let value = SettingValue::Int(slider_value(min, max, rect, gesture.start.x));
+                    if env.settings.get(id.as_str()) != Some(&value) {
+                        cx.command(Command::SetSetting(id.clone(), value));
+                    }
+                } else {
+                    self.activate(&control, cx);
+                }
             }
         }
         Handled::Yes
@@ -591,5 +690,21 @@ impl Screen for PanelScreen {
         if *event == events::SETTING_CHANGED {
             self.redraw(cx);
         }
+    }
+}
+
+#[cfg(test)]
+mod slider_tests {
+    use super::*;
+
+    #[test]
+    fn a_tap_sets_the_value_where_it_lands() {
+        // Knob 15 wide: the track runs from 107 to 192.
+        let rect = Rect::new(100, 0, 100, 30);
+        assert_eq!(slider_value(0, 255, rect, 50), 0);
+        assert_eq!(slider_value(0, 255, rect, 107), 0);
+        assert_eq!(slider_value(0, 255, rect, 150), 129);
+        assert_eq!(slider_value(0, 255, rect, 192), 255);
+        assert_eq!(slider_value(0, 255, rect, 400), 255);
     }
 }

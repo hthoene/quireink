@@ -1,5 +1,7 @@
 //! Rows of different heights on pages: entries and the headings of
-//! sections, which take less room and are never focused.
+//! sections, which take less room and are never focused. A section that
+//! goes on over a page break has its heading again at the top of the next
+//! page.
 
 use alloc::vec::Vec;
 use core::ops::Range;
@@ -12,7 +14,8 @@ pub(crate) struct Rows {
     pub area: Rect,
     heights: Vec<u16>,
     headings: Vec<bool>,
-    pages: Vec<Range<usize>>,
+    /// The rows of each page, and the heading repeated at its top.
+    pages: Vec<(Option<usize>, Range<usize>)>,
     /// The focused row; never a heading while there are entries.
     pub focus: usize,
 }
@@ -20,8 +23,9 @@ pub(crate) struct Rows {
 impl Rows {
     /// Rows of `heights` in `area`; `headings` marks the headings.
     pub fn new(area: Rect, heights: Vec<u16>, headings: Vec<bool>) -> Self {
-        let mut pages: Vec<Range<usize>> = Vec::new();
+        let mut pages: Vec<(Option<usize>, Range<usize>)> = Vec::new();
         let mut start = 0;
+        let mut carried: Option<usize> = None;
         let mut used = 0u16;
         for (i, &height) in heights.iter().enumerate() {
             if i > start && used + height > area.height {
@@ -31,13 +35,17 @@ impl Rows {
                 } else {
                     i
                 };
-                pages.push(start..end);
-                used = heights[end..i].iter().sum();
+                pages.push((carried, start..end));
+                // The section going on: its heading again.
+                carried = (!headings[end])
+                    .then(|| (0..end).rev().find(|&h| headings[h]))
+                    .flatten();
+                used = carried.map_or(0, |h| heights[h]) + heights[end..i].iter().sum::<u16>();
                 start = end;
             }
             used += height;
         }
-        pages.push(start..heights.len());
+        pages.push((carried, start..heights.len()));
         let focus = headings.iter().position(|h| !h).unwrap_or(0);
         Self {
             area,
@@ -56,7 +64,7 @@ impl Rows {
     fn page_of(&self, index: usize) -> usize {
         self.pages
             .iter()
-            .position(|p| p.contains(&index))
+            .position(|(_, rows)| rows.contains(&index))
             .unwrap_or(0)
     }
 
@@ -67,14 +75,17 @@ impl Rows {
 
     /// The rows of the page with the focus and where they are.
     pub fn visible(&self) -> Vec<(usize, Rect)> {
-        let page = self.pages[self.page_of(self.focus)].clone();
+        let (carried, rows) = self.pages[self.page_of(self.focus)].clone();
         let mut y = self.area.y;
-        page.map(|i| {
-            let rect = Rect::new(self.area.x, y, self.area.width, self.heights[i]);
-            y += self.heights[i];
-            (i, rect)
-        })
-        .collect()
+        carried
+            .into_iter()
+            .chain(rows)
+            .map(|i| {
+                let rect = Rect::new(self.area.x, y, self.area.width, self.heights[i]);
+                y += self.heights[i];
+                (i, rect)
+            })
+            .collect()
     }
 
     pub fn rect_of(&self, index: usize) -> Option<Rect> {
@@ -131,7 +142,7 @@ impl Rows {
                 None => return ListChange::None,
             }
         };
-        let Some(range) = self.pages.get(target).cloned() else {
+        let Some((_, range)) = self.pages.get(target).cloned() else {
             return ListChange::None;
         };
         match range.clone().find(|&i| !self.is_heading(i)) {
@@ -151,7 +162,7 @@ mod tests {
         let heights = Vec::from([5, 10, 10, 5, 10, 10]);
         let headings = Vec::from([true, false, false, true, false, false]);
         let mut rows = Rows::new(Rect::new(0, 0, 100, 30), heights, headings);
-        assert_eq!(rows.pages, [0..3, 3..6]);
+        assert_eq!(rows.pages, [(None, 0..3), (None, 3..6)]);
         assert_eq!(rows.focus, 1, "the first entry");
         assert_eq!(rows.step(true), ListChange::Focus);
         assert_eq!(rows.step(true), ListChange::Page, "over the heading");
@@ -171,6 +182,19 @@ mod tests {
         let heights = Vec::from([10, 10, 5, 10]);
         let headings = Vec::from([false, false, true, false]);
         let rows = Rows::new(Rect::new(0, 0, 100, 25), heights, headings);
-        assert_eq!(rows.pages, [0..2, 2..4]);
+        assert_eq!(rows.pages, [(None, 0..2), (None, 2..4)]);
+    }
+
+    #[test]
+    fn a_section_going_on_repeats_its_heading() {
+        // Heading, four entries; two entries fit a page with the heading.
+        let heights = Vec::from([5, 10, 10, 10, 10]);
+        let headings = Vec::from([true, false, false, false, false]);
+        let mut rows = Rows::new(Rect::new(0, 0, 100, 25), heights, headings);
+        assert_eq!(rows.pages, [(None, 0..3), (Some(0), 3..5)]);
+        rows.turn(true);
+        let visible: Vec<usize> = rows.visible().into_iter().map(|(i, _)| i).collect();
+        assert_eq!(visible, [0, 3, 4], "the heading first");
+        assert_eq!(rows.focus, 3);
     }
 }
