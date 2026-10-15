@@ -1,18 +1,25 @@
-//! Editing a page of the home screen, as a list that buttons work as well
-//! as taps: the page's widgets (choosing one offers to move it up or down
-//! or to remove it), then *Add a widget*, *Add a page* and *Remove this
-//! page*. Every change is kept at once.
+//! Editing a list of widgets, as a list that buttons work as well as
+//! taps: the widgets (choosing one offers to move it up or down or to
+//! remove it), then *Add a widget*; for a page of the home screen also
+//! *Add a page* and *Remove this page*. Every change is kept at once.
+//!
+//! It edits a page of the home screen (parameter `page`, or `id` with the
+//! page's setting) or any other setting that is a list of widgets
+//! (parameter `id`), e.g. the sleep screen's: such settings name this
+//! screen as their editor.
 
+use alloc::borrow::Cow;
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use quireink_sdk::builtin::{actions, events, params};
+use quireink_sdk::status::item_ids;
 use quireink_sdk::ui::choice;
 use quireink_sdk::ui::{self, ListChange, ListView, UiStyle};
 use quireink_sdk::{
     Arg, Canvas, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Params, Rect, RefreshMode,
-    Screen,
+    Screen, SettingValue,
 };
 
 use crate::pages::{self, MAX_PAGES, STATUS};
@@ -23,6 +30,82 @@ const CHOSEN: Id = Id::new_static("home.edit-chosen");
 /// Parameter: the page edited (0 the first).
 pub(crate) const PAGE: &str = "page";
 const OPTION_LABELS: &str = "home.edit.";
+
+/// What is edited.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Target {
+    /// A page of the home screen (0 the first).
+    Page(usize),
+    /// Another setting that lists widgets.
+    Setting(String),
+}
+
+/// What the parameters ask to edit.
+pub(crate) fn target_of(params: &Params) -> Target {
+    if let Some(page) = params.get(PAGE).and_then(|p| p.parse().ok()) {
+        return Target::Page(page);
+    }
+    let Some(id) = params.get(params::ID) else {
+        return Target::Page(0);
+    };
+    match (0..MAX_PAGES).find(|&i| pages::setting(i).as_str() == id) {
+        Some(page) => Target::Page(page),
+        None => Target::Setting(id.to_string()),
+    }
+}
+
+impl Target {
+    /// Its widgets.
+    fn widgets(&self, env: &Env<'_>) -> Vec<String> {
+        match self {
+            Target::Page(page) => pages::pages(env).get(*page).cloned().unwrap_or_default(),
+            Target::Setting(id) => item_ids(env.settings.text(id))
+                .map(ToString::to_string)
+                .collect(),
+        }
+    }
+
+    /// The commands that keep `widgets` as its list.
+    fn store(&self, env: &Env<'_>, widgets: Vec<String>) -> Vec<Command> {
+        match self {
+            Target::Page(page) => {
+                let mut pages = pages::pages(env);
+                if let Some(list) = pages.get_mut(*page) {
+                    *list = widgets;
+                }
+                pages::store(&pages)
+            }
+            Target::Setting(id) => Id::parse(id)
+                .ok()
+                .map(|id| {
+                    Command::SetSetting(id, SettingValue::Text(Cow::Owned(widgets.join(", "))))
+                })
+                .into_iter()
+                .collect(),
+        }
+    }
+
+    /// The parameters that ask to edit it.
+    fn params(&self) -> Params {
+        match self {
+            Target::Page(page) => Params::new().with(PAGE, format!("{page}")),
+            Target::Setting(id) => Params::new().with(params::ID, id.clone()),
+        }
+    }
+
+    fn title(&self, env: &Env<'_>) -> String {
+        match self {
+            Target::Page(page) => env
+                .i18n
+                .format("home.edit.title", &[("page", Arg::Int(*page as i64 + 1))]),
+            Target::Setting(id) => env
+                .settings
+                .specs()
+                .find(|s| s.id.as_str() == id)
+                .map_or(id.clone(), |s| env.i18n.tr(&s.title).to_string()),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Row {
@@ -36,17 +119,7 @@ pub(crate) struct EditScreen {
     style: UiStyle,
     header: ui::Header,
     list: ListView,
-    page: usize,
-}
-
-/// The page asked for: by number, or by its setting (from the settings).
-pub(crate) fn page_of(params: &Params) -> usize {
-    if let Some(page) = params.get(PAGE).and_then(|p| p.parse().ok()) {
-        return page;
-    }
-    (0..MAX_PAGES)
-        .find(|&i| params.get(params::ID) == Some(pages::setting(i).as_str()))
-        .unwrap_or(0)
+    target: Target,
 }
 
 impl EditScreen {
@@ -60,20 +133,22 @@ impl EditScreen {
             list: ListView::new(area, style.row).focus_on_keys(env),
             style,
             header,
-            page: page_of(params),
+            target: target_of(params),
         }
     }
 
     fn rows(&self, env: &Env<'_>) -> Vec<Row> {
-        let pages = pages::pages(env);
-        let count = pages.get(self.page).map_or(0, Vec::len);
+        let count = self.target.widgets(env).len();
         let mut rows: Vec<Row> = (0..count).map(Row::Widget).collect();
         rows.push(Row::Add);
-        if pages.len() < MAX_PAGES {
-            rows.push(Row::AddPage);
-        }
-        if pages.len() > 1 {
-            rows.push(Row::RemovePage);
+        if let Target::Page(_) = self.target {
+            let pages = pages::pages(env).len();
+            if pages < MAX_PAGES {
+                rows.push(Row::AddPage);
+            }
+            if pages > 1 {
+                rows.push(Row::RemovePage);
+            }
         }
         rows
     }
@@ -83,8 +158,8 @@ impl EditScreen {
         cx.request_refresh(RefreshMode::Fast);
     }
 
-    fn store(&self, pages: &[Vec<String>], cx: &mut Cx<'_, '_>) {
-        for command in pages::store(pages) {
+    fn run(cx: &mut Cx<'_, '_>, commands: Vec<Command>) {
+        for command in commands {
             cx.command(command);
         }
     }
@@ -94,10 +169,9 @@ impl EditScreen {
         let Some(&row) = self.rows(&env).get(index) else {
             return;
         };
-        let mut pages = pages::pages(&env);
         match row {
             Row::Widget(at) => {
-                let list = pages.get(self.page).cloned().unwrap_or_default();
+                let list = self.target.widgets(&env);
                 let Some(id) = list.get(at) else {
                     return;
                 };
@@ -122,21 +196,23 @@ impl EditScreen {
                     &options,
                 ));
             }
-            Row::Add => cx.command(Command::OpenScreen(
-                ADD_SCREEN,
-                Params::new().with(PAGE, format!("{}", self.page)),
-            )),
+            Row::Add => cx.command(Command::OpenScreen(ADD_SCREEN, self.target.params())),
             Row::AddPage => {
+                let mut pages = pages::pages(&env);
                 pages.push(alloc::vec![String::from(STATUS)]);
-                self.page = pages.len() - 1;
-                self.store(&pages, cx);
+                self.target = Target::Page(pages.len() - 1);
+                Self::run(cx, pages::store(&pages));
                 self.list.focus = 0;
                 self.redraw(cx);
             }
             Row::RemovePage => {
-                if self.page < pages.len() && pages.len() > 1 {
-                    pages.remove(self.page);
-                    self.store(&pages, cx);
+                let mut pages = pages::pages(&env);
+                if let Target::Page(page) = self.target
+                    && page < pages.len()
+                    && pages.len() > 1
+                {
+                    pages.remove(page);
+                    Self::run(cx, pages::store(&pages));
                 }
                 cx.command(Command::Back);
             }
@@ -145,10 +221,7 @@ impl EditScreen {
 
     fn chosen(&mut self, option: &str, at: usize, cx: &mut Cx<'_, '_>) {
         let env = *cx.env();
-        let mut pages = pages::pages(&env);
-        let Some(list) = pages.get_mut(self.page) else {
-            return;
-        };
+        let mut list = self.target.widgets(&env);
         if at >= list.len() {
             return;
         }
@@ -166,7 +239,8 @@ impl EditScreen {
             }
             _ => return,
         }
-        self.store(&pages, cx);
+        let commands = self.target.store(&env, list);
+        Self::run(cx, commands);
         self.redraw(cx);
     }
 }
@@ -175,10 +249,7 @@ impl Screen for EditScreen {
     fn draw(&mut self, canvas: &mut Canvas<'_>, env: &Env<'_>) {
         let style = self.style;
         let rows = self.rows(env);
-        let title = env.i18n.format(
-            "home.edit.title",
-            &[("page", Arg::Int(self.page as i64 + 1))],
-        );
+        let title = self.target.title(env);
         self.header.draw(
             canvas,
             env,
@@ -187,10 +258,7 @@ impl Screen for EditScreen {
             None,
             self.list.paging(rows.len()),
         );
-        let list = pages::pages(env)
-            .get(self.page)
-            .cloned()
-            .unwrap_or_default();
+        let list = self.target.widgets(env);
         let room = ui::icon_room(env, &style, true);
         self.list.draw(
             canvas,
@@ -286,13 +354,13 @@ impl Screen for EditScreen {
     }
 }
 
-/// Adding a widget to a page: every widget not on it yet; choosing one
-/// adds it at the end and goes back.
+/// Adding a widget: every widget not in the list yet; choosing one adds
+/// it at the end and goes back.
 pub(crate) struct AddScreen {
     style: UiStyle,
     header: ui::Header,
     list: ListView,
-    page: usize,
+    target: Target,
     /// Ids and the translation keys of their names.
     widgets: Vec<(Id, String)>,
 }
@@ -304,8 +372,8 @@ impl AddScreen {
         let display = env.device.display;
         let top = header.area.height + style.gap as u16;
         let area = Rect::new(0, top, display.width, display.height.saturating_sub(top));
-        let page = page_of(params);
-        let shown = pages::pages(env).get(page).cloned().unwrap_or_default();
+        let target = target_of(params);
+        let shown = target.widgets(env);
         Self {
             widgets: env
                 .widgets
@@ -316,7 +384,7 @@ impl AddScreen {
             list: ListView::new(area, style.row).focus_on_keys(env),
             style,
             header,
-            page,
+            target,
         }
     }
 
@@ -325,9 +393,9 @@ impl AddScreen {
         let Some((id, _)) = self.widgets.get(index) else {
             return;
         };
-        let pages = pages::pages(&env);
-        let pages = pages::with_widget(pages, self.page, id.as_str(), "");
-        for command in pages::store(&pages) {
+        let mut list = self.target.widgets(&env);
+        list.push(id.as_str().to_string());
+        for command in self.target.store(&env, list) {
             cx.command(command);
         }
         cx.command(Command::Back);

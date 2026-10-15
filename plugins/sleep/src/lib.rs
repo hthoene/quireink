@@ -7,6 +7,9 @@
 //! - *Picture*: the pictures (JPEG, PNG) of a folder (`sleep.folder`,
 //!   `sleep` at first, as on CrossPoint), one after the other;
 //! - *Message*: just "Sleeping";
+//! - *Widgets*: widgets as on the home screen (setting `sleep.widgets`,
+//!   edited with the home screen's editor), e.g. the book being read and
+//!   today's reading, in the middle of the screen;
 //! - *Page*: the screen stays as it is.
 //!
 //! Without a cover or a picture the message shows. The screen closes when
@@ -40,6 +43,11 @@ pub const COVER: &str = "sleep.show.cover";
 pub const PICTURE: &str = "sleep.show.picture";
 pub const MESSAGE: &str = "sleep.show.message";
 pub const PAGE: &str = "sleep.show.page";
+pub const WIDGETS: &str = "sleep.show.widgets";
+/// The widgets shown with [`WIDGETS`], ids separated by commas.
+pub const WIDGET_LIST: Id = Id::new_static("sleep.widgets");
+/// The home screen's editor of lists of widgets, if installed.
+const EDIT_WIDGETS: Id = Id::new_static("home.edit");
 /// The folder of the pictures.
 pub const FOLDER: Id = Id::new_static("sleep.folder");
 const SCREEN: Id = Id::new_static("sleep.screen");
@@ -74,7 +82,7 @@ impl Plugin for Sleep {
                 SHOW,
                 "sleep.setting.show",
                 SettingKind::Choice(
-                    [COVER, PICTURE, MESSAGE, PAGE]
+                    [COVER, PICTURE, WIDGETS, MESSAGE, PAGE]
                         .into_iter()
                         .map(Cow::Borrowed)
                         .collect(),
@@ -97,7 +105,21 @@ impl Plugin for Sleep {
             .editor(CHOOSE_FOLDER)
             .description("sleep.setting.folder.help"),
         )?;
-        for item in [SHOW, FOLDER] {
+        r.add_setting(
+            SettingSpec::new(
+                WIDGET_LIST,
+                "sleep.setting.widgets",
+                SettingKind::List,
+                SettingValue::Text(Cow::Borrowed(
+                    "home.date, home.continue, stats.widget.today, home.recent",
+                )),
+            )
+            .group(groups::DISPLAY)
+            .section(SECTION)
+            .editor(EDIT_WIDGETS)
+            .description("sleep.setting.widgets.help"),
+        )?;
+        for item in [SHOW, FOLDER, WIDGET_LIST] {
             r.set_menu_need(item, MenuNeed::Sleep)?;
         }
         // The book read last, for its cover.
@@ -207,6 +229,42 @@ fn picture(env: &Env<'_>) -> Option<ImageRef> {
     )
 }
 
+/// The widgets of [`WIDGET_LIST`] between the margins, together in the
+/// middle of the screen; `false` if none shows.
+fn draw_widgets(canvas: &mut Canvas<'_>, env: &Env<'_>) -> bool {
+    let style = UiStyle::new(env);
+    let display = env.device.display;
+    let margin = style.margin as u16;
+    let gap = style.gap as u16;
+    let width = display.width.saturating_sub(2 * margin);
+    let mut placed: Vec<(&str, u16)> = Vec::new();
+    let mut total = 0u16;
+    for id in quireink_sdk::status::item_ids(env.settings.text(WIDGET_LIST.as_str())) {
+        let Some(height) = env.widgets.height(id, env, width).filter(|h| *h > 0) else {
+            continue;
+        };
+        let added = height + if placed.is_empty() { 0 } else { gap * 2 };
+        if total + added > display.height {
+            break;
+        }
+        total += added;
+        placed.push((id, height));
+    }
+    if placed.is_empty() {
+        return false;
+    }
+    let mut y = (display.height - total) / 2;
+    for (n, (id, height)) in placed.into_iter().enumerate() {
+        if n > 0 {
+            y += gap * 2;
+        }
+        let area = Rect::new(margin, y, width, height);
+        env.widgets.draw(id, canvas, env, area);
+        y += height;
+    }
+    true
+}
+
 /// What the screen shows while the device sleeps.
 struct SleepScreen {
     show: String,
@@ -218,7 +276,7 @@ impl SleepScreen {
         let show = env.settings.text(SHOW.as_str()).to_string();
         let image = match show.as_str() {
             PICTURE => picture(env),
-            MESSAGE | PAGE => None,
+            MESSAGE | PAGE | WIDGETS => None,
             _ => cover(env),
         };
         Self { show, image }
@@ -237,6 +295,9 @@ impl Screen for SleepScreen {
         }
         let display = env.device.display;
         let screen = Rect::new(0, 0, display.width, display.height);
+        if self.show == WIDGETS && draw_widgets(canvas, env) {
+            return;
+        }
         match &self.image {
             Some(image) => {
                 // As large as fits, in the middle, on black.

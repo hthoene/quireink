@@ -88,36 +88,13 @@ pub(crate) fn store(pages: &[Vec<String>]) -> Vec<Command> {
         .collect()
 }
 
-/// `pages` with `widget` added to page `page` after `after` (if there), else at
-/// its end.
-pub(crate) fn with_widget(
-    mut pages: Vec<Vec<String>>,
-    page: usize,
-    widget: &str,
-    after: &str,
-) -> Vec<Vec<String>> {
-    if let Some(list) = pages.get_mut(page) {
-        let at = list
-            .iter()
-            .position(|w| w == after)
-            .map_or(list.len(), |i| i + 1);
-        list.insert(at, String::from(widget));
-    }
-    pages
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn widgets_go_where_asked() {
+    fn every_page_is_stored() {
         let pages = alloc::vec![alloc::vec![String::from("a"), String::from("b")]];
-        let pages = with_widget(pages, 0, "x", "a");
-        assert_eq!(pages[0], ["a", "x", "b"]);
-        let pages = with_widget(pages, 0, "y", "none");
-        assert_eq!(pages[0], ["a", "x", "b", "y"]);
-        let stored = store(&pages);
-        assert_eq!(stored.len(), MAX_PAGES);
+        assert_eq!(store(&pages).len(), MAX_PAGES);
     }
 }
