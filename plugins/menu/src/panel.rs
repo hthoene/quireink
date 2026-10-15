@@ -570,7 +570,7 @@ impl Screen for PanelScreen {
                 };
                 let title = env.i18n.tr(&spec.title);
                 let value = ui::setting_value(env, spec);
-                ui::draw_number(canvas, env, &style, row.area, title, &value, focus);
+                ui::draw_number(canvas, env, &style, row.area, title, &value, &value, focus);
                 continue;
             }
             if let Some(spec) = label

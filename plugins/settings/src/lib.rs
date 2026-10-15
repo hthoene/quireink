@@ -508,6 +508,8 @@ struct GroupPage {
     editing: bool,
     /// Rows have room for descriptions.
     noted: bool,
+    /// The widest value of the page's numbers, so their − and + line up.
+    number_room: String,
 }
 
 impl GroupPage {
@@ -570,6 +572,14 @@ impl GroupPage {
             .iter()
             .map(|e| matches!(e, Row::Heading(_)))
             .collect();
+        let number_room = ui::number_room(
+            env,
+            &style,
+            entries.iter().filter_map(|e| match e {
+                Row::Setting(spec) => Some(&**spec),
+                Row::Heading(_) => None,
+            }),
+        );
         Self {
             group,
             title,
@@ -580,6 +590,7 @@ impl GroupPage {
             keys: !env.device.input.touch,
             editing: false,
             noted,
+            number_room,
         }
     }
 
@@ -685,6 +696,7 @@ impl Screen for GroupPage {
         let entries = &self.entries;
         let editing = self.editing;
         let noted = self.noted;
+        let room = self.number_room.as_str();
         let touch = env.device.input.touch;
         self.rows
             .draw(canvas, &style, self.keys, |canvas, index, rect, focused| {
@@ -706,7 +718,7 @@ impl Screen for GroupPage {
                         } else {
                             rect
                         };
-                        ui::draw_stepper(canvas, env, &style, area, title, &value, editing);
+                        ui::draw_stepper(canvas, env, &style, area, title, &value, room, editing);
                         if !note.is_empty() {
                             ui::draw_note(canvas, env, &style, rect, true, note);
                         }
@@ -719,7 +731,7 @@ impl Screen for GroupPage {
                         } else {
                             rect
                         };
-                        ui::draw_number(canvas, env, &style, area, title, &value, None);
+                        ui::draw_number(canvas, env, &style, area, title, &value, room, None);
                         if !note.is_empty() {
                             ui::draw_note(canvas, env, &style, rect, false, note);
                         }
@@ -809,7 +821,12 @@ impl Screen for GroupPage {
             };
             let rect = self.title_area(rect);
             let value = ui::setting_value(&env, spec);
-            if let Some((minus, plus)) = ui::stepper(&env, &self.style, rect, &value) {
+            let room = if self.number_room.len() < value.len() {
+                &value
+            } else {
+                &self.number_room
+            };
+            if let Some((minus, plus)) = ui::stepper(&env, &self.style, rect, room) {
                 let x = gesture.start.x;
                 // A little room around the buttons: easier to hit.
                 let slack = i32::from(self.style.gap as u16);
@@ -838,7 +855,12 @@ impl Screen for GroupPage {
             };
             let rect = self.title_area(rect);
             let value = ui::setting_value(&env, spec);
-            if let Some((minus, plus)) = ui::stepper(&env, &self.style, rect, &value) {
+            let room = if self.number_room.len() < value.len() {
+                &value
+            } else {
+                &self.number_room
+            };
+            if let Some((minus, plus)) = ui::stepper(&env, &self.style, rect, room) {
                 let x = gesture.start.x;
                 let within = |r: Rect| x >= i32::from(r.x) && x < r.right() as i32;
                 if within(minus) {

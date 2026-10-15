@@ -1028,9 +1028,11 @@ pub fn draw_value_row(
 /// buttons of rows above each other line up.
 const STEPPER_VALUE: &str = "000 %";
 
-/// The − and + buttons of a number row, with room for `value` between
-/// them (at least [`STEPPER_VALUE`], so rows line up).
-pub fn stepper(env: &Env<'_>, style: &UiStyle, rect: Rect, value: &str) -> Option<(Rect, Rect)> {
+/// The − and + buttons of a number row, with room for `room` between
+/// them (at least [`STEPPER_VALUE`]): the value, or the widest of the
+/// numbers in rows above each other (see [`number_room`]), so their
+/// buttons line up.
+pub fn stepper(env: &Env<'_>, style: &UiStyle, rect: Rect, room: &str) -> Option<(Rect, Rect)> {
     let font = style.font(env)?;
     let size = button_height(rect);
     let y = rect.y + (rect.height - size) / 2;
@@ -1039,10 +1041,46 @@ pub fn stepper(env: &Env<'_>, style: &UiStyle, rect: Rect, value: &str) -> Optio
     let right = rect.x + rect.width - margin;
     let plus = Rect::new(right.saturating_sub(size), y, size, size);
     let value_width = font
-        .measure(style.text, value)
+        .measure(style.text, room)
         .max(font.measure(style.text, STEPPER_VALUE)) as u16;
     let minus_x = plus.x.saturating_sub(2 * gap + value_width + size);
     Some((Rect::new(minus_x, y, size, size), plus))
+}
+
+/// The widest value the numbers among `specs` show, from their least to
+/// their greatest, with their units (and the mark of a value set for a
+/// scope): the room of their steppers (see [`stepper`]) where they are
+/// listed above each other.
+pub fn number_room<'a>(
+    env: &Env<'_>,
+    style: &UiStyle,
+    specs: impl IntoIterator<Item = &'a SettingSpec>,
+) -> String {
+    let Some(font) = style.font(env) else {
+        return String::new();
+    };
+    let mut widest = (0.0, String::new());
+    for spec in specs {
+        let SettingKind::Int { min, max } = spec.kind else {
+            continue;
+        };
+        for v in [min, max] {
+            let text = match &spec.unit {
+                Some(unit) => env.i18n.plural(unit, v, &[]),
+                None => format!("{v}"),
+            };
+            let text = if spec.scoped {
+                format!("• {text}")
+            } else {
+                text
+            };
+            let width = font.measure(style.text, &text);
+            if width > widest.0 {
+                widest = (width, text);
+            }
+        }
+    }
+    widest.1
 }
 
 /// The height of buttons in a row of height `row.height`: the `−` and `+`
@@ -1111,8 +1149,8 @@ pub fn draw_button(
 }
 
 /// A number on a light row: its title, then `[−] value [+]` exactly as in
-/// menus (see [`stepper`]); `focus` frames the `−` (`Some(false)`) or the
-/// `+` (`Some(true)`).
+/// menus, with `room` for the value (see [`stepper`]); `focus` frames the
+/// `−` (`Some(false)`) or the `+` (`Some(true)`).
 #[allow(clippy::too_many_arguments)]
 pub fn draw_number(
     canvas: &mut Canvas<'_>,
@@ -1121,9 +1159,15 @@ pub fn draw_number(
     rect: Rect,
     title: &str,
     value: &str,
+    room: &str,
     focus: Option<bool>,
 ) {
-    let (Some(font), Some((minus, plus))) = (style.font(env), stepper(env, style, rect, value))
+    let room = if room.len() < value.len() {
+        value
+    } else {
+        room
+    };
+    let (Some(font), Some((minus, plus))) = (style.font(env), stepper(env, style, rect, room))
     else {
         return;
     };
@@ -1153,8 +1197,10 @@ fn centred(font: &FontHandle<'_>, size: f32, value: &str, minus: Rect, plus: Rec
     left + (room - font.measure(size, value)) / 2.0
 }
 
-/// A focused number: title, then `[−] value [+]`. While editing with
-/// buttons the boxes are filled.
+/// A focused number: title, then `[−] value [+]`, with `room` for the
+/// value (see [`stepper`]). While editing with buttons the boxes are
+/// filled.
+#[allow(clippy::too_many_arguments)]
 pub fn draw_stepper(
     canvas: &mut Canvas<'_>,
     env: &Env<'_>,
@@ -1162,9 +1208,15 @@ pub fn draw_stepper(
     rect: Rect,
     title: &str,
     value: &str,
+    room: &str,
     editing: bool,
 ) {
-    let (Some(font), Some((minus, plus))) = (style.font(env), stepper(env, style, rect, value))
+    let room = if room.len() < value.len() {
+        value
+    } else {
+        room
+    };
+    let (Some(font), Some((minus, plus))) = (style.font(env), stepper(env, style, rect, room))
     else {
         return;
     };

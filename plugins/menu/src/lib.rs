@@ -326,14 +326,23 @@ impl MenuScreen {
             }
             Some(spec) if focused && matches!(spec.kind, SettingKind::Int { .. }) => {
                 let value = ui::setting_value(env, spec);
-                ui::draw_stepper(canvas, env, &style, rect, label, &value, self.editing);
+                ui::draw_stepper(
+                    canvas,
+                    env,
+                    &style,
+                    rect,
+                    label,
+                    &value,
+                    &value,
+                    self.editing,
+                );
             }
             // On touch screens − and + are always there.
             Some(spec)
                 if env.device.input.touch && matches!(spec.kind, SettingKind::Int { .. }) =>
             {
                 let value = ui::setting_value(env, spec);
-                ui::draw_number(canvas, env, &style, rect, label, &value, None);
+                ui::draw_number(canvas, env, &style, rect, label, &value, &value, None);
             }
             Some(spec) => {
                 let mut value = ui::setting_value(env, spec);
