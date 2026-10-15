@@ -15,7 +15,7 @@ use quireink_core::SpeechCall;
 use crate::access::with_activity;
 
 /// How often the end of a text is looked for.
-pub const POLL: Duration = Duration::from_millis(250);
+pub const POLL: Duration = Duration::from_millis(100);
 /// How long a text waits for the engine to be ready.
 const READY_WAIT: Duration = Duration::from_secs(8);
 /// How long a text may take to start being heard; one never heard is
