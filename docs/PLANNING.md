@@ -773,7 +773,7 @@ If the X4 has not arrived by the end of M3, M6 (Boox) is done before M4.
 | **M3 EPUB** 🔶 | ✅ streaming ZIP (`quireink-zip`), incremental XML tokenizer (`quireink-xml`), EPUB 2/3 package, spine, metadata, TOC (nav + NCX) with anchors, chapter conversion into a block cache (ADR 0011), TOC screen + `reader.goto`, `DocumentError::OutOfMemory`, hyphenation (Liang patterns read in place, `quireink-hyphen`; German and English as the `hyphenation` plugin; contribution `add_hyphenation`; setting `reader.hyphenate`), styled text: bold/italic runs (`<b>`, `<i>`, `<em>`, `<strong>`, inline `style`), alignment (`<center>`, `align`, `text-align`), headings in a larger bold face that never end a page, Literata bold/italic faces, CSS subset (element and class selectors from the book's stylesheets and `<style>`: `text-align`, `font-weight`, `font-style`, `display: none`; parsed once into the cache) , images (`quireink-image`: streaming baseline JPEG and PNG decoded to gray, cached, scaled and ordered-dithered when drawn), mutation tests and cargo-fuzz targets for every parser covers (`Document::cover`, decoded once to a small gray image) · ⬜ progressive JPEG, GIF, more CSS (margins, font sizes, small caps), cover on the home screen | Standard Ebooks / Gutenberg test corpus renders correctly; Gutenberg EPUBs within the X4 budget (✅ peak 115 of 192 KiB with banded rendering, ADR 0012) |
 | **M4 Xteink X4** | ESP32 shell: display, buttons, SD, sleep, firmware backup/restore | Read an EPUB on real hardware; battery measurement |
 | **M5 Plugins v1** 🔶 | ✅ plugin manager (`plugin-manager` plugin: every plugin with translated name, description, version and state; switches saved to `[plugins]`, applied by `Command::Restart`; plugins that alone provide a standard slot or all fonts stay on), data plugins from storage (`plugin.ini`, translations, key maps, setting defaults), progress sync with KOReader (`kosync`), OPDS catalogs (`opds`: browse, search, download, sync folders with catalogs) · ⬜ SDK 0.1 published + docs, fonts and CSS in data plugins, events/filters/services complete, web firmware builder (X4) | Progress syncs with KOReader; a sample community plugin lives outside the repo |
-| **M6 Boox** 🔶 | ✅ native activity in Rust without Java or Gradle (`shells/android`, `build-apk.sh`, APK as CI artifact), touch, page/volume keys, sample books, system language, shared `quireink-app` plugin set and `quireink-fs` storage, Onyx e-ink waveforms (`View.setDefaultUpdateMode`), frontlight (`DeviceController`), shared storage with any library folder, data plugins in `QuireInk/plugins`, app icon · ⬜ colour rendering path | APK runs on Go 7 (mono) ✅ (2026-10-14: library, EPUB, page keys, swipes, reopening the last book) and Air 6C (colour) ⬜ |
+| **M6 Boox** 🔶 | ✅ native activity in Rust without Gradle; its only Java code is the speech listener (`shells/android`, `build-apk.sh`, APK as CI artifact), touch, page/volume keys, sample books, system language, shared `quireink-app` plugin set and `quireink-fs` storage, Onyx e-ink waveforms (`View.setDefaultUpdateMode`), frontlight (`DeviceController`), shared storage with any library folder, data plugins in `QuireInk/plugins`, app icon · ⬜ colour rendering path | APK runs on Go 7 (mono) ✅ (2026-10-14: library, EPUB, page keys, swipes, reopening the last book) and Air 6C (colour) ⬜ |
 | **M7 Kobo** | linux-fb shell, device DB, touch, frontlight, suspend | Daily-driver usable on one Kobo |
 | **M8 Expansion** | Runtime WASM plugins, PDF/CBZ/…, Kindle, PocketBook, reMarkable, web demo | none yet |
 
@@ -805,6 +805,36 @@ makes it replaceable. ✅ done, 🔶 partly, ⬜ open.
 | C18 | Home screen widgets: clock and date, today's reading with a daily goal (bar, time left, days in a row), any plugin's; chosen under Appearance | `Registrar::add_widget`, `Env::widgets`; `home.clock`, `stats.widget.today`, setting `stats.goal` | ✅ |
 | C19 | OPDS: covers in lists (devices with the memory), a folder per catalog, automatic sync (rules), OPDS 2 (JSON) | `opds` plugin, C5, C20 | 🔶 (OPDS 2 open) |
 | C20 | Large-memory devices may use more (covers in lists, caches) without separate code | `DeviceInfo::memory` (`MemoryClass::Small`/`Large`) | ✅ |
+
+### 12.2 Ideas from KOReader and CrossPoint / CrossInk
+
+Looked at on 2026-10-15: what the other readers offer that QuireInk does
+not yet. Each idea stays simple by default and replaceable by plugins.
+⬜ open, ✅ done.
+
+| # | Idea | Seen in | State |
+|---|------|---------|-------|
+| I1 | Time left in the chapter and the book, from one's reading speed, as status items | KOReader | ⬜ |
+| I2 | A slider to skim through the book (chapter marks on it), back to where one was with one tap | KOReader (skim widget) | ⬜ |
+| I3 | "Back" after any jump (contents, search, go to page, skimming), not only after links | KOReader | ⬜ |
+| I4 | Turning pages by itself every few seconds | KOReader (Autoturn), CrossPoint | ⬜ |
+| I5 | Notes on highlights; highlight styles (marker, underline, strikeout) | KOReader | ⬜ |
+| I6 | Book information: description, subjects, series, file, from the library and the reader | KOReader | ⬜ |
+| I7 | The printed edition's page numbers (EPUB `page-list`) | KOReader | ⬜ |
+| I8 | Contents made from the headings where a book has none or a poor one | KOReader | ⬜ |
+| I9 | Vocabulary: words looked up, with their sentence, to review later | KOReader (vocabulary builder) | ⬜ |
+| I10 | Translating selected text online, by a plugin | KOReader | ⬜ |
+| L1 | Favourites: a star on a book, a shelf of them | KOReader | ⬜ |
+| L2 | The library as a grid of covers | KOReader (cover browser), CrossPoint | ⬜ |
+| L3 | Searching the library by title and author | KOReader | ⬜ |
+| L4 | Marking a book finished, moving it to an archive folder | KOReader | ⬜ |
+| F1 | More formats: FB2, Markdown, CBZ, Xteink's own XTC/XTCH, pictures; PDF on Android through the system's renderer | KOReader, CrossPoint | ⬜ |
+| D1 | Sleep screen: the cover, own pictures, minimal, today's reading (C9) | CrossPoint, CrossInk, KOReader | ⬜ |
+| D2 | Sleeping and switching off by themselves after a while | KOReader, X4 firmware | ⬜ |
+| D3 | Turning the screen, also to landscape | CrossPoint | ⬜ |
+| D4 | Firmware updates over Wi-Fi (X4) | CrossPoint | ⬜ |
+| D5 | Screenshots | CrossPoint, KOReader | ⬜ |
+| S1 | Read-later articles (Wallabag), news feeds as books, highlights to Readwise and Joplin (C15), Calibre wireless (C16) | KOReader | ⬜ |
 
 ---
 
