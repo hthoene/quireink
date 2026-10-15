@@ -52,7 +52,10 @@ struct Embedded {
 /// (the default choice), and they render on this device.
 fn uses_book_fonts(env: &Env<'_>) -> bool {
     use quireink_sdk::builtin::settings::{DEFAULT_FONT, READING_FONT};
-    quireink_sdk::text::OUTLINES && env.settings.text(READING_FONT.as_str()) == DEFAULT_FONT
+    // Embedded fonts take hundreds of kilobytes: not on small devices.
+    quireink_sdk::text::OUTLINES
+        && env.device.memory != quireink_sdk::MemoryClass::Small
+        && env.settings.text(READING_FONT.as_str()) == DEFAULT_FONT
 }
 
 impl Embedded {

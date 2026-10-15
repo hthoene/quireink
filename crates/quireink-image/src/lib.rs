@@ -10,10 +10,11 @@
 //! and height as u32, then rows), so readers draw them straight from
 //! storage without decoding again.
 //!
-//! Supported: baseline JPEG (1 or 3 components, any sampling) and
-//! non-interlaced PNG (all colour types and depths, transparency over
-//! white). Progressive JPEG, interlaced PNG and other formats return
-//! [`ImageError::Unsupported`].
+//! Supported: baseline and progressive JPEG (1 or 3 components, any
+//! sampling; progressive ones keep their coefficients until the last
+//! scan, as few as the output size needs) and non-interlaced PNG (all
+//! colour types and depths, transparency over white). Interlaced PNG and
+//! other formats return [`ImageError::Unsupported`].
 
 #![no_std]
 
@@ -22,6 +23,7 @@ extern crate alloc;
 mod gray;
 mod jpeg;
 mod png;
+mod progressive;
 
 use core::fmt;
 

@@ -381,7 +381,9 @@ impl Document for EpubDocument {
         if u64::from(entry.size) > MAX_FONT {
             return Err(DocumentError::OutOfMemory);
         }
-        let mut data = Vec::with_capacity(entry.size as usize);
+        let mut data = Vec::new();
+        data.try_reserve_exact(entry.size as usize)
+            .map_err(|_| DocumentError::OutOfMemory)?;
         self.archive
             .stream(storage, &entry, &mut |chunk| {
                 data.extend_from_slice(chunk);

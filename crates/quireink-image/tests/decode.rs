@@ -65,6 +65,68 @@ fn gray_jpeg_matches_reference() {
     assert!(diff < 6.0, "mean difference {diff}");
 }
 
+/// `image` reduced by averaging `factor`×`factor` blocks (whole ones).
+fn reduce(image: &Collect, factor: u32) -> Vec<u8> {
+    let (w, h) = (image.width / factor, image.height / factor);
+    let mut out = Vec::with_capacity((w * h) as usize);
+    for y in 0..h {
+        for x in 0..w {
+            let mut sum = 0u32;
+            for dy in 0..factor {
+                for dx in 0..factor {
+                    let at = (y * factor + dy) * image.width + x * factor + dx;
+                    sum += u32::from(image.pixels[at as usize]);
+                }
+            }
+            out.push((sum / (factor * factor)) as u8);
+        }
+    }
+    out
+}
+
+#[test]
+fn progressive_jpeg_matches_reference() {
+    // 4:2:0 colour, ten scans, restart markers.
+    let data = include_bytes!("data/alice-progressive.jpg");
+    let reference = include_bytes!("data/alice-progressive.gray4");
+    // A quarter: the 2×2 lowest frequencies of each block.
+    let image = decoded(data, 300);
+    assert_eq!((image.width, image.height), (200, 276));
+    let diff = difference(&image.pixels, reference);
+    assert!(diff < 4.0, "mean difference {diff}");
+    // Full size: all frequencies.
+    let image = decoded(data, 2000);
+    assert_eq!((image.width, image.height), (800, 1104));
+    let diff = difference(&reduce(&image, 4), reference);
+    assert!(diff < 3.0, "mean difference {diff}");
+    // Half size.
+    let image = decoded(data, 600);
+    assert_eq!((image.width, image.height), (400, 552));
+    let diff = difference(&reduce(&image, 2), reference);
+    assert!(diff < 3.0, "mean difference {diff}");
+    // Very small: the DC only.
+    let image = decoded(data, 120);
+    assert_eq!((image.width, image.height), (50, 69));
+    let small = Collect {
+        width: 200,
+        height: 276,
+        pixels: reference.to_vec(),
+    };
+    let diff = difference(&image.pixels, &reduce(&small, 4)[..50 * 69]);
+    assert!(diff < 6.0, "mean difference {diff}");
+}
+
+#[test]
+fn progressive_gray_jpeg_matches_reference() {
+    let image = decoded(include_bytes!("data/kafka-progressive.jpg"), 150);
+    assert_eq!((image.width, image.height), (85, 150));
+    let diff = difference(
+        &image.pixels,
+        include_bytes!("data/kafka-progressive.gray4"),
+    );
+    assert!(diff < 6.0, "mean difference {diff}");
+}
+
 #[test]
 fn full_size_jpeg() {
     let image = decoded(include_bytes!("data/alice-cover.jpg"), 2000);
@@ -108,6 +170,8 @@ fn damaged_images_fail_cleanly() {
     for data in [
         &include_bytes!("data/alice-cover.jpg")[..],
         &include_bytes!("data/rgba.png")[..],
+        &include_bytes!("data/alice-progressive.jpg")[..],
+        &include_bytes!("data/kafka-progressive.jpg")[..],
     ] {
         let step = data.len() / 60 + 1;
         for cut in (0..data.len()).step_by(step) {
@@ -120,16 +184,19 @@ fn damaged_images_fail_cleanly() {
         for at in (0..data.len()).step_by(step / 2 + 1) {
             let mut damaged = data.to_vec();
             damaged[at] ^= 0x5a;
-            let mut source = &damaged[..];
-            let mut out = Collect::default();
-            let _ = decode(
-                Format::detect(&damaged).unwrap_or(Format::Jpeg),
-                &mut source,
-                100,
-                &mut out,
-            );
-            if out.height > 0 {
-                assert!(out.pixels.len() <= (out.width * out.height) as usize);
+            // Small and large: progressive JPEG keeps more for larger.
+            for side in [100, 1000] {
+                let mut source = &damaged[..];
+                let mut out = Collect::default();
+                let _ = decode(
+                    Format::detect(&damaged).unwrap_or(Format::Jpeg),
+                    &mut source,
+                    side,
+                    &mut out,
+                );
+                if out.height > 0 {
+                    assert!(out.pixels.len() <= (out.width * out.height) as usize);
+                }
             }
         }
     }

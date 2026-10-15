@@ -1,20 +1,20 @@
 //! Baseline JPEG, decoded one row of MCUs at a time. Only the first
 //! component (luma) is transformed; the others are entropy-decoded and
-//! dropped.
+//! dropped. Progressive JPEG goes on in [`progressive`](crate::progressive).
 
 use alloc::vec::Vec;
 
 use crate::{Downscaler, ImageError, ImageSink, Reader, factor_for, zeroed};
 
 /// Natural order of the zig-zag sequence.
-const ZIGZAG: [u8; 64] = [
+pub(crate) const ZIGZAG: [u8; 64] = [
     0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5, 12, 19, 26, 33, 40, 48, 41, 34, 27, 20,
     13, 6, 7, 14, 21, 28, 35, 42, 49, 56, 57, 50, 43, 36, 29, 22, 15, 23, 30, 37, 44, 51, 58, 59,
     52, 45, 38, 31, 39, 46, 53, 60, 61, 54, 47, 55, 62, 63,
 ];
 
 #[derive(Clone)]
-struct Huffman {
+pub(crate) struct Huffman {
     /// Largest code of each length (1 to 16), -1 if none.
     max_code: [i32; 18],
     /// Index into `values` of the first code of each length, minus that code.
@@ -46,27 +46,27 @@ impl Huffman {
 }
 
 #[derive(Clone, Copy, Default)]
-struct Component {
-    id: u8,
-    h: usize,
-    v: usize,
-    quant: usize,
-    dc: usize,
-    ac: usize,
-    prediction: i32,
+pub(crate) struct Component {
+    pub id: u8,
+    pub h: usize,
+    pub v: usize,
+    pub quant: usize,
+    pub dc: usize,
+    pub ac: usize,
+    pub prediction: i32,
 }
 
 /// Entropy-coded data: bits with byte stuffing and markers.
-struct Bits<'r, 'a> {
-    reader: &'r mut Reader<'a>,
-    bits: u32,
-    count: u32,
+pub(crate) struct Bits<'r, 'a> {
+    pub reader: &'r mut Reader<'a>,
+    pub bits: u32,
+    pub count: u32,
     /// A marker ended the data; zeros are read from here on.
-    marker: Option<u8>,
+    pub marker: Option<u8>,
 }
 
 impl<'r, 'a> Bits<'r, 'a> {
-    fn bit(&mut self) -> Result<u32, ImageError> {
+    pub(crate) fn bit(&mut self) -> Result<u32, ImageError> {
         if self.count == 0 {
             let byte = match self.marker {
                 Some(_) => 0,
@@ -95,7 +95,7 @@ impl<'r, 'a> Bits<'r, 'a> {
         Ok((self.bits >> self.count) & 1)
     }
 
-    fn receive(&mut self, n: u32) -> Result<i32, ImageError> {
+    pub(crate) fn receive(&mut self, n: u32) -> Result<i32, ImageError> {
         let mut v = 0i32;
         for _ in 0..n {
             v = (v << 1) | self.bit()? as i32;
@@ -103,7 +103,7 @@ impl<'r, 'a> Bits<'r, 'a> {
         Ok(v)
     }
 
-    fn extend(v: i32, n: u32) -> i32 {
+    pub(crate) fn extend(v: i32, n: u32) -> i32 {
         if n == 0 {
             0
         } else if v < 1 << (n - 1) {
@@ -113,7 +113,7 @@ impl<'r, 'a> Bits<'r, 'a> {
         }
     }
 
-    fn decode(&mut self, table: &Huffman) -> Result<u8, ImageError> {
+    pub(crate) fn decode(&mut self, table: &Huffman) -> Result<u8, ImageError> {
         let mut code = 0i32;
         for len in 1..=16 {
             code = (code << 1) | self.bit()? as i32;
@@ -130,7 +130,7 @@ impl<'r, 'a> Bits<'r, 'a> {
     }
 
     /// After a restart interval: realign and expect an RST marker.
-    fn restart(&mut self) -> Result<(), ImageError> {
+    pub(crate) fn restart(&mut self) -> Result<(), ImageError> {
         self.count = 0;
         match self.marker.take() {
             Some(0xd0..=0xd7) => Ok(()),
@@ -159,41 +159,83 @@ impl<'r, 'a> Bits<'r, 'a> {
 /// Inverse DCT of one block (dequantized coefficients in natural order),
 /// written to `out` with stride `stride`, clamped to 0 to 255.
 fn idct(coef: &[i32; 64], out: &mut [u8], stride: usize) {
-    // c[u][x] = C(u) cos((2x+1)uπ/16) / 2, scaled by 2^12.
-    const C: [[i32; 8]; 8] = {
-        // Precomputed values of the cosine basis (×4096).
-        [
-            [1448, 1448, 1448, 1448, 1448, 1448, 1448, 1448],
-            [2009, 1703, 1138, 400, -400, -1138, -1703, -2009],
-            [1892, 784, -784, -1892, -1892, -784, 784, 1892],
-            [1703, -400, -2009, -1138, 1138, 2009, 400, -1703],
-            [1448, -1448, -1448, 1448, 1448, -1448, -1448, 1448],
-            [1138, -2009, 400, 1703, -1703, -400, 2009, -1138],
-            [784, -1892, 1892, -784, -784, 1892, -1892, 784],
-            [400, -1138, 1703, -2009, 2009, -1703, 1138, -400],
-        ]
+    idct_scaled(coef, 8, out, stride);
+}
+
+/// The cosine basis c[u][x] = C(u) cos((2x+1)uπ/2n) / 2, scaled by 2^12,
+/// for blocks of n = 8, 4, 2 or 1 pixels a side.
+const C8: [[i32; 8]; 8] = [
+    [1448, 1448, 1448, 1448, 1448, 1448, 1448, 1448],
+    [2009, 1703, 1138, 400, -400, -1138, -1703, -2009],
+    [1892, 784, -784, -1892, -1892, -784, 784, 1892],
+    [1703, -400, -2009, -1138, 1138, 2009, 400, -1703],
+    [1448, -1448, -1448, 1448, 1448, -1448, -1448, 1448],
+    [1138, -2009, 400, 1703, -1703, -400, 2009, -1138],
+    [784, -1892, 1892, -784, -784, 1892, -1892, 784],
+    [400, -1138, 1703, -2009, 2009, -1703, 1138, -400],
+];
+const C4: [[i32; 8]; 8] = [
+    [1448, 1448, 1448, 1448, 0, 0, 0, 0],
+    [1892, 784, -784, -1892, 0, 0, 0, 0],
+    [1448, -1448, -1448, 1448, 0, 0, 0, 0],
+    [784, -1892, 1892, -784, 0, 0, 0, 0],
+    [0; 8],
+    [0; 8],
+    [0; 8],
+    [0; 8],
+];
+const C2: [[i32; 8]; 8] = [
+    [1448, 1448, 0, 0, 0, 0, 0, 0],
+    [1448, -1448, 0, 0, 0, 0, 0, 0],
+    [0; 8],
+    [0; 8],
+    [0; 8],
+    [0; 8],
+    [0; 8],
+    [0; 8],
+];
+const C1: [[i32; 8]; 8] = [
+    [1448, 0, 0, 0, 0, 0, 0, 0],
+    [0; 8],
+    [0; 8],
+    [0; 8],
+    [0; 8],
+    [0; 8],
+    [0; 8],
+    [0; 8],
+];
+
+/// Inverse DCT of the `n`×`n` lowest frequencies of a block, which gives
+/// the block at `n`/8 of its size (`n` = 8, 4, 2 or 1).
+pub(crate) fn idct_scaled(coef: &[i32; 64], n: usize, out: &mut [u8], stride: usize) {
+    let c = match n {
+        8 => &C8,
+        4 => &C4,
+        2 => &C2,
+        _ => &C1,
     };
+    let n = n.clamp(1, 8);
     let mut tmp = [0i32; 64];
     // Rows: frequencies u (horizontal) to positions x.
-    for v in 0..8 {
-        let row = &coef[v * 8..v * 8 + 8];
+    for v in 0..n {
+        let row = &coef[v * 8..v * 8 + n];
         if row.iter().all(|&c| c == 0) {
             continue;
         }
-        for x in 0..8 {
+        for x in 0..n {
             let mut sum = 0i64;
-            for u in 0..8 {
-                sum += i64::from(row[u]) * i64::from(C[u][x]);
+            for (u, &value) in row.iter().enumerate() {
+                sum += i64::from(value) * i64::from(c[u][x]);
             }
             tmp[v * 8 + x] = (sum >> 8) as i32;
         }
     }
     // Columns.
-    for x in 0..8 {
-        for y in 0..8 {
+    for x in 0..n {
+        for y in 0..n {
             let mut sum = 0i64;
-            for v in 0..8 {
-                sum += i64::from(tmp[v * 8 + x]) * i64::from(C[v][y]);
+            for v in 0..n {
+                sum += i64::from(tmp[v * 8 + x]) * i64::from(c[v][y]);
             }
             // Scales: 2^12 · 2^12 / 2^8 = 2^16, plus the level shift.
             let value = (sum >> 16) as i32 + 128;
@@ -216,6 +258,7 @@ pub(crate) fn decode(
     let mut components: Vec<Component> = Vec::new();
     let (mut width, mut height) = (0u32, 0u32);
     let mut restart_interval = 0u32;
+    let mut progressive = false;
 
     loop {
         // Next marker.
@@ -235,25 +278,9 @@ pub(crate) fn decode(
             .checked_sub(2)
             .ok_or(ImageError::Invalid("bad segment length"))?;
         match marker {
-            0xdb => {
-                let mut left = len;
-                while left > 0 {
-                    let pq_tq = reader.byte()?;
-                    let table = quant
-                        .get_mut(usize::from(pq_tq & 15))
-                        .ok_or(ImageError::Invalid("bad table"))?;
-                    let wide = pq_tq >> 4 != 0;
-                    for entry in table.iter_mut() {
-                        *entry = if wide {
-                            reader.u16_be()?
-                        } else {
-                            u16::from(reader.byte()?)
-                        };
-                    }
-                    left = left.saturating_sub(1 + if wide { 128 } else { 64 });
-                }
-            }
-            0xc0 | 0xc1 => {
+            0xdb => read_quant(reader, len, &mut quant)?,
+            0xc0..=0xc2 => {
+                progressive = marker == 0xc2;
                 if reader.byte()? != 8 {
                     return Err(ImageError::Unsupported("12-bit JPEG"));
                 }
@@ -282,37 +309,28 @@ pub(crate) fn decode(
                 }
                 reader.skip(len.saturating_sub(6 + 3 * usize::from(count)))?;
             }
-            0xc2 | 0xc3 | 0xc5..=0xc7 | 0xc9..=0xcb | 0xcd..=0xcf => {
-                return Err(ImageError::Unsupported("progressive or lossless JPEG"));
+            0xc3 | 0xc5..=0xc7 | 0xc9..=0xcb | 0xcd..=0xcf => {
+                return Err(ImageError::Unsupported("lossless or arithmetic-coded JPEG"));
             }
-            0xc4 => {
-                let mut left = len;
-                while left >= 17 {
-                    let tc_th = reader.byte()?;
-                    let mut counts = [0u8; 16];
-                    reader.fill(&mut counts)?;
-                    let total: usize = counts.iter().map(|&c| usize::from(c)).sum();
-                    if total > 256 {
-                        return Err(ImageError::Invalid("bad Huffman table"));
-                    }
-                    let mut values = zeroed(total)?;
-                    reader.fill(&mut values)?;
-                    let table = Some(Huffman::new(&counts, values));
-                    let index = usize::from(tc_th & 3);
-                    if tc_th >> 4 == 0 {
-                        dc_tables[index] = table;
-                    } else {
-                        ac_tables[index] = table;
-                    }
-                    left = left
-                        .checked_sub(17 + total)
-                        .ok_or(ImageError::Invalid("bad Huffman table"))?;
-                }
-                reader.skip(left)?;
-            }
+            0xc4 => read_huffman(reader, len, &mut dc_tables, &mut ac_tables)?,
             0xdd => {
                 restart_interval = u32::from(reader.u16_be()?);
                 reader.skip(len.saturating_sub(2))?;
+            }
+            0xda if progressive => {
+                if components.is_empty() {
+                    return Err(ImageError::Invalid("scan before frame"));
+                }
+                let frame = crate::progressive::Frame {
+                    width,
+                    height,
+                    components,
+                    quant,
+                    dc_tables,
+                    ac_tables,
+                    restart_interval,
+                };
+                return crate::progressive::decode(reader, frame, max_side, sink);
             }
             0xda => {
                 let count = usize::from(reader.byte()?);
@@ -344,6 +362,63 @@ pub(crate) fn decode(
             _ => reader.skip(len)?,
         }
     }
+}
+
+/// A quantization table segment (`DQT`) of `len` bytes.
+pub(crate) fn read_quant(
+    reader: &mut Reader<'_>,
+    len: usize,
+    quant: &mut [[u16; 64]; 4],
+) -> Result<(), ImageError> {
+    let mut left = len;
+    while left > 0 {
+        let pq_tq = reader.byte()?;
+        let table = quant
+            .get_mut(usize::from(pq_tq & 15))
+            .ok_or(ImageError::Invalid("bad table"))?;
+        let wide = pq_tq >> 4 != 0;
+        for entry in table.iter_mut() {
+            *entry = if wide {
+                reader.u16_be()?
+            } else {
+                u16::from(reader.byte()?)
+            };
+        }
+        left = left.saturating_sub(1 + if wide { 128 } else { 64 });
+    }
+    Ok(())
+}
+
+/// A Huffman table segment (`DHT`) of `len` bytes.
+pub(crate) fn read_huffman(
+    reader: &mut Reader<'_>,
+    len: usize,
+    dc_tables: &mut [Option<Huffman>; 4],
+    ac_tables: &mut [Option<Huffman>; 4],
+) -> Result<(), ImageError> {
+    let mut left = len;
+    while left >= 17 {
+        let tc_th = reader.byte()?;
+        let mut counts = [0u8; 16];
+        reader.fill(&mut counts)?;
+        let total: usize = counts.iter().map(|&c| usize::from(c)).sum();
+        if total > 256 {
+            return Err(ImageError::Invalid("bad Huffman table"));
+        }
+        let mut values = zeroed(total)?;
+        reader.fill(&mut values)?;
+        let table = Some(Huffman::new(&counts, values));
+        let index = usize::from(tc_th & 3);
+        if tc_th >> 4 == 0 {
+            dc_tables[index] = table;
+        } else {
+            ac_tables[index] = table;
+        }
+        left = left
+            .checked_sub(17 + total)
+            .ok_or(ImageError::Invalid("bad Huffman table"))?;
+    }
+    reader.skip(left)
 }
 
 #[allow(clippy::too_many_arguments)]
