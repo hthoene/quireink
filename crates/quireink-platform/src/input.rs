@@ -84,6 +84,9 @@ pub struct InputCaps {
     pub touch: bool,
     /// A pen digitizer is available.
     pub pen: bool,
+    /// The buttons it has (see [`buttons`]), for screens that list them;
+    /// empty where not known.
+    pub keys: &'static [&'static str],
 }
 
 /// A point in time in milliseconds on a monotonic clock with an arbitrary

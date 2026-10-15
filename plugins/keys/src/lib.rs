@@ -62,19 +62,33 @@ const ZONES: [&str; 9] = [
 ];
 const SWIPES: [&str; 4] = ["left", "right", "up", "down"];
 
-/// The inputs this device has, as in `quireink.ini`.
+/// The inputs this device has, as in `quireink.ini`: on touch screens
+/// the gestures first, then the buttons it has (all where not known).
 fn inputs(env: &Env<'_>) -> Vec<String> {
-    let mut all = Vec::new();
-    if env.device.input.buttons {
-        all.extend(BUTTONS.iter().map(|b| format!("button.{b}")));
-        all.extend(BUTTONS.iter().map(|b| format!("long.{b}")));
+    let input = env.device.input;
+    let mut buttons = Vec::new();
+    if input.buttons {
+        let has: Vec<&str> = BUTTONS
+            .iter()
+            .copied()
+            .filter(|b| input.keys.is_empty() || input.keys.contains(b))
+            .collect();
+        buttons.extend(has.iter().map(|b| format!("button.{b}")));
+        buttons.extend(has.iter().map(|b| format!("long.{b}")));
     }
-    if env.device.input.touch {
-        all.extend(ZONES.iter().map(|z| format!("tap.{z}")));
-        all.extend(ZONES.iter().map(|z| format!("long-tap.{z}")));
-        all.extend(SWIPES.iter().map(|s| format!("swipe.{s}")));
+    let mut gestures = Vec::new();
+    if input.touch {
+        gestures.extend(SWIPES.iter().map(|s| format!("swipe.{s}")));
+        gestures.extend(ZONES.iter().map(|z| format!("tap.{z}")));
+        gestures.extend(ZONES.iter().map(|z| format!("long-tap.{z}")));
     }
-    all
+    if input.touch {
+        gestures.extend(buttons);
+        gestures
+    } else {
+        buttons.extend(gestures);
+        buttons
+    }
 }
 
 /// An input's name: "Page forward", "Hold: Menu", "Tap: top left".

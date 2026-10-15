@@ -278,6 +278,12 @@ fn start_kernel(
             buttons: true,
             touch: true,
             pen: false,
+            // The page buttons (or volume keys) and back.
+            keys: &[
+                quireink_platform::buttons::PAGE_FORWARD,
+                quireink_platform::buttons::PAGE_BACK,
+                quireink_platform::buttons::BACK,
+            ],
         },
         memory: quireink_platform::MemoryClass::Large,
     };

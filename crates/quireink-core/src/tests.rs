@@ -35,6 +35,7 @@ const DEVICE: DeviceInfo = DeviceInfo {
         buttons: true,
         touch: true,
         pen: false,
+        keys: &[],
     },
     memory: quireink_platform::MemoryClass::Large,
 };

@@ -326,7 +326,9 @@ fn build_kernel(
         } else {
             quireink_app::Fonts::Outline
         };
-        let mut builder = Kernel::builder(profile.device)
+        let mut device = profile.device;
+        device.input.keys = profile.buttons;
+        let mut builder = Kernel::builder(device)
             .storage(storage)
             .glyph_cache(profile.glyph_cache)
             .network(true)
