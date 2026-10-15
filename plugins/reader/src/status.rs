@@ -126,7 +126,7 @@ pub(crate) fn register(r: &mut dyn Registrar) -> Result<(), RegisterError> {
             SIZE,
             "reader.status.size",
             SettingKind::Int { min: 5, max: 16 },
-            SettingValue::Int(8),
+            SettingValue::Int(6),
         )
         .group(GROUP)
         .unit("core.unit.pt")

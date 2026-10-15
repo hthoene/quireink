@@ -4,6 +4,11 @@ What changes from one release of QuireInk to the next. Versions follow
 [Semantic Versioning](https://semver.org); before 1.0, a minor version may
 change the plugin SDK.
 
+## [Unreleased]
+
+- Smaller text by default: menus 9 pt (was 11), status lines 6 pt
+  (was 8). Both stay adjustable in the settings.
+
 ## [0.1.1] - 2026-10-15
 
 The Android app for F-Droid.

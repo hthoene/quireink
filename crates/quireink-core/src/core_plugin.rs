@@ -269,7 +269,7 @@ impl Plugin for CorePlugin {
                 settings::UI_SIZE,
                 "core.setting.ui-size",
                 SettingKind::Int { min: 7, max: 24 },
-                SettingValue::Int(11),
+                SettingValue::Int(9),
             )
             .group(groups::LOOK)
             .unit("core.unit.pt")
