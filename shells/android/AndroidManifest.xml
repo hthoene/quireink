@@ -21,13 +21,14 @@
         </intent>
     </queries>
 
-    <!-- usesCleartextTraffic: self-hosted sync servers often answer over
+    <!-- extractNativeLibs false: the library is stored in the APK, aligned,
+         and runs from there. usesCleartextTraffic: self-hosted sync servers often answer over
          plain http in the home network. -->
     <application
         android:label="QuireInk"
         android:icon="@mipmap/ic_launcher"
         android:hasCode="true"
-        android:extractNativeLibs="true"
+        android:extractNativeLibs="false"
         android:allowBackup="true"
         android:requestLegacyExternalStorage="true"
         android:usesCleartextTraffic="true">
