@@ -17,11 +17,10 @@ use quireink_sdk::{
     Screen, SettingValue, http_params,
 };
 
-use quireink_sdk::md5;
+use quireink_sdk::{json, md5};
 
 use crate::{
-    ACCOUNT_CHANGED, SERVER, USER, json, normalize_server, save_key, server, server_label,
-    server_request,
+    ACCOUNT_CHANGED, SERVER, USER, normalize_server, save_key, server, server_label, server_request,
 };
 
 /// Replies of the keyboard and the server.

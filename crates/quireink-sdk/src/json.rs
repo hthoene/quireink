@@ -1,12 +1,13 @@
-//! The little JSON the sync server speaks: flat objects of strings and
-//! numbers. Nested values are skipped.
+//! The little JSON web services answer with: flat objects of strings and
+//! numbers (e.g. a sync server's, an encyclopedia's summary). Nested
+//! values are skipped.
 
 use alloc::string::String;
 use alloc::vec::Vec;
 
 /// A value of a flat object.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) enum Value {
+pub enum Value {
     Str(String),
     Num(f64),
     /// `true`, `false`, `null` or a nested object or array.
@@ -14,13 +15,13 @@ pub(crate) enum Value {
 }
 
 /// The members of a JSON object; empty if `text` is none.
-pub(crate) fn object(text: &str) -> Vec<(String, Value)> {
+pub fn object(text: &str) -> Vec<(String, Value)> {
     let mut p = Parser(text.trim().chars().peekable());
     p.object().unwrap_or_default()
 }
 
 /// The string member `key` of an object.
-pub(crate) fn text<'a>(members: &'a [(String, Value)], key: &str) -> Option<&'a str> {
+pub fn text<'a>(members: &'a [(String, Value)], key: &str) -> Option<&'a str> {
     members.iter().find_map(|(k, v)| match v {
         Value::Str(s) if k == key => Some(s.as_str()),
         _ => None,
@@ -28,7 +29,7 @@ pub(crate) fn text<'a>(members: &'a [(String, Value)], key: &str) -> Option<&'a 
 }
 
 /// The number member `key` of an object.
-pub(crate) fn number(members: &[(String, Value)], key: &str) -> Option<f64> {
+pub fn number(members: &[(String, Value)], key: &str) -> Option<f64> {
     members.iter().find_map(|(k, v)| match v {
         Value::Num(n) if k == key => Some(*n),
         _ => None,
@@ -36,7 +37,7 @@ pub(crate) fn number(members: &[(String, Value)], key: &str) -> Option<f64> {
 }
 
 /// `text` as a JSON string literal.
-pub(crate) fn string(text: &str) -> String {
+pub fn string(text: &str) -> String {
     let mut out = String::from("\"");
     for c in text.chars() {
         match c {

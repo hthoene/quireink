@@ -129,6 +129,8 @@ enum State {
 
 struct Popup {
     word: String,
+    /// The book's language, passed on to an online lookup.
+    language: Option<String>,
     dictionaries: Vec<Dictionary>,
     state: State,
     /// The definitions (or a message), and its lines as byte ranges.
@@ -155,6 +157,7 @@ impl Popup {
         let top = display.height * 9 / 20;
         let mut popup = Self {
             word: params.get(params::WORD).unwrap_or_default().to_string(),
+            language: params.get(params::LANGUAGE).map(ToString::to_string),
             dictionaries: Vec::new(),
             state: State::Ready,
             text: String::new(),
@@ -245,6 +248,57 @@ impl Popup {
         self.text = text;
     }
 
+    /// Where *Online* is in the header, if the word can be looked up
+    /// online: left of the page note.
+    fn online_area(&self, env: &Env<'_>, note: &str) -> Option<Rect> {
+        if !env.has_slot(&slots::LOOKUP_ONLINE) || !env.network {
+            return None;
+        }
+        let font = self.style.font(env)?;
+        let header = self.header();
+        let margin = self.style.margin as f32;
+        let note_width = font.measure(self.style.small, note);
+        let gap = if note.is_empty() { 0.0 } else { margin };
+        let label = font.measure(self.style.small, env.i18n.tr("dictionary.online"));
+        let right = f32::from(header.width) - margin - note_width - gap;
+        let x = (right - label).max(0.0);
+        Some(Rect::new(
+            x as u16,
+            header.y,
+            (label + margin) as u16,
+            header.height,
+        ))
+    }
+
+    /// Opens the online lookup instead.
+    fn online(&self, cx: &mut Cx<'_, '_>) {
+        let mut params = Params::new().with(params::WORD, self.word.clone());
+        if let Some(language) = &self.language {
+            params = params.with(params::LANGUAGE, language.clone());
+        }
+        cx.command(Command::Back);
+        cx.command(Command::OpenSlot(slots::LOOKUP_ONLINE, params));
+    }
+
+    /// The note in the header: preparing, or the page.
+    fn note(&self, env: &Env<'_>) -> String {
+        let rows = self.rows(env);
+        match &self.state {
+            State::Preparing(_, done, total) => env.i18n.format(
+                "dictionary.preparing",
+                &[("percent", Arg::Int((done * 100 / (*total).max(1)) as i64))],
+            ),
+            State::Ready if self.lines.len() > rows => env.i18n.format(
+                "dictionary.page",
+                &[
+                    ("page", Arg::Int((self.top / rows + 1) as i64)),
+                    ("pages", Arg::Int(self.lines.len().div_ceil(rows) as i64)),
+                ],
+            ),
+            State::Ready => String::new(),
+        }
+    }
+
     fn header(&self) -> Rect {
         Rect::new(
             self.region.x,
@@ -313,23 +367,22 @@ impl Screen for Popup {
         // The word, and where in the definitions the page is.
         let header = self.header();
         let rows = self.rows(env);
-        let note = match &self.state {
-            State::Preparing(_, done, total) => env.i18n.format(
-                "dictionary.preparing",
-                &[("percent", Arg::Int((done * 100 / (*total).max(1)) as i64))],
-            ),
-            State::Ready if self.lines.len() > rows => env.i18n.format(
-                "dictionary.page",
-                &[
-                    ("page", Arg::Int((self.top / rows + 1) as i64)),
-                    ("pages", Arg::Int(self.lines.len().div_ceil(rows) as i64)),
-                ],
-            ),
-            State::Ready => String::new(),
-        };
+        let note = self.note(env);
         let margin = style.margin as f32;
         let note_width = font.measure(style.small, &note);
-        let right = f32::from(header.width) - margin - note_width;
+        let mut right = f32::from(header.width) - margin - note_width;
+        if let Some(online) = self.online_area(env, &note) {
+            ui::draw_label(
+                canvas,
+                &font,
+                style.small,
+                f32::from(online.x),
+                header,
+                env.i18n.tr("dictionary.online"),
+                Color::BLACK,
+            );
+            right = f32::from(online.x);
+        }
         ui::draw_label(
             canvas,
             &font,
@@ -433,6 +486,8 @@ impl Screen for Popup {
             self.scroll(&env, false, cx);
         } else if *a == actions::CONFIRM {
             cx.command(Command::Back);
+        } else if *a == actions::MENU && self.online_area(&env, "").is_some() {
+            self.online(cx);
         } else {
             return Handled::No;
         }
@@ -444,6 +499,14 @@ impl Screen for Popup {
             return Handled::No;
         }
         let env = *cx.env();
+        let note = self.note(&env);
+        if self
+            .online_area(&env, &note)
+            .is_some_and(|area| area.contains(gesture.start))
+        {
+            self.online(cx);
+            return Handled::Yes;
+        }
         let forward = gesture.start.x > i32::from(self.region.width) / 3;
         // At the end, a tap closes the panel.
         if !self.scroll(&env, forward, cx) && forward {

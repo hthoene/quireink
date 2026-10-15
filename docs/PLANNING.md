@@ -787,7 +787,7 @@ makes it replaceable. ✅ done, 🔶 partly, ⬜ open.
 | C9 | Sleep screen: cover, own picture, calendar, statistics | Slot `core.sleep` | ⬜ |
 | C10 | Text filters between format and layout: a style sheet per book, replaced words, reading aids, fonts for dyslexia | Document filter stage (§7.5) | ⬜ |
 | C11 | Footnotes over the page or jumped to; note marks recognised by their text (1, [2], *) | Setting `reader.footnotes`, screen `reader.footnote`, event `reader.follow` | ✅ |
-| C12 | Dictionary sources beside StarDict: online dictionaries, translators, Wikipedia | Dictionary providers | ⬜ |
+| C12 | Looking up beside StarDict: Wikipedia summaries online; translators or online dictionaries by plugins | Slot `core.lookup-online` (offered in the dictionary when bound and online), `wikipedia` plugin, `quireink_sdk::json` | ✅ |
 | C13 | Reading aloud | Speech engines as providers | ⬜ |
 | C14 | Library order: recently read or by name, folders as collections, by author and by series (from the books, also EPUB 3 and Calibre series) | `files` plugin: catalog made in the background, views `files.by-author`, `files.by-series` | 🔶 (tags open) |
 | C15 | Export of highlights and notes: Markdown in `Notes` beside the library; Obsidian, Joplin, Readwise, KOReader by plugins | Event `reader.notes-exported` for exporter plugins | 🔶 (Markdown done; exporter plugins open) |

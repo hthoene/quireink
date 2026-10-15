@@ -24,7 +24,6 @@ extern crate alloc;
 
 mod account;
 mod confirm;
-mod json;
 
 use quireink_sdk::md5;
 
@@ -38,6 +37,7 @@ use core::cell::RefCell;
 
 use quireink_sdk::builtin::{events, params};
 use quireink_sdk::document::Locator;
+use quireink_sdk::json;
 use quireink_sdk::{
     ActionSpec, Arg, Command, Env, HttpRequest, Id, Instant, Manifest, MenuEntry, Params, Plugin,
     RegisterError, Registrar, SDK_VERSION, ScreenSpec, SettingGroupSpec, SettingKind, SettingSpec,

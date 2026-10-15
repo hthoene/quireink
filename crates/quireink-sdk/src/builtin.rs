@@ -60,6 +60,12 @@ pub mod slots {
     /// [`LANGUAGE`](super::params::LANGUAGE). The standard dictionary
     /// binds here; translators or encyclopedias can too.
     pub const LOOKUP: Id = Id::new_static("core.lookup");
+    /// Looks a word up online (an overlay), with the same parameters as
+    /// [`LOOKUP`]: an encyclopedia, an online dictionary, a translator.
+    /// Dictionaries offer it beside their own entries when a screen is
+    /// bound here ([`Env::has_slot`](crate::Env::has_slot)) and there is
+    /// a network.
+    pub const LOOKUP_ONLINE: Id = Id::new_static("core.lookup-online");
     /// Shows a menu as a panel of controls for quick changes (an overlay):
     /// parameter [`MENU`](super::params::MENU). The reader opens its
     /// font and layout menu this way.
