@@ -1,0 +1,28 @@
+name: Android tools
+description: >
+  The tools of shells/android/versions.env (Rust, NDK, build tools,
+  platform, cargo-ndk, JDK), so the app comes out byte for byte the same.
+inputs:
+  root:
+    description: Where the repository is checked out.
+    default: "."
+runs:
+  using: composite
+  steps:
+    - name: The versions
+      shell: bash
+      run: grep -E '^[A-Z_]+=' "${{ inputs.root }}/shells/android/versions.env" >> "$GITHUB_ENV"
+    - uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: ${{ env.JDK_VERSION }}
+    - name: Rust, the SDK's parts and cargo-ndk
+      shell: bash
+      run: |
+        rustup toolchain install "$RUST_VERSION" --profile minimal --target aarch64-linux-android
+        # Over rust-toolchain.toml, which follows stable.
+        echo "RUSTUP_TOOLCHAIN=$RUST_VERSION" >> "$GITHUB_ENV"
+        yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+          "ndk;$NDK_VERSION" "build-tools;$BUILD_TOOLS_VERSION" "platforms;android-$PLATFORM_VERSION" > /dev/null
+        echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+        cargo +"$RUST_VERSION" install cargo-ndk --version "$CARGO_NDK_VERSION" --locked

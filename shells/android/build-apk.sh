@@ -104,8 +104,13 @@ mkdir -p "$out/apk/lib" "$out/apk/assets/books"
 echo "Building the native library ($profile)"
 # No paths of this computer in the library, and no symbols: the same
 # bytes wherever it is built, and smaller.
-src="$(pwd -W 2>/dev/null || pwd)"
+src="$(pwd)"
 cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+# On Windows, rustc sees the paths the Windows way (C:\Users\...).
+if command -v cygpath > /dev/null; then
+    src="$(cygpath -w "$src")"
+    cargo_home="$(cygpath -w "$cargo_home")"
+fi
 export RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=$src=/quireink --remap-path-prefix=$cargo_home=/cargo"
 export CARGO_PROFILE_RELEASE_STRIP=symbols
 cargo ndk -t arm64-v8a --platform 26 -o "$out/apk/lib" build "${cargo_profile[@]}" -p quireink-android
@@ -124,9 +129,15 @@ echo "Packaging"
 version="$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)"
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]] || fail "no version in Cargo.toml"
 # Android installs a version over another only if its code is higher:
-# 1.2.3 is 10203 (a pre-release counts as its release).
+# 1.2.3 is 10203 (a pre-release counts as its release). The manifest has
+# both, where F-Droid looks for them; they must be the workspace's.
 IFS=. read -r major minor patch <<< "${version%%-*}"
 version_code=$((major * 10000 + minor * 100 + patch))
+manifest=shells/android/AndroidManifest.xml
+manifest_name="$(sed -n 's/.*android:versionName="\([^"]*\)".*/\1/p' "$manifest")"
+manifest_code="$(sed -n 's/.*android:versionCode="\([^"]*\)".*/\1/p' "$manifest")"
+[[ "$manifest_name" == "$version" && "$manifest_code" == "$version_code" ]] \
+    || fail "$manifest says $manifest_name ($manifest_code); Cargo.toml asks for $version ($version_code)"
 cp samples/library/books/*.epub samples/library/books/*.txt "$out/apk/assets/books/"
 # Resources: the launcher icon (drawn by tools/android-icon.py).
 rm -f "$out/res.zip" "$out/unsigned.apk"
@@ -135,8 +146,7 @@ rm -f "$out/res.zip" "$out/unsigned.apk"
     --manifest shells/android/AndroidManifest.xml \
     "$out/res.zip" \
     -I "$platform" \
-    --min-sdk-version 26 --target-sdk-version "$PLATFORM_VERSION" \
-    --version-code "$version_code" --version-name "$version"
+    --min-sdk-version 26 --target-sdk-version "$PLATFORM_VERSION"
 # The library, the books and the code: sorted, stored, at a fixed time.
 "$python" shells/android/pack.py "$out/unsigned.apk" "$out/apk"
 "$zipalign" -f -p 4 "$out/unsigned.apk" "$out/aligned.apk"

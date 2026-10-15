@@ -1,0 +1,39 @@
+name: Reproducible build
+
+# Builds the Android app twice, in two folders, with the tools of
+# shells/android/versions.env, and compares the two: F-Droid publishes the
+# app signed with QuireInk's key only if its own build is the same.
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  twice:
+    name: Twice the same
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: first
+      - uses: actions/checkout@v4
+        with:
+          path: elsewhere/second
+      - uses: ./first/.github/actions/android-tools
+        with:
+          root: first
+      - name: Build both and compare
+        env:
+          QUIREINK_REPRODUCIBLE: 1
+          QUIREINK_UNSIGNED: 1
+        run: |
+          (cd first && shells/android/build-apk.sh)
+          (cd elsewhere/second && shells/android/build-apk.sh)
+          sha256sum first/target/android/quireink-unsigned.apk elsewhere/second/target/android/quireink-unsigned.apk
+          cmp first/target/android/quireink-unsigned.apk elsewhere/second/target/android/quireink-unsigned.apk

@@ -27,15 +27,11 @@ jobs:
             exit 1
           fi
           echo "VERSION=$version" >> "$GITHUB_ENV"
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-linux-android
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo install cargo-ndk --locked
-      - name: Find the NDK
-        run: echo "ANDROID_NDK_HOME=${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_ROOT}" >> "$GITHUB_ENV"
+      # The tools F-Droid builds with too: the same app, byte for byte.
+      - uses: ./.github/actions/android-tools
       - name: Build the app, signed with the release key
         env:
+          QUIREINK_REPRODUCIBLE: 1
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           QUIREINK_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           QUIREINK_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
