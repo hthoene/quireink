@@ -153,6 +153,7 @@ impl HtmlDocument {
             title: found.title.or_else(|| Some(name.to_string())),
             authors: Vec::new(),
             language: found.language,
+            ..Metadata::default()
         };
         Ok(Self {
             path: path.to_string(),

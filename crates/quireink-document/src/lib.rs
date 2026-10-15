@@ -53,6 +53,10 @@ pub struct Metadata {
     pub authors: Vec<String>,
     /// BCP 47 language tag, e.g. `de` or `en-GB`.
     pub language: Option<String>,
+    /// The series the book belongs to, if it says so.
+    pub series: Option<String>,
+    /// Its number in the series, e.g. `2` or `2.5`, as written.
+    pub series_index: Option<String>,
 }
 
 /// The role of a block; layout engines style blocks by kind.

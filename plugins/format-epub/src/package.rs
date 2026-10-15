@@ -30,7 +30,7 @@ use crate::css;
 use crate::obfuscation::Method;
 
 /// Bump when the cache format or the conversion changes.
-pub(crate) const CACHE_VERSION: u32 = 14;
+pub(crate) const CACHE_VERSION: u32 = 15;
 
 /// A chapter: where it is in the archive and its uncompressed size.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -193,6 +193,10 @@ pub(crate) fn load(storage: &dyn Storage, cache: &str, book_size: u64) -> Option
                 metadata.authors.push(entry.value.as_str().into_owned());
             }
             ("book", "language") => metadata.language = Some(entry.value.as_str().into_owned()),
+            ("book", "series") => metadata.series = Some(entry.value.as_str().into_owned()),
+            ("book", "series-index") => {
+                metadata.series_index = Some(entry.value.as_str().into_owned());
+            }
             ("book", "sections") => sections = entry.value.as_u32(),
             ("book", "toc") => toc_len = entry.value.as_u32(),
             ("book", "cover") => cover = Some(entry.value.as_str().into_owned()),
@@ -486,6 +490,9 @@ pub(crate) fn build(
     // The unique identifier, the key of obfuscated fonts.
     let mut unique_id: Option<String> = None;
     let mut identifier = String::new();
+    // EPUB 3 series: `<meta property="belongs-to-collection" id="c">`, its
+    // number in `<meta refines="#c" property="group-position">`.
+    let mut collection_id: Option<String> = None;
     tokenize(storage, archive, &opf_path, &mut |token| match token {
         Token::Start {
             name,
@@ -515,6 +522,34 @@ pub(crate) fn build(
             "meta" if attrs.get("name").as_deref() == Some("cover") => {
                 cover_id = attrs.get("content").map(|v| hash(&v));
             }
+            // Calibre's series.
+            "meta" if attrs.get("name").as_deref() == Some("calibre:series") => {
+                if let Some(series) = attrs.get("content").map(|v| clean(&v)) {
+                    metadata.series.get_or_insert(series);
+                }
+            }
+            "meta" if attrs.get("name").as_deref() == Some("calibre:series_index") => {
+                if let Some(index) = attrs.get("content").map(|v| clean(&v)) {
+                    metadata.series_index.get_or_insert(index);
+                }
+            }
+            "meta" if !self_closing => {
+                let property = attrs.get("property");
+                if property.as_deref() == Some("belongs-to-collection") {
+                    collection_id = attrs.get("id").map(|v| v.into_owned());
+                    capture = Some("collection");
+                    text.clear();
+                } else if property.as_deref() == Some("group-position")
+                    && attrs.get("refines").is_some_and(|r| {
+                        collection_id
+                            .as_deref()
+                            .is_some_and(|id| r.trim_start_matches('#') == id)
+                    })
+                {
+                    capture = Some("position");
+                    text.clear();
+                }
+            }
             "itemref" => {
                 if let Some(id) = attrs.get("idref") {
                     let position = spine_ids.len() as u32;
@@ -526,8 +561,15 @@ pub(crate) fn build(
         Token::Text(t) if capture.is_some() => text.push_str(&decode(&t)),
         Token::CData(t) if capture.is_some() => text.push_str(t),
         Token::End { name } => {
+            // Series are captured from `<meta>` elements.
+            let element = |field: &'static str| -> &'static str {
+                match field {
+                    "collection" | "position" => "meta",
+                    field => field,
+                }
+            };
             if let Some(field) = capture
-                && local_name(name) == field
+                && local_name(name) == element(field)
             {
                 let value = clean(&text);
                 match field {
@@ -539,6 +581,12 @@ pub(crate) fn build(
                         metadata.language = Some(value);
                     }
                     "identifier" => identifier = value,
+                    "collection" if !value.is_empty() => {
+                        metadata.series.get_or_insert(value);
+                    }
+                    "position" if !value.is_empty() => {
+                        metadata.series_index.get_or_insert(value);
+                    }
                     _ => {}
                 }
                 capture = None;
@@ -694,6 +742,12 @@ pub(crate) fn build(
     }
     if let Some(language) = &metadata.language {
         set("book", "language", language);
+    }
+    if let Some(series) = &metadata.series {
+        set("book", "series", series);
+    }
+    if let Some(index) = &metadata.series_index {
+        set("book", "series-index", index);
     }
     set("book", "sections", &spine.len().to_string());
     set("book", "toc", &toc_len.to_string());

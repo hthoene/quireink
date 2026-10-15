@@ -18,6 +18,9 @@ use crate::PLUGIN;
 
 /// Books remembered for "recently read" order.
 const MAX_OPENED: usize = 100;
+/// What the details hold; books cached with another version are read
+/// again (version 2 added the series).
+const DETAILS: u32 = 2;
 
 /// Details of a book, cached in storage.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -29,6 +32,9 @@ pub(crate) struct Book {
     pub indexed: bool,
     pub title: Option<String>,
     pub author: Option<String>,
+    /// The series and the book's number in it, if it names one.
+    pub series: Option<String>,
+    pub series_index: Option<String>,
     pub cover: Option<ImageRef>,
     /// Reading progress in percent, once opened.
     pub progress: Option<u8>,
@@ -59,6 +65,7 @@ pub(crate) fn load(storage: &dyn Storage, path: &str) -> Option<Book> {
     let source = core::str::from_utf8(&data).ok()?;
     let mut book = Book::default();
     let (mut cover_path, mut cover_width, mut cover_height) = (None, None, None);
+    let mut version = 1;
     for entry in config::parse(source).filter_map(Result::ok) {
         let text = || entry.value.as_str().into_owned();
         match entry.key {
@@ -66,6 +73,9 @@ pub(crate) fn load(storage: &dyn Storage, path: &str) -> Option<Book> {
             "indexed" => book.indexed = entry.value.as_bool().unwrap_or_default(),
             "title" => book.title = Some(text()),
             "author" => book.author = Some(text()),
+            "series" => book.series = Some(text()),
+            "series-index" => book.series_index = Some(text()),
+            "version" => version = entry.value.as_u32().unwrap_or(1),
             "cover" => cover_path = Some(text()),
             "cover-width" => cover_width = entry.value.as_u32(),
             "cover-height" => cover_height = entry.value.as_u32(),
@@ -80,6 +90,8 @@ pub(crate) fn load(storage: &dyn Storage, path: &str) -> Option<Book> {
             height,
         });
     }
+    // Details of an older kind are read again.
+    book.indexed &= version == DETAILS;
     (book.size == size).then_some(book)
 }
 
@@ -88,11 +100,18 @@ fn save(storage: &dyn Storage, path: &str, book: &Book) {
     let mut set = |key: &str, value: &str| ini = config::set(&ini, "book", key, value);
     set("size", &book.size.to_string());
     set("indexed", if book.indexed { "on" } else { "off" });
+    set("version", &DETAILS.to_string());
     if let Some(title) = &book.title {
         set("title", title);
     }
     if let Some(author) = &book.author {
         set("author", author);
+    }
+    if let Some(series) = &book.series {
+        set("series", series);
+    }
+    if let Some(index) = &book.series_index {
+        set("series-index", index);
     }
     if let Some(cover) = &book.cover {
         set("cover", &cover.path);
@@ -118,6 +137,8 @@ pub(crate) fn index(env: &Env<'_>, path: &str) -> Book {
         let metadata = document.metadata();
         book.title = metadata.title.clone();
         book.author = metadata.authors.first().cloned();
+        book.series = metadata.series.clone();
+        book.series_index = metadata.series_index.clone();
         book.cover = document.cover(storage).ok().flatten();
     }
     save(storage, path, &book);
@@ -184,6 +205,8 @@ mod tests {
             indexed: true,
             title: Some("A = \"title\"".into()),
             author: Some("Ann".into()),
+            series: Some("Tales".into()),
+            series_index: Some("2".into()),
             cover: Some(ImageRef {
                 path: "x.gray".into(),
                 width: 30,

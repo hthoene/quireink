@@ -24,6 +24,7 @@ extern crate alloc;
 mod books;
 mod folders;
 mod listing;
+mod shelves;
 
 use alloc::borrow::Cow;
 use alloc::boxed::Box;
@@ -57,6 +58,10 @@ pub const SORT_NAME: &str = "files.sort.name";
 pub const CHOOSE_FOLDER: Id = Id::new_static("files.choose-folder");
 /// The library's menu.
 pub const MENU: Id = Id::new_static("files.menu");
+/// The library by author, and by series.
+pub const BY_AUTHOR: Id = Id::new_static("files.by-author");
+pub const BY_SERIES: Id = Id::new_static("files.by-series");
+const SHELF_SCREEN: Id = Id::new_static("files.shelf");
 
 /// The library plugin.
 #[derive(Debug, Default)]
@@ -84,6 +89,32 @@ impl Plugin for Files {
             title: Cow::Borrowed("files.choose.title"),
             factory: Box::new(|env, params| Box::new(folders::FolderChooser::new(env, params))),
         })?;
+        r.add_screen(ScreenSpec {
+            id: SHELF_SCREEN,
+            title: Cow::Borrowed("files.title"),
+            factory: Box::new(|env, params| Box::new(shelves::ShelfScreen::new(env, params))),
+        })?;
+        for (action, mode, title, icon) in [
+            (BY_AUTHOR, shelves::MODE_AUTHORS, "files.by-author", "user"),
+            (
+                BY_SERIES,
+                shelves::MODE_SERIES,
+                "files.by-series",
+                "list-details",
+            ),
+        ] {
+            r.add_action(quireink_sdk::ActionSpec {
+                id: action.clone(),
+                title: Cow::Borrowed(title),
+                handler: Some(Box::new(move |_: &Env<'_>, out: &mut Vec<Command>| {
+                    out.push(Command::OpenScreen(
+                        SHELF_SCREEN,
+                        Params::new().with(params::MODE, mode),
+                    ));
+                })),
+            })?;
+            r.add_icon(action, Cow::Borrowed(icon))?;
+        }
         r.bind_slot(slots::HOME, SCREEN, Priority::FALLBACK)?;
         r.bind_slot(slots::LIBRARY, SCREEN, Priority::DEFAULT)?;
         r.add_setting(
@@ -112,6 +143,8 @@ impl Plugin for Files {
         )?;
         for (item, order) in [
             (SORT, 10),
+            (BY_AUTHOR, 12),
+            (BY_SERIES, 14),
             (ROOT, 20),
             (core_settings::NIGHT_MODE, 30),
             (core_actions::SETTINGS, 40),

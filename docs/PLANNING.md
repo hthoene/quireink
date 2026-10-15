@@ -789,7 +789,7 @@ makes it replaceable. ✅ done, 🔶 partly, ⬜ open.
 | C11 | Footnotes over the page or jumped to; note marks recognised by their text (1, [2], *) | Setting `reader.footnotes`, screen `reader.footnote`, event `reader.follow` | ✅ |
 | C12 | Dictionary sources beside StarDict: online dictionaries, translators, Wikipedia | Dictionary providers | ⬜ |
 | C13 | Reading aloud | Speech engines as providers | ⬜ |
-| C14 | Library order: sort, group by author, series or tag, collections | Library views and sorters | 🔶 (recent/name, folders) |
+| C14 | Library order: recently read or by name, folders as collections, by author and by series (from the books, also EPUB 3 and Calibre series) | `files` plugin: catalog made in the background, views `files.by-author`, `files.by-series` | 🔶 (tags open) |
 | C15 | Export of highlights and notes: Markdown in `Notes` beside the library; Obsidian, Joplin, Readwise, KOReader by plugins | Event `reader.notes-exported` for exporter plugins | 🔶 (Markdown done; exporter plugins open) |
 | C16 | More sync: Calibre wireless, Nextcloud, Syncthing (books, progress, notes) | Sync providers | 🔶 (kosync, statistics over WebDAV, OPDS) |
 | C17 | Buttons, held buttons, tap zones, held taps and swipes changed on the device, everywhere or while reading; a left-handed layout | `keys` plugin, `Command::Bind`, `Env::keys`, action `core.nothing`, preset `core.left-handed` | ✅ (custom zone shapes open) |
