@@ -1,4 +1,7 @@
 //! Bookmarks and highlights of a book, and the screen that lists them.
+//! The list ends with *Export as Markdown*: a file in `Notes` beside the
+//! library folder, then the event [`EXPORTED`] for plugins that take it
+//! further (a notes app, a sync).
 //!
 //! They are kept in `annotations.txt` in the book's data folder, one per
 //! line, sorted by position: kind, start and end (section and offset in
@@ -20,6 +23,12 @@ use quireink_sdk::{
 
 use crate::GOTO;
 use crate::toc::locator_params;
+
+/// Emitted after the notes of a book were exported: parameters `path`
+/// (the Markdown file) and `title` (the book's).
+pub const EXPORTED: Id = Id::new_static("reader.notes-exported");
+/// Where exported notes go, beside the library folder.
+const NOTES: &str = "Notes";
 
 /// Longest snippet kept with an annotation.
 const MAX_TEXT: usize = 240;
@@ -150,6 +159,49 @@ pub(crate) fn remove(storage: &dyn Storage, dir: &str, remove: impl Fn(&Mark) ->
     removed
 }
 
+/// The notes of the book at `path` as Markdown: its title and author,
+/// the highlights as quotes, the bookmarks as a list, each with where it
+/// is in the book.
+pub(crate) fn markdown(env: &Env<'_>, title: &str, author: &str, all: &[Annotation]) -> String {
+    let mut text = format!("# {title}\n\n");
+    if !author.is_empty() {
+        text.push_str(&format!("{author}\n\n"));
+    }
+    let highlights: Vec<&Annotation> = all
+        .iter()
+        .filter(|a| a.mark.kind == Kind::Highlight)
+        .collect();
+    if !highlights.is_empty() {
+        text.push_str(&format!("## {}\n\n", env.i18n.tr("reader.highlights")));
+        for a in highlights {
+            text.push_str(&format!("> {}\n>\n> {} %\n\n", a.text, a.percent));
+        }
+    }
+    let bookmarks: Vec<&Annotation> = all
+        .iter()
+        .filter(|a| a.mark.kind == Kind::Bookmark)
+        .collect();
+    if !bookmarks.is_empty() {
+        text.push_str(&format!("## {}\n\n", env.i18n.tr("reader.bookmarks")));
+        for a in bookmarks {
+            text.push_str(&format!("- {} %: {}\n", a.percent, a.text));
+        }
+        text.push('\n');
+    }
+    text
+}
+
+/// The folder notes are exported to: `Notes` beside the library folder.
+fn notes_dir(env: &Env<'_>) -> String {
+    let library = env.settings.text("files.root").trim_matches('/');
+    let parent = quireink_sdk::files::parent(library);
+    if parent.is_empty() {
+        String::from(NOTES)
+    } else {
+        format!("{parent}/{NOTES}")
+    }
+}
+
 /// Lists the bookmarks and highlights of a book (parameter `path`);
 /// choosing one goes there.
 pub(crate) struct AnnotationsScreen {
@@ -178,7 +230,62 @@ impl AnnotationsScreen {
         }
     }
 
+    /// Writes the notes as Markdown and tells where.
+    fn export(&self, cx: &mut Cx<'_, '_>) {
+        let env = *cx.env();
+        let (title, author) = match env.formats.open(env.storage, &self.path) {
+            Ok(document) => {
+                let m = document.metadata();
+                (m.title.clone().unwrap_or_default(), m.authors.join(", "))
+            }
+            Err(_) => (String::new(), String::new()),
+        };
+        let title = if title.is_empty() {
+            quireink_sdk::files::name(&self.path).to_string()
+        } else {
+            title
+        };
+        let base = if author.is_empty() {
+            title.clone()
+        } else {
+            format!("{author} - {title}")
+        };
+        let name =
+            quireink_sdk::web::clean_name(&base, 100).unwrap_or_else(|| String::from("notes"));
+        let dir = notes_dir(&env);
+        let _ = env.storage.create_dir(&dir);
+        let file = format!("{dir}/{name}.md");
+        let text = markdown(&env, &title, &author, &self.annotations);
+        let message = match env.storage.write(&file, text.as_bytes()) {
+            Ok(()) => {
+                cx.command(Command::Emit(
+                    EXPORTED,
+                    Params::new()
+                        .with(params::PATH, file.clone())
+                        .with(params::TITLE, title),
+                ));
+                env.i18n.format(
+                    "reader.exported",
+                    &[("path", quireink_sdk::Arg::Str(&file))],
+                )
+            }
+            Err(_) => env.i18n.tr("reader.export-failed").to_string(),
+        };
+        cx.command(Command::Notify(message));
+    }
+
+    /// The rows: the annotations, then *Export* if there are any.
+    fn len(&self) -> usize {
+        match self.annotations.len() {
+            0 => 0,
+            n => n + 1,
+        }
+    }
+
     fn open_entry(&self, index: usize, cx: &mut Cx<'_, '_>) {
+        if index == self.annotations.len() && index > 0 {
+            return self.export(cx);
+        }
         if let Some(annotation) = self.annotations.get(index) {
             cx.command(Command::Back);
             cx.command(Command::Emit(
@@ -192,7 +299,7 @@ impl AnnotationsScreen {
 impl Screen for AnnotationsScreen {
     fn draw(&mut self, canvas: &mut Canvas<'_>, env: &Env<'_>) {
         let style = self.style;
-        let len = self.annotations.len();
+        let len = self.len();
         self.header.draw(
             canvas,
             env,
@@ -214,10 +321,21 @@ impl Screen for AnnotationsScreen {
         let annotations = &self.annotations;
         self.list
             .draw(canvas, &style, len, |canvas, index, rect, focused| {
-                let a = &annotations[index];
+                let Some(a) = annotations.get(index) else {
+                    let title = env.i18n.tr("reader.export");
+                    let note = env.i18n.tr("reader.export.help");
+                    ui::draw_noted_row(canvas, env, &style, rect, focused, title, "›", note);
+                    return;
+                };
                 let (kind, title) = match a.mark.kind {
                     Kind::Bookmark => ("reader.bookmark", a.text.clone()),
-                    Kind::Highlight => ("reader.highlight", format!("„{}“", a.text)),
+                    Kind::Highlight => (
+                        "reader.highlight",
+                        env.i18n.format(
+                            "reader.quoted",
+                            &[("text", quireink_sdk::Arg::Str(&a.text))],
+                        ),
+                    ),
                 };
                 let note = format!("{} · {} %", env.i18n.tr(kind), a.percent);
                 ui::draw_noted_row(canvas, env, &style, rect, focused, &title, "", &note);
@@ -225,7 +343,7 @@ impl Screen for AnnotationsScreen {
     }
 
     fn on_action(&mut self, action: &Id, cx: &mut Cx<'_, '_>) -> Handled {
-        let len = self.annotations.len();
+        let len = self.len();
         let rows = self.list.rows() as isize;
         let a = action;
         let delta = if [actions::UP, actions::LEFT, actions::PREVIOUS].contains(a) {
@@ -259,12 +377,12 @@ impl Screen for AnnotationsScreen {
             return Handled::No;
         }
         let env = *cx.env();
-        let paging = self.list.paging(self.annotations.len());
+        let paging = self.list.paging(self.len());
         if let Some(action) = self.header.tap(&env, &self.style, gesture.start, paging) {
             cx.command(Command::RunAction(action));
             return Handled::Yes;
         }
-        match self.list.hit(gesture.start, self.annotations.len()) {
+        match self.list.hit(gesture.start, self.len()) {
             Some(index) => {
                 self.list.focus = index;
                 self.open_entry(index, cx);

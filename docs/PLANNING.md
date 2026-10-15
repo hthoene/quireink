@@ -790,7 +790,7 @@ makes it replaceable. ✅ done, 🔶 partly, ⬜ open.
 | C12 | Dictionary sources beside StarDict: online dictionaries, translators, Wikipedia | Dictionary providers | ⬜ |
 | C13 | Reading aloud | Speech engines as providers | ⬜ |
 | C14 | Library order: sort, group by author, series or tag, collections | Library views and sorters | 🔶 (recent/name, folders) |
-| C15 | Export of highlights and notes: Markdown, Obsidian, Joplin, Readwise, KOReader | Exporter plugins | ⬜ |
+| C15 | Export of highlights and notes: Markdown in `Notes` beside the library; Obsidian, Joplin, Readwise, KOReader by plugins | Event `reader.notes-exported` for exporter plugins | 🔶 (Markdown done; exporter plugins open) |
 | C16 | More sync: Calibre wireless, Nextcloud, Syncthing (books, progress, notes) | Sync providers | 🔶 (kosync, statistics over WebDAV, OPDS) |
 | C17 | Gestures and keys edited on the device; free tap zones (e.g. left-handed) | Key map editor plugin | 🔶 (`quireink.ini`, presets) |
 | C18 | Home screen widgets: reading goal, statistics, calendar, quote of the day | Widget contributions to the home screen | ⬜ |
