@@ -1,45 +1,60 @@
-//! The home screen.
+//! The home screen: pages of widgets.
 //!
-//! - **Continue reading**: the last book with its progress, one press away.
-//! - **Recently read**: the books before it.
-//! - **Widgets**: the ones chosen under Settings › Appearance (a clock,
-//!   today's reading, any plugin's), below the card.
-//! - **Shortcuts**: the entries of the `home.actions` menu (library and
-//!   settings by default). Any plugin can add shortcuts with
-//!   `Registrar::add_menu_entry`; users can redefine them in `[menus]`.
+//! - **Pages**: each a list of widgets in a setting of its own (see
+//!   `pages`): by default the status line, the date, the book being read
+//!   and the recent ones, then a second page with all tools. Swipes and
+//!   the page buttons go from page to page; dots below show where one is.
+//! - **Widgets**: the home screen's own (see `blocks`) and any plugin's
+//!   (`Registrar::add_widget`), e.g. today's reading.
+//! - **Targets**: what a widget does when tapped (open a book, a tool).
+//!   With buttons, left and right (or up and down) go from target to
+//!   target and confirm runs it; the first press shows where the focus is.
+//! - **Editing**: the pencil below the page (reached with the buttons too)
+//!   or a long press opens a list of the page's widgets to move, remove
+//!   and add, and to add or remove pages (see `edit`).
+//! - **Shortcuts**: the entries of the `home.actions` menu (the library by
+//!   default) lead the grid of tools; plugins add their own with
+//!   `Registrar::add_menu_entry`.
 //!
-//! The recently read list is built from the standard reading events
-//! (`core.book-opened`, `core.page-turned`), so it works with any reader
-//! plugin. The home screen is bound to `core.home`; replace it with any other
+//! The recently read books come from the standard reading events
+//! (`core.book-opened`, `core.page-turned`), so any reader plugin works.
+//! The home screen is bound to `core.home`; replace it with any other
 //! screen by configuration or with a plugin of higher priority.
 
 #![no_std]
 
 extern crate alloc;
 
+mod blocks;
+mod covers;
+mod edit;
+mod pages;
 mod recent;
-mod widgets;
 
 use alloc::borrow::Cow;
 use alloc::boxed::Box;
-use alloc::string::{String, ToString};
+use alloc::format;
+use alloc::string::String;
 use alloc::vec::Vec;
 
-use quireink_sdk::builtin::{actions, events, params, slots};
-use quireink_sdk::document::ImageRef;
-use quireink_sdk::ui::{self, ListChange, ListView, UiStyle};
+use quireink_sdk::builtin::{actions, events, slots};
+use quireink_sdk::ui::choice::Choice;
+use quireink_sdk::ui::{self, UiStyle};
 use quireink_sdk::{
-    Arg, Canvas, Color, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Manifest, MenuEntry,
-    Params, Plugin, Priority, Rect, RefreshMode, RegisterError, Registrar, SDK_VERSION, Screen,
-    ScreenSpec, Version,
+    Canvas, Color, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Manifest, MenuEntry,
+    Params, Plugin, Point, Priority, Rect, RefreshMode, RegisterError, Registrar, SDK_VERSION,
+    Screen, ScreenSpec, Version,
 };
-
-use crate::recent::Recent;
 
 pub const PLUGIN: Id = Id::new_static("home");
 pub const SCREEN: Id = Id::new_static("home.dashboard");
-/// Shortcuts shown on the home screen.
+/// Shortcuts at the head of the home screen's grid of tools.
 pub const ACTIONS: Id = Id::new_static("home.actions");
+/// Editing a page.
+pub(crate) const EDIT_SCREEN: Id = Id::new_static("home.edit");
+/// Adding a widget to a page.
+pub(crate) const ADD_SCREEN: Id = Id::new_static("home.add-widget");
+pub(crate) const CHOICE: Id = Id::new_static("home.choice");
 
 /// The home screen plugin.
 #[derive(Debug, Default)]
@@ -51,7 +66,7 @@ impl Plugin for Home {
             id: PLUGIN,
             name: Cow::Borrowed("Home screen"),
             description: Cow::Borrowed(
-                "The start page: continue reading, recent books and shortcuts.",
+                "The start page: pages of widgets, such as the book being read and the tools.",
             ),
             version: Version::new(0, 1, 0),
             sdk: SDK_VERSION,
@@ -64,486 +79,390 @@ impl Plugin for Home {
             title: Cow::Borrowed("home.title"),
             factory: Box::new(|env, _| Box::new(Dashboard::new(env))),
         })?;
+        r.add_screen(ScreenSpec {
+            id: EDIT_SCREEN,
+            title: Cow::Borrowed("home.edit.screen"),
+            factory: Box::new(|env, params| Box::new(edit::EditScreen::new(env, params))),
+        })?;
+        r.add_screen(ScreenSpec {
+            id: ADD_SCREEN,
+            title: Cow::Borrowed("home.edit.add"),
+            factory: Box::new(|env, params| Box::new(edit::AddScreen::new(env, params))),
+        })?;
+        r.add_screen(ScreenSpec {
+            id: CHOICE,
+            title: Cow::Borrowed("home.edit.screen"),
+            factory: Box::new(|env, params| Box::new(Choice::new(env, params))),
+        })?;
         r.bind_slot(slots::HOME, SCREEN, Priority::DEFAULT)?;
-        for (action, order) in [(actions::LIBRARY, 10), (actions::SETTINGS, 20)] {
-            r.add_menu_entry(MenuEntry {
-                menu: ACTIONS,
-                item: action,
-                order,
-            })?;
-        }
+        r.add_menu_entry(MenuEntry {
+            menu: ACTIONS,
+            item: actions::LIBRARY,
+            order: 10,
+        })?;
         for event in [events::BOOK_OPENED, events::PAGE_TURNED] {
             r.subscribe(
                 event,
                 Box::new(|env, params, _| recent::record(env, params)),
             )?;
-            r.subscribe(
-                events::BOOK_MOVED,
-                Box::new(|env, params, _| recent::moved(env, params)),
-            )?;
         }
-        widgets::register(r)?;
+        r.subscribe(
+            events::BOOK_MOVED,
+            Box::new(|env, params, _| recent::moved(env, params)),
+        )?;
+        pages::register(r)?;
+        blocks::register(r)?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/en.ini")))?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/de.ini")))?;
         Ok(())
     }
 }
 
-/// An entry of the list below the "continue reading" card.
-#[derive(Debug, Clone, PartialEq)]
-enum Item {
-    Book(Recent),
-    /// An action with the translation key of its label.
-    Action(Id, String),
+/// A widget on the page: where it is and what it showed when drawn.
+#[derive(Debug)]
+struct Placed {
+    id: String,
+    area: Rect,
+    shown: Option<String>,
 }
 
 #[derive(Debug)]
 struct Dashboard {
     style: UiStyle,
-    header: Rect,
-    card: Rect,
-    /// "Recently read" label above the list, if there is one.
-    label: Option<Rect>,
-    list: ListView,
-    current: Option<Recent>,
-    items: Vec<Item>,
-    /// The focus is on the card rather than the list.
-    on_card: bool,
-    /// The current book's cover, once looked up: `(path, cover)`.
-    cover: Option<(String, Option<ImageRef>)>,
-    /// The widgets shown, where they are, and what they showed when drawn.
-    widgets: Vec<(String, Rect, Option<String>)>,
+    page: usize,
+    pages: usize,
+    widgets: Vec<Placed>,
+    /// Where taps and the buttons' focus go, in order; the pencil last.
+    targets: Vec<(Rect, Command)>,
+    /// The target with the focus, shown once buttons are used.
+    focus: usize,
+    focus_shown: bool,
+    /// The dots and the pencil below the page.
+    footer: Rect,
+    pencil: Rect,
 }
 
 impl Dashboard {
     fn new(env: &Env<'_>) -> Self {
-        let style = UiStyle::new(env);
         let mut dashboard = Self {
-            header: Rect::default(),
-            card: Rect::default(),
-            label: None,
-            list: ListView::new(Rect::default(), style.row).focus_on_keys(env),
-            style,
-            current: None,
-            items: Vec::new(),
-            on_card: false,
-            cover: None,
+            style: UiStyle::new(env),
+            page: 0,
+            pages: 1,
             widgets: Vec::new(),
+            targets: Vec::new(),
+            focus: 0,
+            focus_shown: !env.device.input.touch,
+            footer: Rect::default(),
+            pencil: Rect::default(),
         };
-        dashboard.load(env);
+        dashboard.layout(env);
         dashboard
     }
 
-    /// Reads the recent books and shortcuts and lays out the screen.
-    fn load(&mut self, env: &Env<'_>) {
+    /// Places the page's widgets between the margins, top to bottom, as
+    /// far as they fit above the footer.
+    fn layout(&mut self, env: &Env<'_>) {
         let style = UiStyle::new(env);
-        let mut books = recent::load(env.storage);
-        books.retain(|b| env.storage.size(&b.path).is_ok());
-        let current = (!books.is_empty()).then(|| books.remove(0));
-        let mut items: Vec<Item> = books.into_iter().map(Item::Book).collect();
-        let recent_count = items.len();
-        items.extend(
-            env.menus
-                .items(ACTIONS.as_str())
-                .into_iter()
-                .map(|item| Item::Action(item.id.clone(), String::from(item.title))),
-        );
-
         let display = env.device.display;
-        let header = Rect::new(0, 0, display.width, style.header as u16);
-        let mut y = header.height + style.gap as u16;
+        let pages = pages::pages(env);
+        self.pages = pages.len();
+        self.page = self.page.min(self.pages - 1);
         let margin = style.margin as u16;
-        let card = Rect::new(
-            margin,
-            y,
-            display.width.saturating_sub(2 * margin),
-            (style.row as f32 * 2.6) as u16,
-        );
-        y += card.height + style.gap as u16;
-        // The widgets chosen, between the margins.
+        let gap = style.gap as u16;
         let width = display.width.saturating_sub(2 * margin);
-        self.widgets = widgets::chosen(env)
-            .into_iter()
-            .filter_map(|id| {
-                let height = env.widgets.height(id, env, width)?;
-                let rect = Rect::new(margin, y, width, height);
-                y += height + style.gap as u16;
-                Some((id.to_string(), rect, env.widgets.signature(id, env)))
-            })
-            .collect();
-        let label = (recent_count > 0).then(|| {
-            let rect = Rect::new(0, y, display.width, (style.row as f32 * 0.7) as u16);
-            y += rect.height;
-            rect
-        });
-        let area = Rect::new(0, y, display.width, display.height.saturating_sub(y));
-
-        let focus = self.list.focus.min(items.len().saturating_sub(1));
-        self.list = ListView::new(area, style.row).focus_on_keys(env);
-        self.list.focus = focus;
-        self.on_card = current.is_some() && (self.on_card || self.current.is_none());
-        self.list.active = !self.on_card;
-        self.style = style;
-        self.header = header;
-        self.card = card;
-        self.label = label;
-        self.current = current;
-        self.items = items;
-    }
-
-    fn focus_card(&mut self, on_card: bool, cx: &mut Cx<'_, '_>) {
-        let on_card = on_card && self.current.is_some();
-        if on_card != self.on_card {
-            self.on_card = on_card;
-            self.list.active = !on_card;
-            cx.request_redraw();
-            cx.request_refresh(RefreshMode::Fast);
-        }
-    }
-
-    fn moved(change: ListChange, cx: &mut Cx<'_, '_>) {
-        if change != ListChange::None {
-            cx.request_redraw();
-            cx.request_refresh(if change == ListChange::Page {
-                RefreshMode::Partial
-            } else {
-                RefreshMode::Fast
-            });
-        }
-    }
-
-    fn up(&mut self, cx: &mut Cx<'_, '_>) {
-        if self.on_card {
-            return;
-        }
-        if self.list.focus == 0 {
-            self.focus_card(true, cx);
-        } else {
-            Self::moved(self.list.move_focus(-1, self.items.len()), cx);
-        }
-    }
-
-    fn down(&mut self, cx: &mut Cx<'_, '_>) {
-        if self.on_card {
-            if !self.items.is_empty() {
-                self.list.focus = 0;
-                self.focus_card(false, cx);
+        let footer_height = style.row as u16;
+        let footer = Rect::new(
+            0,
+            display.height - footer_height,
+            display.width,
+            footer_height,
+        );
+        let mut y = gap;
+        self.widgets.clear();
+        self.targets.clear();
+        for id in &pages[self.page] {
+            let Some(height) = env.widgets.height(id, env, width) else {
+                continue;
+            };
+            if height == 0 {
+                continue;
             }
-            return;
+            if y + height > footer.y {
+                break;
+            }
+            let area = Rect::new(margin, y, width, height);
+            for target in env.widgets.targets(id, env, area) {
+                self.targets.push((target.area, target.command));
+            }
+            self.widgets.push(Placed {
+                id: id.clone(),
+                area,
+                shown: env.widgets.signature(id, env),
+            });
+            y += height + gap;
         }
-        Self::moved(self.list.move_focus(1, self.items.len()), cx);
+        // The pencil, at the right end of the footer.
+        let side = footer_height;
+        self.pencil = Rect::new(display.width - margin - side, footer.y, side, side);
+        self.targets.push((
+            self.pencil,
+            Command::OpenScreen(
+                EDIT_SCREEN,
+                Params::new().with(edit::PAGE, format!("{}", self.page)),
+            ),
+        ));
+        self.footer = footer;
+        self.focus = self.focus.min(self.targets.len() - 1);
+        self.style = style;
     }
 
-    fn open_book(path: &str, cx: &mut Cx<'_, '_>) {
-        cx.command(Command::OpenSlot(
-            slots::READER,
-            Params::new().with(params::PATH, path),
+    fn redraw(&self, cx: &mut Cx<'_, '_>, mode: RefreshMode) {
+        cx.request_redraw();
+        cx.request_refresh(mode);
+    }
+
+    fn turn(&mut self, forward: bool, cx: &mut Cx<'_, '_>) {
+        let to = if forward {
+            (self.page + 1 < self.pages).then_some(self.page + 1)
+        } else {
+            self.page.checked_sub(1)
+        };
+        if let Some(to) = to {
+            self.page = to;
+            self.focus = 0;
+            let env = *cx.env();
+            self.layout(&env);
+            self.redraw(cx, RefreshMode::Partial);
+        }
+    }
+
+    /// Moves the focus to `to`, redrawing both targets.
+    fn focus_on(&mut self, to: usize, cx: &mut Cx<'_, '_>) {
+        if let Some((area, _)) = self.targets.get(self.focus) {
+            cx.request_redraw_area(grown(*area, self.style.line * 4));
+        }
+        self.focus = to;
+        if let Some((area, _)) = self.targets.get(to) {
+            cx.request_redraw_area(grown(*area, self.style.line * 4));
+        }
+        cx.request_refresh(RefreshMode::Fast);
+    }
+
+    /// The target nearest below (or above) the focused one.
+    fn vertical(&self, down: bool) -> Option<usize> {
+        let (from, _) = self.targets.get(self.focus)?;
+        let cx = i32::from(from.x) + i32::from(from.width) / 2;
+        self.targets
+            .iter()
+            .enumerate()
+            .filter(|(_, (r, _))| {
+                if down {
+                    r.y >= from.y + from.height
+                } else {
+                    r.y + r.height <= from.y
+                }
+            })
+            .min_by_key(|(_, (r, _))| {
+                let dy = (i32::from(r.y) - i32::from(from.y)).abs();
+                let dx = (i32::from(r.x) + i32::from(r.width) / 2 - cx).abs();
+                dy * 4 + dx
+            })
+            .map(|(i, _)| i)
+    }
+
+    fn run(&self, index: usize, cx: &mut Cx<'_, '_>) {
+        if let Some((_, command)) = self.targets.get(index) {
+            cx.command(command.clone());
+        }
+    }
+
+    fn edit(&self, cx: &mut Cx<'_, '_>) {
+        cx.command(Command::OpenScreen(
+            EDIT_SCREEN,
+            Params::new().with(edit::PAGE, format!("{}", self.page)),
         ));
     }
 
-    fn open(&self, cx: &mut Cx<'_, '_>) {
-        if self.on_card {
-            if let Some(book) = &self.current {
-                Self::open_book(&book.path, cx);
-            }
-            return;
-        }
-        match self.items.get(self.list.focus) {
-            Some(Item::Book(book)) => Self::open_book(&book.path, cx),
-            Some(Item::Action(action, _)) => cx.command(Command::RunAction(action.clone())),
-            None => {}
-        }
+    fn target_at(&self, point: Point) -> Option<usize> {
+        self.targets.iter().position(|(r, _)| r.contains(point))
     }
 
-    fn draw_card(&self, canvas: &mut Canvas<'_>, env: &Env<'_>) {
+    fn draw_footer(&self, canvas: &mut Canvas<'_>, env: &Env<'_>) {
         let style = self.style;
-        let r = self.card;
-        let Some(font) = style.font(env) else {
-            return;
-        };
-        // A thick frame shows the focus, once buttons are used.
-        let border = if self.on_card && self.list.shown {
-            style.line * 5
-        } else {
-            style.line * 2
-        };
-        canvas.stroke_rect(
-            i32::from(r.x),
-            i32::from(r.y),
-            u32::from(r.width),
-            u32::from(r.height),
-            border,
-            Color::BLACK,
-        );
-        let gray = Color::gray(90);
-        let Some(book) = &self.current else {
-            ui::draw_message(canvas, env, &style, r, env.i18n.tr("home.nothing-read"));
-            return;
-        };
-
-        // The cover on the left, if the book has one.
-        let inset = style.margin as u16 + border as u16;
-        let cover = self
-            .cover
-            .as_ref()
-            .filter(|(path, _)| *path == book.path)
-            .and_then(|(_, cover)| cover.as_ref());
-        let r = match cover {
-            Some(cover) => {
-                let (w, h) = ui::fit_image(cover, r.width / 4, r.height.saturating_sub(2 * inset));
-                let area = Rect::new(r.x + inset, r.y + (r.height - h) / 2, w, h);
-                ui::draw_image(canvas, env.storage, cover, area);
-                let shift = inset + w;
-                Rect::new(r.x + shift, r.y, r.width.saturating_sub(shift), r.height)
+        let f = self.footer;
+        // A dot a page, the current one filled.
+        if self.pages > 1 {
+            let dot = (style.gap * 2 / 3).max(6);
+            let spacing = dot * 2;
+            let total = dot * self.pages as u32 + (spacing - dot) * (self.pages as u32 - 1);
+            let mut x = i32::from(f.x) + (i32::from(f.width) - total as i32) / 2;
+            let y = i32::from(f.y) + (i32::from(f.height) - dot as i32) / 2;
+            for page in 0..self.pages {
+                if page == self.page {
+                    canvas.fill_rect(x, y, dot, dot, Color::BLACK);
+                } else {
+                    canvas.stroke_rect(x, y, dot, dot, style.line.max(1), Color::BLACK);
+                }
+                x += spacing as i32;
             }
-            None => r,
-        };
-        let pad = style.margin as f32 + border as f32;
-        let inner_w = f32::from(r.width) - 2.0 * pad;
-        let third = r.height / 3;
-        let line = |i: u16| Rect::new(r.x, r.y + i * third, r.width, third);
-        ui::draw_label(
-            canvas,
-            &font,
-            style.small,
-            f32::from(r.x) + pad,
-            line(0),
-            env.i18n.tr("home.continue"),
-            gray,
-        );
-        let percent = env.i18n.format(
-            "home.percent",
-            &[("percent", Arg::Int((book.progress + 0.5) as i64))],
-        );
-        let pw = font.measure(style.small, &percent);
-        ui::draw_label(
-            canvas,
-            &font,
-            style.small,
-            f32::from(r.x) + f32::from(r.width) - pad - pw,
-            line(0),
-            &percent,
-            gray,
-        );
-        // Long titles in the body size rather than cut short.
-        let size = if font.measure(style.title, &book.title) <= inner_w {
-            style.title
-        } else {
-            style.text
-        };
-        let title = ui::fit(&font, size, &book.title, inner_w);
-        ui::draw_label(
-            canvas,
-            &font,
-            size,
-            f32::from(r.x) + pad,
-            line(1),
-            &title,
-            Color::BLACK,
-        );
-        // Progress bar.
-        let bar_h = (style.line * 4).max(3);
-        let bar = line(2);
-        let x = i32::from(r.x) + pad as i32;
-        let y = i32::from(bar.y) + i32::from(bar.height) / 2 - bar_h as i32 / 2;
-        let w = inner_w.max(1.0) as u32;
-        canvas.stroke_rect(x, y, w, bar_h, style.line.max(1), Color::BLACK);
-        let filled = (w as f32 * (book.progress / 100.0).clamp(0.0, 1.0)) as u32;
-        canvas.fill_rect(x, y, filled, bar_h, Color::BLACK);
+        }
+        let size = style.title;
+        let w = ui::icon_width(env, "pencil", size);
+        let x = f32::from(self.pencil.x) + (f32::from(self.pencil.width) - w) / 2.0;
+        ui::draw_icon(canvas, env, "pencil", size, x, self.pencil, Color::gray(60));
     }
+}
+
+/// `r` grown by `by` on every side (for the focus frame).
+fn grown(r: Rect, by: u32) -> Rect {
+    let by = by as u16;
+    Rect::new(
+        r.x.saturating_sub(by),
+        r.y.saturating_sub(by),
+        r.width + 2 * by,
+        r.height + 2 * by,
+    )
 }
 
 impl Screen for Dashboard {
     fn draw(&mut self, canvas: &mut Canvas<'_>, env: &Env<'_>) {
-        let style = self.style;
-        ui::draw_header(
-            canvas,
-            env,
-            &style,
-            self.header,
-            env.i18n.tr("home.title"),
-            None,
-        );
-        self.draw_card(canvas, env);
-        for (id, rect, _) in &self.widgets {
-            ui::fill(canvas, *rect, Color::WHITE);
-            env.widgets.draw(id, canvas, env, *rect);
+        for placed in &self.widgets {
+            ui::fill(canvas, placed.area, Color::WHITE);
+            env.widgets.draw(&placed.id, canvas, env, placed.area);
         }
-        let Some(font) = style.font(env) else {
-            return;
-        };
-        if let Some(label) = self.label {
-            ui::draw_label(
-                canvas,
-                &font,
-                style.small,
-                style.margin as f32,
-                label,
-                env.i18n.tr("home.recent"),
-                Color::gray(90),
+        self.draw_footer(canvas, env);
+        // The focus: a frame around its target, once buttons are used.
+        if self.focus_shown
+            && let Some((area, _)) = self.targets.get(self.focus)
+        {
+            let frame = grown(*area, self.style.line * 2);
+            canvas.stroke_rect(
+                i32::from(frame.x),
+                i32::from(frame.y),
+                u32::from(frame.width),
+                u32::from(frame.height),
+                self.style.line * 3,
+                Color::BLACK,
             );
         }
-        // Like menu entries: an icon, the label, and what is behind it.
-        let items = &self.items;
-        let room = ui::icon_room(env, &style, true);
-        self.list.draw(
-            canvas,
-            &style,
-            items.len(),
-            |canvas, index, rect, focused| {
-                let ink = if focused { Color::WHITE } else { Color::BLACK };
-                match &items[index] {
-                    Item::Book(book) => {
-                        let rect =
-                            ui::draw_row_icon(canvas, env, &style, rect, room, Some("book"), ink);
-                        let percent = env.i18n.format(
-                            "home.percent",
-                            &[("percent", Arg::Int((book.progress + 0.5) as i64))],
-                        );
-                        ui::draw_value_row(
-                            canvas,
-                            env,
-                            &style,
-                            rect,
-                            focused,
-                            &book.title,
-                            &percent,
-                        );
-                    }
-                    Item::Action(id, title) => {
-                        let icon = env.menus.icon(id.as_str());
-                        let rect = ui::draw_row_icon(canvas, env, &style, rect, room, icon, ink);
-                        let title = env.i18n.tr(title);
-                        ui::draw_value_row(canvas, env, &style, rect, focused, title, "›");
-                    }
-                }
-            },
-        );
     }
 
     fn on_show(&mut self, cx: &mut Cx<'_, '_>) {
         // The reader may have changed the recent books meanwhile.
         let env = *cx.env();
-        self.load(&env);
+        self.layout(&env);
+        cx.request_redraw();
         cx.wake_at(env.now);
     }
 
-    /// Looks up the current book's cover (opening the book through its
-    /// format plugin, which caches the cover).
+    /// Redraws widgets whose content changed (the time each minute) and
+    /// looks up the covers not known yet, one a time.
     fn on_timer(&mut self, cx: &mut Cx<'_, '_>) {
         let env = *cx.env();
-        // Widgets whose content changed (a clock each minute).
         let mut changed = false;
-        for (id, rect, shown) in &mut self.widgets {
-            let now = env.widgets.signature(id, &env);
-            if now.is_some() && now != *shown {
-                *shown = now;
-                cx.request_redraw_area(*rect);
+        for placed in &mut self.widgets {
+            let now = env.widgets.signature(&placed.id, &env);
+            if now.is_some() && now != placed.shown {
+                placed.shown = now;
+                cx.request_redraw_area(placed.area);
                 changed = true;
             }
+        }
+        let missing = blocks::wanted_covers(&env)
+            .into_iter()
+            .find(|path| covers::get(env.storage, path).is_none());
+        if let Some(path) = missing {
+            if covers::look_up(&env, &path).is_some() {
+                for placed in &self.widgets {
+                    if placed.id == pages::CONTINUE || placed.id == pages::RECENT {
+                        cx.request_redraw_area(placed.area);
+                        changed = true;
+                    }
+                }
+            }
+            cx.wake_at(env.now.add_millis(20));
+        } else if self.widgets.iter().any(|p| p.shown.is_some()) {
+            let next = quireink_sdk::time::next_minute(&env).unwrap_or(env.now.add_millis(60_000));
+            cx.wake_at(next);
         }
         if changed {
             cx.request_refresh(RefreshMode::Fast);
         }
-        if self.widgets.iter().any(|(_, _, s)| s.is_some()) {
-            let next = quireink_sdk::time::next_minute(&env).unwrap_or(env.now.add_millis(60_000));
-            cx.wake_at(next);
-        }
-        let Some(book) = &self.current else {
-            return;
-        };
-        if self
-            .cover
-            .as_ref()
-            .is_some_and(|(path, _)| *path == book.path)
-        {
-            return;
-        }
-        let cover = env
-            .formats
-            .open(env.storage, &book.path)
-            .ok()
-            .and_then(|document| document.cover(env.storage).ok().flatten());
-        let found = cover.is_some();
-        self.cover = Some((book.path.clone(), cover));
-        if found {
-            cx.request_redraw_area(self.card);
-            cx.request_refresh(RefreshMode::Partial);
-        }
     }
 
     fn on_event(&mut self, event: &Id, _: &Params, cx: &mut Cx<'_, '_>) {
-        if *event == events::SETTING_CHANGED {
+        if *event == events::SETTING_CHANGED || *event == events::STATUS_CHANGED {
             let env = *cx.env();
-            self.load(&env);
+            self.layout(&env);
             cx.request_redraw();
         }
     }
 
     fn on_action(&mut self, action: &Id, cx: &mut Cx<'_, '_>) -> Handled {
         let a = action;
-        let rows = self.list.rows() as isize;
-        let navigation = [
-            actions::UP,
-            actions::LEFT,
-            actions::PREVIOUS,
-            actions::DOWN,
-            actions::RIGHT,
-            actions::NEXT,
-            actions::NEXT_PAGE,
-            actions::PREV_PAGE,
-        ];
-        if navigation.contains(a) && !self.list.shown {
-            // The first button press shows where the focus is.
-            self.list.shown = true;
-            cx.request_redraw();
-            cx.request_refresh(RefreshMode::Fast);
+        if *a == actions::NEXT_PAGE || *a == actions::PREV_PAGE {
+            self.turn(*a == actions::NEXT_PAGE, cx);
             return Handled::Yes;
         }
-        if *a == actions::UP || *a == actions::LEFT || *a == actions::PREVIOUS {
-            self.up(cx);
-        } else if *a == actions::DOWN || *a == actions::RIGHT || *a == actions::NEXT {
-            self.down(cx);
-        } else if *a == actions::NEXT_PAGE {
-            if self.on_card {
-                self.down(cx);
-            } else {
-                Self::moved(self.list.move_focus(rows, self.items.len()), cx);
-            }
-        } else if *a == actions::PREV_PAGE {
-            if self.list.focus == 0 {
-                self.focus_card(true, cx);
-            } else {
-                Self::moved(self.list.move_focus(-rows, self.items.len()), cx);
-            }
-        } else if *a == actions::CONFIRM {
-            self.open(cx);
-        } else {
+        let moves = [
+            actions::UP,
+            actions::DOWN,
+            actions::LEFT,
+            actions::RIGHT,
+            actions::NEXT,
+            actions::PREVIOUS,
+            actions::CONFIRM,
+        ];
+        if !moves.contains(a) {
             return Handled::No;
         }
+        if !self.focus_shown {
+            // The first press shows where the focus is.
+            self.focus_shown = true;
+            self.focus_on(self.focus, cx);
+            return Handled::Yes;
+        }
+        let last = self.targets.len() - 1;
+        let to = if *a == actions::CONFIRM {
+            self.run(self.focus, cx);
+            return Handled::Yes;
+        } else if *a == actions::RIGHT || *a == actions::NEXT {
+            if self.focus == last {
+                0
+            } else {
+                self.focus + 1
+            }
+        } else if *a == actions::LEFT || *a == actions::PREVIOUS {
+            if self.focus == 0 {
+                last
+            } else {
+                self.focus - 1
+            }
+        } else {
+            match self.vertical(*a == actions::DOWN) {
+                Some(to) => to,
+                None => return Handled::Yes,
+            }
+        };
+        self.focus_on(to, cx);
         Handled::Yes
     }
 
     fn on_gesture(&mut self, gesture: Gesture, cx: &mut Cx<'_, '_>) -> Handled {
-        if gesture.kind != GestureKind::Tap {
-            return Handled::No;
-        }
-        if self.card.contains(gesture.start) {
-            if let Some(book) = &self.current {
-                Self::open_book(&book.path.clone(), cx);
-                return Handled::Yes;
-            }
-            return Handled::No;
-        }
-        match self.list.hit(gesture.start, self.items.len()) {
-            Some(index) => {
-                self.list.focus = index;
-                self.on_card = false;
-                self.list.active = true;
-                self.open(cx);
+        match gesture.kind {
+            GestureKind::Tap => match self.target_at(gesture.start) {
+                Some(index) => {
+                    self.focus = index;
+                    self.run(index, cx);
+                    Handled::Yes
+                }
+                None => Handled::No,
+            },
+            GestureKind::LongPress => {
+                self.edit(cx);
                 Handled::Yes
             }
-            None => Handled::No,
+            _ => Handled::No,
         }
     }
 }

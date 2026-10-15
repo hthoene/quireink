@@ -128,27 +128,34 @@ pub(crate) fn register(r: &mut dyn Registrar) -> Result<(), RegisterError> {
         .group(crate::GROUP)
         .description("stats.setting.goal.help"),
     )?;
-    // A goal set shows on the home screen: the widget is added if missing.
+    // A goal set shows on the home screen: the widget goes onto its first
+    // page, after the book being read, if no page shows it yet.
     r.subscribe(
         quireink_sdk::builtin::events::SETTING_CHANGED,
         Box::new(|env, params, out| {
-            let widgets = Id::new_static("home.widgets");
             if params.get(quireink_sdk::builtin::params::ID) != Some(GOAL.as_str())
                 || goal(env).is_none()
             {
                 return;
             }
-            if let Some(SettingValue::Text(list)) = env.settings.get(widgets.as_str())
-                && !quireink_sdk::status::item_ids(list).any(|id| id == TODAY.as_str())
+            let pages: [&str; 4] = ["home.page-1", "home.page-2", "home.page-3", "home.page-4"];
+            let shown = pages.iter().any(|page| {
+                quireink_sdk::status::item_ids(env.settings.text(page))
+                    .any(|id| id == TODAY.as_str())
+            });
+            if let Some(SettingValue::Text(list)) = env.settings.get(pages[0])
+                && !shown
             {
-                let list = if list.trim().is_empty() {
-                    String::from(TODAY.as_str())
-                } else {
-                    format!("{list}, {TODAY}")
-                };
+                let mut ids: alloc::vec::Vec<&str> = quireink_sdk::status::item_ids(list).collect();
+                let at = ids
+                    .iter()
+                    .position(|id| *id == "home.continue")
+                    .map_or(ids.len(), |i| i + 1);
+                let today = TODAY;
+                ids.insert(at, today.as_str());
                 out.push(quireink_sdk::Command::SetSetting(
-                    widgets,
-                    SettingValue::Text(Cow::Owned(list)),
+                    Id::new_static("home.page-1"),
+                    SettingValue::Text(Cow::Owned(ids.join(", "))),
                 ));
             }
         }),
@@ -174,6 +181,7 @@ pub(crate) fn register(r: &mut dyn Registrar) -> Result<(), RegisterError> {
             let (a, b) = lines(env, &numbers);
             format!("{a}|{b}|{}", progress(env, &numbers))
         })),
+        targets: None,
     })
 }
 

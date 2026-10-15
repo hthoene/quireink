@@ -1,8 +1,11 @@
 //! Widgets: small boxes plugins contribute for screens that show them,
-//! such as the home screen (a clock, today's reading, a goal). Any plugin
-//! adds widgets with
+//! such as the home screen's pages (a clock, the book being read, today's
+//! reading, a grid of tools). Any plugin adds widgets with
 //! [`Registrar::add_widget`](crate::Registrar::add_widget); screens let
-//! the user choose which to show.
+//! the user choose which to show and where.
+//!
+//! A widget may have targets: places that do something when tapped, which
+//! buttons reach one after the other too (see [`WidgetTarget`]).
 
 use alloc::borrow::Cow;
 use alloc::boxed::Box;
@@ -23,6 +26,16 @@ pub type WidgetDrawFn = Box<dyn Fn(&mut Canvas<'_>, &Env<'_>, Rect)>;
 /// What a widget shows now, as text: screens redraw it when it changes
 /// (they look each minute).
 pub type WidgetSignatureFn = Box<dyn Fn(&Env<'_>) -> String>;
+/// The targets of a widget drawn in an area, in reading order.
+pub type WidgetTargetsFn = Box<dyn Fn(&Env<'_>, Rect) -> Vec<WidgetTarget>>;
+
+/// A place in a widget that does something: a tap on it, or confirm
+/// once buttons moved the focus there, runs `command`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WidgetTarget {
+    pub area: Rect,
+    pub command: crate::Command,
+}
 
 /// A widget contribution.
 pub struct WidgetSpec {
@@ -33,6 +46,8 @@ pub struct WidgetSpec {
     pub draw: WidgetDrawFn,
     /// Without one, a widget is drawn when its screen is.
     pub signature: Option<WidgetSignatureFn>,
+    /// Without them, a widget only shows something.
+    pub targets: Option<WidgetTargetsFn>,
 }
 
 impl fmt::Debug for WidgetSpec {
@@ -87,6 +102,18 @@ impl Widgets {
         if let Some(widget) = self.get(id) {
             (widget.draw)(canvas, env, area);
         }
+    }
+
+    /// The targets of widget `id` drawn in `area` (see [`WidgetTarget`]).
+    pub fn targets(&self, id: &str, env: &Env<'_>, area: Rect) -> Vec<WidgetTarget> {
+        self.get(id)
+            .and_then(|w| w.targets.as_ref())
+            .map_or_else(Vec::new, |targets| targets(env, area))
+    }
+
+    /// Whether widget `id` exists.
+    pub fn has(&self, id: &str) -> bool {
+        self.get(id).is_some()
     }
 
     /// What widget `id` shows now (see [`WidgetSignatureFn`]).
