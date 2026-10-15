@@ -47,6 +47,7 @@ quireink-plugin-sleep.workspace = true
 quireink-plugin-translate.workspace = true
 quireink-plugin-readwise.workspace = true
 quireink-plugin-wallabag.workspace = true
+quireink-plugin-about.workspace = true
 quireink-plugin-news.workspace = true
 quireink-plugin-plugin-manager.workspace = true
 quireink-plugin-reader.workspace = true

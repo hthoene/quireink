@@ -1258,6 +1258,7 @@ name = "quireink-app"
 version = "0.1.0"
 dependencies = [
  "quireink-core",
+ "quireink-plugin-about",
  "quireink-plugin-aids",
  "quireink-plugin-browser",
  "quireink-plugin-diagnostics",
@@ -1391,6 +1392,14 @@ dependencies = [
 [[package]]
 name = "quireink-platform"
 version = "0.1.0"
+
+[[package]]
+name = "quireink-plugin-about"
+version = "0.1.0"
+dependencies = [
+ "quireink-i18n",
+ "quireink-sdk",
+]
 
 [[package]]
 name = "quireink-plugin-aids"

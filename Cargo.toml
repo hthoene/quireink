@@ -50,6 +50,7 @@ members = [
     "plugins/translate",
     "plugins/readwise",
     "plugins/wallabag",
+    "plugins/about",
     "samples/hello-plugin",
     "plugins/news",
     "plugins/plugin-manager",
@@ -112,6 +113,7 @@ quireink-plugin-sleep = { path = "plugins/sleep", version = "0.1.0" }
 quireink-plugin-translate = { path = "plugins/translate", version = "0.1.0" }
 quireink-plugin-readwise = { path = "plugins/readwise", version = "0.1.0" }
 quireink-plugin-wallabag = { path = "plugins/wallabag", version = "0.1.0" }
+quireink-plugin-about = { path = "plugins/about", version = "0.1.0" }
 quireink-plugin-news = { path = "plugins/news", version = "0.1.0" }
 quireink-plugin-keyboard = { path = "plugins/keyboard", version = "0.1.0" }
 quireink-plugin-plugin-manager = { path = "plugins/plugin-manager", version = "0.1.0" }
