@@ -780,7 +780,7 @@ makes it replaceable. ✅ done, 🔶 partly, ⬜ open.
 | C2 | Formats, fonts, hyphenation, translations, key maps, menus | Contributions, data plugins | ✅ |
 | C3 | Status lines: own text size; whole lines from plugins; a tap switches between the chosen ones, above and below the text | `add_status_line`, `add_status_item` | ✅ |
 | C4 | Short messages any plugin can show the same way ("Sync done"), how long they show | `Command::Notify`, slot `core.notice` | ✅ |
-| C5 | Rules: "when Wi-Fi is there, sync the catalogs", "from 22:00 night mode", "comics get another layout" | Rule plugin on events and actions | ⬜ |
+| C5 | Rules: "every day at 22:00: night mode on", "when QuireInk starts: sync the catalogs"; when: start, time of day, book opened, waking up; then: any action, any switch on or off | `rules` plugin, `Command::Schedule` (timers for plugins) | ✅ (more triggers, e.g. Wi-Fi, once the shells report them) |
 | C6 | Reading profiles: named sets of settings ("Night", "Commute", "Large print"), switched with a tap | Profiles over settings | ⬜ |
 | C7 | Themes: margins, row heights, UI text sizes, gray levels, header style, corners; icon packs (icons are a font role already) | Theme data plugins over `UiStyle` | ⬜ |
 | C8 | Menus as a grid of tiles besides lists | Menu presentation setting or plugin | ⬜ |
@@ -794,7 +794,7 @@ makes it replaceable. ✅ done, 🔶 partly, ⬜ open.
 | C16 | More sync: Calibre wireless, Nextcloud, Syncthing (books, progress, notes) | Sync providers | 🔶 (kosync, statistics over WebDAV, OPDS) |
 | C17 | Gestures and keys edited on the device; free tap zones (e.g. left-handed) | Key map editor plugin | 🔶 (`quireink.ini`, presets) |
 | C18 | Home screen widgets: reading goal, statistics, calendar, quote of the day | Widget contributions to the home screen | ⬜ |
-| C19 | OPDS: covers in lists, OPDS 2 (JSON), automatic sync | `opds` plugin, C5 | 🔶 |
+| C19 | OPDS: covers in lists, OPDS 2 (JSON), automatic sync | `opds` plugin, C5 | 🔶 (sync at start or a time of day via rules) |
 | C20 | Large-memory devices may use more (covers, more cached pages) without separate code | Device memory class in `DeviceInfo` | ⬜ |
 
 ---

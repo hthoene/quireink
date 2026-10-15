@@ -794,6 +794,32 @@ fn notices_show_over_everything_and_go_by_themselves() {
 }
 
 #[test]
+fn scheduled_events_come_at_their_time() {
+    let log = log();
+    let mut kernel = Kernel::builder(DEVICE)
+        .plugin(OverlayPlugin { log: log.clone() })
+        .build()
+        .unwrap();
+    kernel.start(Instant(0));
+    let event = Id::new_static("ov.later");
+    let params = quireink_sdk::Params::new().with("id", "x");
+    kernel.apply(Command::Schedule(
+        event.clone(),
+        params.clone(),
+        Instant(9000),
+    ));
+    // Scheduled again: moved, not doubled.
+    kernel.apply(Command::Schedule(event, params, Instant(5000)));
+    assert_eq!(kernel.finish().wake_at(), Some(Instant(5000)));
+    log.borrow_mut().clear();
+    kernel.tick(Instant(4999));
+    assert!(log.borrow().is_empty());
+    let effects = kernel.tick(Instant(5000));
+    assert_eq!(*log.borrow(), ["event ov.later x"]);
+    assert_eq!(effects.wake_at(), None);
+}
+
+#[test]
 fn screens_below_overlays_redraw_themselves() {
     let log = log();
     let mut kernel = Kernel::builder(DEVICE)

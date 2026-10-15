@@ -339,6 +339,7 @@ impl KernelBuilder {
             subscriptions: Vec::new(),
             screen_timer: None,
             notice: None,
+            scheduled: Vec::new(),
             recognizer: Recognizer::default(),
             captured: Vec::new(),
             stack: Vec::new(),
@@ -524,6 +525,8 @@ pub struct Kernel {
     subscriptions: Vec<(Id, EventHandler)>,
     /// When the active screen wants `on_timer`.
     screen_timer: Option<Instant>,
+    /// Events plugins asked for at a time ([`Command::Schedule`]).
+    scheduled: Vec<(Instant, Id, Params)>,
     /// The short message showing ([`Command::Notify`]) and until when.
     notice: Option<(Box<dyn Screen>, Instant)>,
     /// The part of the screen to redraw at the end of the current call.
@@ -668,6 +671,10 @@ impl Kernel {
         }
         if self.notice.as_ref().is_some_and(|(_, until)| *until <= now) {
             self.end_notice();
+        }
+        while let Some(due) = self.scheduled.iter().position(|(at, ..)| *at <= now) {
+            let (_, event, params) = self.scheduled.remove(due);
+            self.output.commands.push(Command::Emit(event, params));
         }
         self.finish()
     }
@@ -1624,7 +1631,8 @@ impl Kernel {
         }
         let input = self.recognizer.next_deadline(&self.thresholds());
         let notice = self.notice.as_ref().map(|(_, until)| *until);
-        effects.wake_at = [input, self.screen_timer, notice]
+        let scheduled = self.scheduled.iter().map(|(at, ..)| *at).min();
+        effects.wake_at = [input, self.screen_timer, notice, scheduled]
             .into_iter()
             .flatten()
             .min();
@@ -1742,6 +1750,10 @@ impl Kernel {
             }
             Command::SetMenu(menu, entries) => self.set_menu(menu, entries),
             Command::Notify(text) => self.notify(text),
+            Command::Schedule(event, params, at) => {
+                self.scheduled.retain(|(_, e, _)| *e != event);
+                self.scheduled.push((at, event, params));
+            }
             _ => {}
         }
     }

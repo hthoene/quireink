@@ -43,6 +43,7 @@ pub fn install(builder: KernelBuilder, fonts: Fonts) -> KernelBuilder {
         .plugin(quireink_plugin_file_manager::FileManager)
         .plugin(quireink_plugin_transfer::Transfer)
         .plugin(quireink_plugin_opds::Opds)
+        .plugin(quireink_plugin_rules::Rules)
         .plugin_off(quireink_plugin_browser::Browser)
         .plugin(quireink_plugin_keyboard::Keyboard)
         .plugin(quireink_plugin_settings::SettingsPlugin)

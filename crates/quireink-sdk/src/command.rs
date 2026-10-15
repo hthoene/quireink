@@ -139,6 +139,11 @@ pub enum Command {
     /// submenus), saved in `[menus]` of `quireink.ini`; `None` returns to
     /// the entries plugins contribute.
     SetMenu(Id, Option<alloc::vec::Vec<Id>>),
+    /// Emits event `.0` with parameters `.1` at time `.2`, whatever screen
+    /// is open then: a timer for plugins, e.g. for something to do at a
+    /// time of day. Scheduling the same event again moves it; it is
+    /// emitted once.
+    Schedule(Id, Params, quireink_platform::Instant),
     /// Shows a short message for a few seconds, e.g. "Sync done", by the
     /// screen bound to [`slots::NOTICE`](crate::builtin::slots::NOTICE),
     /// over whatever is open and without taking any input. A newer
