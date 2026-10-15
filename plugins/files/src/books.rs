@@ -19,8 +19,8 @@ use crate::PLUGIN;
 /// Books remembered for "recently read" order.
 const MAX_OPENED: usize = 100;
 /// What the details hold; books cached with another version are read
-/// again (version 2 added the series).
-const DETAILS: u32 = 2;
+/// again (version 2 added the series, 3 the tags).
+const DETAILS: u32 = 3;
 
 /// Details of a book, cached in storage.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -35,6 +35,8 @@ pub(crate) struct Book {
     /// The series and the book's number in it, if it names one.
     pub series: Option<String>,
     pub series_index: Option<String>,
+    /// Its tags (subjects), if it names any.
+    pub tags: Vec<String>,
     pub cover: Option<ImageRef>,
     /// Reading progress in percent, once opened.
     pub progress: Option<u8>,
@@ -75,6 +77,7 @@ pub(crate) fn load(storage: &dyn Storage, path: &str) -> Option<Book> {
             "author" => book.author = Some(text()),
             "series" => book.series = Some(text()),
             "series-index" => book.series_index = Some(text()),
+            key if key.starts_with("tag.") => book.tags.push(text()),
             "version" => version = entry.value.as_u32().unwrap_or(1),
             "cover" => cover_path = Some(text()),
             "cover-width" => cover_width = entry.value.as_u32(),
@@ -113,6 +116,9 @@ fn save(storage: &dyn Storage, path: &str, book: &Book) {
     if let Some(index) = &book.series_index {
         set("series-index", index);
     }
+    for (i, tag) in book.tags.iter().enumerate() {
+        set(&format!("tag.{}", i + 1), tag);
+    }
     if let Some(cover) = &book.cover {
         set("cover", &cover.path);
         set("cover-width", &cover.width.to_string());
@@ -139,6 +145,7 @@ pub(crate) fn index(env: &Env<'_>, path: &str) -> Book {
         book.author = metadata.authors.first().cloned();
         book.series = metadata.series.clone();
         book.series_index = metadata.series_index.clone();
+        book.tags = metadata.subjects.clone();
         book.cover = document.cover(storage).ok().flatten();
     }
     save(storage, path, &book);
@@ -207,6 +214,7 @@ mod tests {
             author: Some("Ann".into()),
             series: Some("Tales".into()),
             series_index: Some("2".into()),
+            tags: alloc::vec!["Fantasy".into(), "To read".into()],
             cover: Some(ImageRef {
                 path: "x.gray".into(),
                 width: 30,

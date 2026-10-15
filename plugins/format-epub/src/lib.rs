@@ -120,6 +120,8 @@ mod tests {
     <dc:title>Die   Verwandlung</dc:title>
     <dc:creator>Franz Kafka</dc:creator>
     <dc:language>de</dc:language>
+    <dc:subject>Novella</dc:subject>
+    <dc:subject>Classics</dc:subject>
   </metadata>
   <manifest>
     <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
@@ -337,7 +339,11 @@ mod tests {
         assert_eq!(metadata.title.as_deref(), Some("Die Verwandlung"));
         assert_eq!(metadata.authors, ["Franz Kafka"]);
         assert_eq!(metadata.language.as_deref(), Some("de"));
+        assert_eq!(metadata.subjects, ["Novella", "Classics"]);
         assert_eq!(doc.sections(), 2);
+        // Also when read from the cache.
+        let again = EpubDocument::open(&storage, "books/test.epub").unwrap();
+        assert_eq!(again.metadata().subjects, ["Novella", "Classics"]);
 
         let ch1 = blocks(&storage, &doc, 0);
         let texts: Vec<&str> = ch1.iter().map(|(_, t)| t.as_str()).collect();

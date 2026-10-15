@@ -30,7 +30,7 @@ use crate::css;
 use crate::obfuscation::Method;
 
 /// Bump when the cache format or the conversion changes.
-pub(crate) const CACHE_VERSION: u32 = 15;
+pub(crate) const CACHE_VERSION: u32 = 16;
 
 /// A chapter: where it is in the archive and its uncompressed size.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -196,6 +196,9 @@ pub(crate) fn load(storage: &dyn Storage, cache: &str, book_size: u64) -> Option
             ("book", "series") => metadata.series = Some(entry.value.as_str().into_owned()),
             ("book", "series-index") => {
                 metadata.series_index = Some(entry.value.as_str().into_owned());
+            }
+            ("book", key) if key.starts_with("subject.") => {
+                metadata.subjects.push(entry.value.as_str().into_owned());
             }
             ("book", "sections") => sections = entry.value.as_u32(),
             ("book", "toc") => toc_len = entry.value.as_u32(),
@@ -516,10 +519,11 @@ pub(crate) fn build(
                 capture = Some("identifier");
                 text.clear();
             }
-            "title" | "creator" | "language" if !self_closing => {
+            "title" | "creator" | "language" | "subject" if !self_closing => {
                 capture = match local_name(name) {
                     "title" => Some("title"),
                     "creator" => Some("creator"),
+                    "subject" => Some("subject"),
                     _ => Some("language"),
                 };
                 text.clear();
@@ -583,6 +587,9 @@ pub(crate) fn build(
                         metadata.title = Some(value);
                     }
                     "creator" if !value.is_empty() => metadata.authors.push(value),
+                    "subject" if !value.is_empty() && !metadata.subjects.contains(&value) => {
+                        metadata.subjects.push(value);
+                    }
                     "language" if metadata.language.is_none() && !value.is_empty() => {
                         metadata.language = Some(value);
                     }
@@ -759,6 +766,9 @@ pub(crate) fn build(
     set("book", "toc", &toc_len.to_string());
     for (i, author) in metadata.authors.iter().enumerate() {
         set("book", &alloc::format!("author.{}", i + 1), author);
+    }
+    for (i, subject) in metadata.subjects.iter().enumerate() {
+        set("book", &alloc::format!("subject.{}", i + 1), subject);
     }
     let cover = cover.map(|(_, path)| path);
     if let Some(cover) = &cover {

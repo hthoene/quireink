@@ -75,6 +75,7 @@ pub(crate) const ICONS: &[(&str, char)] = &[
     ("star", '\u{eb2e}'),
     ("sun", '\u{eb30}'),
     ("sun-low", '\u{f237}'),
+    ("tag", '\u{10096}'),
     ("temperature", '\u{eb38}'),
     ("text-size", '\u{f2b1}'),
     ("toggle-left", '\u{eb3e}'),

@@ -34,7 +34,7 @@ ICONS = sorted({
     "search", "typography", "text-size", "letter-case", "adjustments",
     "adjustments-horizontal", "layout", "columns", "highlight", "pencil",
     "note", "hash", "arrow-bar-to-right", "language", "a-b", "link",
-    "clipboard", "copy", "selector", "volume",
+    "clipboard", "copy", "selector", "volume", "tag",
     # Light and display
     "sun", "sun-low", "moon", "temperature", "brightness", "contrast",
     "refresh",

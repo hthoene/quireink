@@ -57,6 +57,9 @@ pub struct Metadata {
     pub series: Option<String>,
     /// Its number in the series, e.g. `2` or `2.5`, as written.
     pub series_index: Option<String>,
+    /// Its subjects or tags, e.g. an EPUB's `dc:subject` (where Calibre
+    /// puts its tags).
+    pub subjects: Vec<String>,
 }
 
 /// The role of a block; layout engines style blocks by kind.

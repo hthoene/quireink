@@ -58,9 +58,12 @@ pub const SORT_NAME: &str = "files.sort.name";
 pub const CHOOSE_FOLDER: Id = Id::new_static("files.choose-folder");
 /// The library's menu.
 pub const MENU: Id = Id::new_static("files.menu");
-/// The library by author, and by series.
+/// The library by author, by series and by tag.
 pub const BY_AUTHOR: Id = Id::new_static("files.by-author");
 pub const BY_SERIES: Id = Id::new_static("files.by-series");
+pub const BY_TAG: Id = Id::new_static("files.by-tag");
+/// The submenu with the views above ("Shelves").
+pub const SHELVES_MENU: Id = Id::new_static("files.shelves");
 const SHELF_SCREEN: Id = Id::new_static("files.shelf");
 
 /// The library plugin.
@@ -102,6 +105,7 @@ impl Plugin for Files {
                 "files.by-series",
                 "list-details",
             ),
+            (BY_TAG, shelves::MODE_TAGS, "files.by-tag", "tag"),
         ] {
             r.add_action(quireink_sdk::ActionSpec {
                 id: action.clone(),
@@ -142,10 +146,28 @@ impl Plugin for Files {
             .group(groups::LIBRARY)
             .description("files.setting.sort.help"),
         )?;
+        // The shelves as a submenu: an action named like its menu.
+        r.add_action(quireink_sdk::ActionSpec {
+            id: SHELVES_MENU,
+            title: Cow::Borrowed("files.shelves"),
+            handler: Some(Box::new(|_: &Env<'_>, out: &mut Vec<Command>| {
+                out.push(Command::OpenSlot(
+                    slots::MENU,
+                    Params::new().with(params::MENU, String::from(SHELVES_MENU.as_str())),
+                ));
+            })),
+        })?;
+        r.add_icon(SHELVES_MENU, Cow::Borrowed("books"))?;
+        for (item, order) in [(BY_AUTHOR, 10), (BY_SERIES, 20), (BY_TAG, 30)] {
+            r.add_menu_entry(MenuEntry {
+                menu: SHELVES_MENU,
+                item,
+                order,
+            })?;
+        }
         for (item, order) in [
             (SORT, 10),
-            (BY_AUTHOR, 12),
-            (BY_SERIES, 14),
+            (SHELVES_MENU, 12),
             (ROOT, 20),
             (core_settings::NIGHT_MODE, 30),
             (core_actions::SETTINGS, 40),

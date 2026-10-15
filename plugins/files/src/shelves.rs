@@ -1,15 +1,15 @@
-//! The library by author and by series.
+//! The library by author, by series and by tag.
 //!
 //! A catalog of every book under the library folder (`catalog.txt`, one
-//! book a line: path, author, title, series, number) is made anew in the
+//! book a line: path, author, title, series, number, tags) is made anew in the
 //! background whenever one of these views opens: from the details the
 //! library keeps of each book, opening only books not seen before, a few
 //! entries at a time. The view shows the catalog there was until the new
 //! one is complete.
 //!
-//! The first page lists the authors (or series) with how many books each
-//! has; choosing one lists those books, a series by its numbers. Only
-//! the names are held in memory, never the whole catalog.
+//! The first page lists the authors (or series, or tags) with how many
+//! books each has; choosing one lists those books, a series by its
+//! numbers. Only the names are held in memory, never the whole catalog.
 
 use alloc::format;
 use alloc::string::{String, ToString};
@@ -26,9 +26,31 @@ use crate::books;
 use crate::listing::{Entry, Listing};
 use crate::{PLUGIN, ROOT};
 
-/// The view of authors (`mode` = `authors`) or series (`series`).
+/// The view of authors (`mode` = `authors`), series (`series`) or tags
+/// (`tags`).
 pub(crate) const MODE_AUTHORS: &str = "authors";
 pub(crate) const MODE_SERIES: &str = "series";
+pub(crate) const MODE_TAGS: &str = "tags";
+/// Between a book's tags in the catalog.
+const TAG_SEPARATOR: char = '\u{1f}';
+
+/// What books are listed under.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Shelf {
+    Authors,
+    Series,
+    Tags,
+}
+
+impl Shelf {
+    fn of(mode: Option<&str>) -> Shelf {
+        match mode {
+            Some(MODE_SERIES) => Shelf::Series,
+            Some(MODE_TAGS) => Shelf::Tags,
+            _ => Shelf::Authors,
+        }
+    }
+}
 /// Names held at most.
 const MAX_NAMES: usize = 2000;
 /// Entries looked at, and books opened, in one step of making the catalog.
@@ -52,6 +74,8 @@ pub(crate) struct Line {
     pub title: String,
     pub series: String,
     pub number: String,
+    /// Separated by [`TAG_SEPARATOR`].
+    pub tags: String,
 }
 
 impl Line {
@@ -65,24 +89,35 @@ impl Line {
             title: next(),
             series: next(),
             number: next(),
+            tags: next(),
         })
     }
 
     fn text(&self) -> String {
         let clean = |s: &str| s.replace(['\t', '\n', '\r'], " ");
         format!(
-            "{}\t{}\t{}\t{}\t{}\n",
+            "{}\t{}\t{}\t{}\t{}\t{}\n",
             clean(&self.path),
             clean(&self.author),
             clean(&self.title),
             clean(&self.series),
-            clean(&self.number)
+            clean(&self.number),
+            clean(&self.tags)
         )
     }
 
-    /// What it is listed under in a view.
-    fn key(&self, series: bool) -> &str {
-        if series { &self.series } else { &self.author }
+    /// What it is listed under in a view: its author, its series, or
+    /// each of its tags.
+    fn keys(&self, shelf: Shelf) -> Vec<&str> {
+        match shelf {
+            Shelf::Authors => alloc::vec![self.author.as_str()],
+            Shelf::Series => alloc::vec![self.series.as_str()],
+            Shelf::Tags => self
+                .tags
+                .split(TAG_SEPARATOR)
+                .filter(|t| !t.is_empty())
+                .collect(),
+        }
     }
 }
 
@@ -177,6 +212,12 @@ impl Walk {
                     title,
                     series: book.series.unwrap_or_default(),
                     number: book.series_index.unwrap_or_default(),
+                    tags: book
+                        .tags
+                        .iter()
+                        .map(|t| t.replace(TAG_SEPARATOR, " "))
+                        .collect::<Vec<_>>()
+                        .join(&TAG_SEPARATOR.to_string()),
                 };
                 let _ = env.storage.append(&building_path(), line.text().as_bytes());
                 self.found += 1;
@@ -191,31 +232,35 @@ impl Walk {
     }
 }
 
-/// The names of the authors or series and how many books each has,
-/// alphabetically.
-fn names(storage: &dyn Storage, series: bool) -> Vec<(String, usize)> {
+/// The names of the authors, series or tags and how many books each
+/// has, alphabetically.
+fn names(storage: &dyn Storage, shelf: Shelf) -> Vec<(String, usize)> {
     let mut names: Vec<(String, usize)> = Vec::new();
     each_line(storage, &catalog_path(), &mut |line| {
-        let key = line.key(series);
-        if series && key.is_empty() {
-            return;
-        }
-        if let Some((_, count)) = names.iter_mut().find(|(n, _)| n == key) {
-            *count += 1;
-        } else if names.len() < MAX_NAMES {
-            names.push((key.to_string(), 1));
+        for key in line.keys(shelf) {
+            // Books without series are no series; those without author
+            // are listed under "Unknown author".
+            if shelf == Shelf::Series && key.is_empty() {
+                continue;
+            }
+            if let Some((_, count)) = names.iter_mut().find(|(n, _)| n == key) {
+                *count += 1;
+            } else if names.len() < MAX_NAMES {
+                names.push((key.to_string(), 1));
+            }
         }
     });
     names.sort_by_key(|(n, _)| n.to_lowercase());
     names
 }
 
-/// The books of author or series `name`: a series by its numbers, an
-/// author's by title.
-fn books_of(storage: &dyn Storage, series: bool, name: &str) -> Vec<Line> {
+/// The books of author, series or tag `name`: a series by its numbers,
+/// the others by title.
+fn books_of(storage: &dyn Storage, shelf: Shelf, name: &str) -> Vec<Line> {
+    let series = shelf == Shelf::Series;
     let mut books = Vec::new();
     each_line(storage, &catalog_path(), &mut |line| {
-        if line.key(series) == name {
+        if line.keys(shelf).contains(&name) {
             books.push(line);
         }
     });
@@ -235,7 +280,7 @@ pub(crate) struct ShelfScreen {
     style: UiStyle,
     header: ui::Header,
     list: ListView,
-    series: bool,
+    shelf: Shelf,
     names: Vec<(String, usize)>,
     /// The author or series chosen, with its books.
     chosen: Option<(String, Vec<Line>)>,
@@ -253,15 +298,15 @@ impl ShelfScreen {
         let display = env.device.display;
         let top = header.area.height + style.gap as u16;
         let area = Rect::new(0, top, display.width, display.height.saturating_sub(top));
-        let series = params.get(params::MODE) == Some(MODE_SERIES);
+        let shelf = Shelf::of(params.get(params::MODE));
         Self {
             list: ListView::new(area, style.noted_row()).focus_on_keys(env),
-            names: names(env.storage, series),
+            names: names(env.storage, shelf),
             chosen: None,
             names_focus: 0,
             walk: None,
             walked: false,
-            series,
+            shelf,
             style,
             header,
         }
@@ -292,7 +337,7 @@ impl ShelfScreen {
             }
             None => {
                 if let Some((name, _)) = self.names.get(index) {
-                    let books = books_of(env.storage, self.series, name);
+                    let books = books_of(env.storage, self.shelf, name);
                     self.chosen = Some((name.clone(), books));
                     self.names_focus = index;
                     self.list.focus = 0;
@@ -306,8 +351,14 @@ impl ShelfScreen {
         match &self.chosen {
             Some((name, _)) if name.is_empty() => env.i18n.tr("files.unknown-author").to_string(),
             Some((name, _)) => name.clone(),
-            None if self.series => env.i18n.tr("files.by-series").to_string(),
-            None => env.i18n.tr("files.by-author").to_string(),
+            None => env
+                .i18n
+                .tr(match self.shelf {
+                    Shelf::Authors => "files.by-author",
+                    Shelf::Series => "files.by-series",
+                    Shelf::Tags => "files.by-tag",
+                })
+                .to_string(),
         }
     }
 }
@@ -322,13 +373,15 @@ impl Screen for ShelfScreen {
         if len == 0 {
             let message = match &self.walk {
                 Some(walk) => env.i18n.plural("files.collecting", walk.found as i64, &[]),
-                None if self.series => env.i18n.tr("files.no-series").to_string(),
+                None if self.shelf == Shelf::Series => env.i18n.tr("files.no-series").to_string(),
+                None if self.shelf == Shelf::Tags => env.i18n.tr("files.no-tags").to_string(),
                 None => env.i18n.tr("files.no-books").to_string(),
             };
             ui::draw_message(canvas, env, &style, self.list.area, &message);
             return;
         }
-        let series = self.series;
+        let series = self.shelf == Shelf::Series;
+        let tags = self.shelf == Shelf::Tags;
         let (names, chosen) = (&self.names, &self.chosen);
         self.list.draw(
             canvas,
@@ -340,7 +393,7 @@ impl Screen for ShelfScreen {
                     let note = if series && !book.number.is_empty() {
                         env.i18n
                             .format("files.series-number", &[("number", Arg::Str(&book.number))])
-                    } else if series {
+                    } else if series || tags {
                         book.author.clone()
                     } else if book.number.is_empty() {
                         book.series.clone()
@@ -390,9 +443,9 @@ impl Screen for ShelfScreen {
         // The new catalog: the lists again, keeping the place.
         self.walk = None;
         self.walked = true;
-        self.names = names(env.storage, self.series);
+        self.names = names(env.storage, self.shelf);
         if let Some((name, books)) = &mut self.chosen {
-            *books = books_of(env.storage, self.series, name);
+            *books = books_of(env.storage, self.shelf, name);
         }
         self.list.focus = self.list.focus.min(self.len().saturating_sub(1));
         self.redraw(cx);
@@ -469,13 +522,20 @@ mod tests {
     fn catalog_lines_and_views() {
         let storage = MemoryStorage::new();
         let lines = [
-            ("b/2.epub", "Ann", "Second", "Tales", "2"),
-            ("b/1.epub", "Ann", "First", "Tales", "1"),
-            ("b/x.epub", "bob", "Alone", "", ""),
-            ("b/y.txt", "", "Nobody's", "", ""),
+            (
+                "b/2.epub",
+                "Ann",
+                "Second",
+                "Tales",
+                "2",
+                "Fantasy\u{1f}Kids",
+            ),
+            ("b/1.epub", "Ann", "First", "Tales", "1", "Fantasy"),
+            ("b/x.epub", "bob", "Alone", "", "", ""),
+            ("b/y.txt", "", "Nobody's", "", "", ""),
         ];
         let mut text = String::new();
-        for (path, author, title, series, number) in lines {
+        for (path, author, title, series, number, tags) in lines {
             text.push_str(
                 &Line {
                     path: path.into(),
@@ -483,12 +543,13 @@ mod tests {
                     title: title.into(),
                     series: series.into(),
                     number: number.into(),
+                    tags: tags.into(),
                 }
                 .text(),
             );
         }
         storage.write(&catalog_path(), text.as_bytes()).unwrap();
-        let authors = names(&storage, false);
+        let authors = names(&storage, Shelf::Authors);
         assert_eq!(
             authors,
             [
@@ -497,8 +558,13 @@ mod tests {
                 (String::from("bob"), 1)
             ]
         );
-        assert_eq!(names(&storage, true), [(String::from("Tales"), 2)]);
-        let tales = books_of(&storage, true, "Tales");
+        assert_eq!(names(&storage, Shelf::Series), [(String::from("Tales"), 2)]);
+        assert_eq!(
+            names(&storage, Shelf::Tags),
+            [(String::from("Fantasy"), 2), (String::from("Kids"), 1)]
+        );
+        assert_eq!(books_of(&storage, Shelf::Tags, "Kids")[0].title, "Second");
+        let tales = books_of(&storage, Shelf::Series, "Tales");
         assert_eq!(tales[0].title, "First", "by number");
         assert_eq!(tales[1].path, "b/2.epub");
     }
