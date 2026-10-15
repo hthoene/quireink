@@ -37,6 +37,11 @@ pub mod actions {
     pub const LIBRARY: Id = Id::new_static("core.library");
     /// Opens the settings slot.
     pub const SETTINGS: Id = Id::new_static("core.settings");
+    /// Puts the device to sleep: shows the sleep screen (slot
+    /// [`SLEEP`](super::slots::SLEEP)), then the shell sleeps until it is
+    /// woken (see [`Env::sleep`](crate::Env)). Where the system sleeps on
+    /// its own (Android), nothing sends it.
+    pub const SLEEP: Id = Id::new_static("core.sleep");
 }
 
 /// Standard slots.
@@ -100,6 +105,11 @@ pub mod slots {
     /// the kernel; bind another screen here for messages that look
     /// different. Its [`region`](crate::Screen::region) is where it shows.
     pub const NOTICE: Id = Id::new_static("core.notice");
+    /// Shown while the device sleeps (see
+    /// [`actions::SLEEP`](super::actions::SLEEP)): a cover, a picture, a
+    /// message. It closes itself when the device wakes
+    /// ([`events::RESUME`](super::events::RESUME)).
+    pub const SLEEP: Id = Id::new_static("core.sleep");
 }
 
 /// Standard menus. Plugins add entries with

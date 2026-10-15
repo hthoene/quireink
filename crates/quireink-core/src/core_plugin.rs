@@ -62,7 +62,7 @@ impl Plugin for CorePlugin {
                 out.push(Command::RunAction(target.clone()));
             })
         };
-        let handled: [(Id, &'static str, ActionHandler); 9] = [
+        let handled: [(Id, &'static str, ActionHandler); 10] = [
             // Screens without their own meaning of next/previous turn pages.
             (
                 actions::NEXT,
@@ -109,6 +109,17 @@ impl Plugin for CorePlugin {
                 "core.action.home",
                 Box::new(|_: &Env<'_>, out: &mut Vec<Command>| {
                     out.push(Command::open_slot(slots::HOME));
+                }),
+            ),
+            (
+                actions::SLEEP,
+                "core.action.sleep",
+                Box::new(|env: &Env<'_>, out: &mut Vec<Command>| {
+                    // The sleep screen first, if there is one, then sleep.
+                    if env.sleep && env.has_slot(&slots::SLEEP) {
+                        out.push(Command::open_slot(slots::SLEEP));
+                    }
+                    out.push(Command::Sleep);
                 }),
             ),
             (

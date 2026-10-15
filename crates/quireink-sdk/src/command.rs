@@ -203,6 +203,9 @@ pub enum Command {
     /// Restarts QuireInk, e.g. to apply switched plugins. The shell builds
     /// a new kernel; the reading position is already saved.
     Restart,
+    /// Asks the shell to sleep once the frame is shown, where it can
+    /// ([`Env::sleep`](crate::Env)); the kernel is told when it wakes.
+    Sleep,
     /// Puts text on the clipboard, on devices with one also the system's,
     /// for other apps. Long text is cut at [`MAX_CLIPBOARD`] bytes.
     SetClipboard(alloc::string::String),

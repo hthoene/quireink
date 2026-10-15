@@ -97,6 +97,9 @@ pub enum Effect {
     WakeAt(Instant),
     /// Build a new kernel, e.g. to apply switched plugins.
     Restart,
+    /// Sleep once the frame is shown (the sleep screen): call
+    /// [`Kernel::suspend`], and [`Kernel::resume`] on waking.
+    Sleep,
 }
 
 /// The effects of one kernel call. Refreshes are already coalesced: there
@@ -106,6 +109,7 @@ pub struct Effects {
     refresh: Option<(Rect, RefreshMode)>,
     wake_at: Option<Instant>,
     restart: bool,
+    sleep: bool,
 }
 
 impl Effects {
@@ -122,8 +126,14 @@ impl Effects {
         self.restart
     }
 
+    /// Whether the shell should sleep once the frame is shown (see
+    /// [`Effect::Sleep`]).
+    pub fn sleep(&self) -> bool {
+        self.sleep
+    }
+
     pub fn is_empty(&self) -> bool {
-        self.refresh.is_none() && self.wake_at.is_none() && !self.restart
+        self.refresh.is_none() && self.wake_at.is_none() && !self.restart && !self.sleep
     }
 
     pub fn iter(&self) -> impl Iterator<Item = Effect> {
@@ -134,6 +144,7 @@ impl Effects {
             .into_iter()
             .chain(self.wake_at.map(Effect::WakeAt))
             .chain(self.restart.then_some(Effect::Restart))
+            .chain(self.sleep.then_some(Effect::Sleep))
     }
 }
 
@@ -200,6 +211,7 @@ pub struct KernelBuilder {
     network: bool,
     system_clipboard: bool,
     speech: bool,
+    sleep: bool,
     frame_rows: Option<u16>,
     storage: Option<Box<dyn Storage>>,
     setting_defaults: Vec<(String, String)>,
@@ -296,6 +308,13 @@ impl KernelBuilder {
         self
     }
 
+    /// The shell sleeps after showing QuireInk's sleep screen (see
+    /// [`Effect::Sleep`]); without, the system has its own (Android).
+    pub fn sleep(mut self, available: bool) -> Self {
+        self.sleep = available;
+        self
+    }
+
     /// Memory for glyphs rasterized at runtime (default 32 KiB). Bitmap font
     /// packs do not use it.
     pub fn glyph_cache(mut self, bytes: usize) -> Self {
@@ -336,6 +355,7 @@ impl KernelBuilder {
                 clipboard: String::new(),
                 system_clipboard: false,
                 speech: self.speech,
+                sleep: self.sleep,
                 slots: Vec::new(),
                 font_dirs: Vec::new(),
                 storage: self.storage.unwrap_or_else(|| Box::new(NoStorage)),
@@ -358,6 +378,7 @@ impl KernelBuilder {
             output: Output::default(),
             warnings: Vec::new(),
             restart: false,
+            sleep: false,
             scope: None,
             requests: Vec::new(),
             copied: None,
@@ -378,6 +399,7 @@ impl KernelBuilder {
         };
         let (touch, speech) = (kernel.shared.device.input.touch, kernel.shared.speech);
         kernel.shared.menus.set_device(touch, speech);
+        kernel.shared.menus.set_sleep(kernel.shared.sleep);
 
         // The configuration file on the device, then the shell's overrides.
         let stored = read_config(kernel.shared.storage.as_ref());
@@ -557,6 +579,8 @@ pub struct Kernel {
     warnings: Vec<Warning>,
     /// A restart was requested (see [`Command::Restart`]).
     restart: bool,
+    /// Sleep was requested (see [`Command::Sleep`]).
+    sleep: bool,
     /// The active settings scope: its file and the screen that set it.
     scope: Option<(String, Option<usize>)>,
     /// HTTP requests for the shell to make.
@@ -621,6 +645,7 @@ impl Kernel {
             network: false,
             system_clipboard: false,
             speech: false,
+            sleep: false,
             frame_rows: None,
             storage: None,
             setting_defaults: Vec::new(),
@@ -1713,6 +1738,7 @@ impl Kernel {
         let requested = self.output.refresh.take();
         let mut effects = Effects {
             restart: mem::take(&mut self.restart),
+            sleep: mem::take(&mut self.sleep),
             ..Effects::default()
         };
         if let Some(dirty) = self.pending.take() {
@@ -1803,6 +1829,7 @@ impl Kernel {
             Command::RunAction(action) => self.dispatch(action),
             Command::SetPluginEnabled(id, enabled) => self.set_plugin_enabled(&id, enabled),
             Command::Restart => self.restart = true,
+            Command::Sleep => self.sleep = self.shared.sleep,
             Command::SetClipboard(text) => {
                 self.shared.clipboard = clipped(&text);
                 self.copied = Some(self.shared.clipboard.clone());
@@ -2453,6 +2480,8 @@ struct Shared {
     system_clipboard: bool,
     /// The shell speaks (see [`KernelBuilder::speech`]).
     speech: bool,
+    /// The shell sleeps after the sleep screen (see [`KernelBuilder::sleep`]).
+    sleep: bool,
     /// Slots some screen is bound to.
     slots: Vec<Id>,
     /// Folders fonts are read from.
@@ -2482,6 +2511,7 @@ impl Shared {
             network: self.network,
             clipboard: self.system_clipboard || !self.clipboard.is_empty(),
             speech: self.speech,
+            sleep: self.sleep,
             slots: &self.slots,
             font_dirs: &self.font_dirs,
             storage: self.storage.as_ref(),

@@ -52,6 +52,10 @@ pub struct Env<'a> {
     /// Whether the device can speak text aloud
     /// ([`Command::Speak`](crate::Command::Speak)).
     pub speech: bool,
+    /// Whether QuireInk shows a screen while the device sleeps
+    /// ([`actions::SLEEP`](crate::builtin::actions::SLEEP)); where the
+    /// system sleeps on its own (Android), it shows its own.
+    pub sleep: bool,
     /// The slots some screen is bound to (see [`Env::has_slot`]).
     pub slots: &'a [crate::Id],
     /// The folders reading fonts are found in at start-up, the first one

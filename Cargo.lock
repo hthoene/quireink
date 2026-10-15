@@ -1266,6 +1266,7 @@ dependencies = [
  "quireink-plugin-reader",
  "quireink-plugin-rules",
  "quireink-plugin-settings",
+ "quireink-plugin-sleep",
  "quireink-plugin-stats",
  "quireink-plugin-transfer",
  "quireink-plugin-vocabulary",
@@ -1545,6 +1546,14 @@ dependencies = [
 
 [[package]]
 name = "quireink-plugin-settings"
+version = "0.1.0"
+dependencies = [
+ "quireink-i18n",
+ "quireink-sdk",
+]
+
+[[package]]
+name = "quireink-plugin-sleep"
 version = "0.1.0"
 dependencies = [
  "quireink-i18n",

@@ -4,7 +4,9 @@ use std::time::Instant as StdInstant;
 
 use quireink_core::{Effects, Kernel, KernelError, SpeechCall};
 use quireink_graphics::Framebuffer;
-use quireink_platform::{Battery, InputEvent, Instant, SystemStatus, WallClock};
+use quireink_platform::{
+    Battery, ButtonState, InputEvent, Instant, SystemStatus, WallClock, buttons,
+};
 
 use crate::budget;
 use crate::panel::Panel;
@@ -34,6 +36,8 @@ pub struct Device {
     pub servers: quireink_serve::Servers,
     /// The texts being spoken (emulated), in order: number and when each
     /// ends.
+    /// Sleeping (see `Effects::sleep`): only the power button wakes it.
+    asleep: bool,
     speech: std::collections::VecDeque<(u32, Instant)>,
 }
 
@@ -68,6 +72,7 @@ impl Device {
             http: crate::http::Http::new(),
             servers: quireink_serve::Servers::new(|| {}),
             speech: std::collections::VecDeque::new(),
+            asleep: false,
             clock: if simulated_time {
                 Clock::Simulated(0)
             } else {
@@ -132,6 +137,20 @@ impl Device {
 
     pub fn input(&mut self, event: InputEvent) {
         let now = self.now();
+        if self.asleep {
+            // Asleep, only the power button wakes the device.
+            if let InputEvent::Button {
+                name: buttons::POWER,
+                state: ButtonState::Pressed,
+            } = event
+            {
+                self.asleep = false;
+                eprintln!("{}: awake", self.profile.device.id);
+                let effects = budget::track(|| self.kernel.resume(now));
+                self.execute(effects);
+            }
+            return;
+        }
         let effects = budget::track(|| self.kernel.handle(now, event));
         self.execute(effects);
     }
@@ -173,6 +192,9 @@ impl Device {
 
     /// Ticks the kernel if a requested wake-up is due.
     pub fn tick_if_due(&mut self) {
+        if self.asleep {
+            return;
+        }
         self.poll_http(None);
         self.poll_servers();
         let now = self.now();
@@ -204,6 +226,14 @@ impl Device {
             self.panel.refresh(self.controller.view(), region, mode);
         }
         self.wake_at = effects.wake_at();
+        if effects.sleep() && !self.asleep {
+            // The sleep screen is shown: plugins save, the device sleeps.
+            self.asleep = true;
+            eprintln!("{}: asleep", self.profile.device.id);
+            let now = self.now();
+            let effects = budget::track(|| self.kernel.suspend(now));
+            self.execute(effects);
+        }
         for call in self.kernel.take_requests() {
             self.http.start(call);
         }
@@ -300,7 +330,8 @@ fn build_kernel(
             .storage(storage)
             .glyph_cache(profile.glyph_cache)
             .network(true)
-            .speech(profile.speech);
+            .speech(profile.speech)
+            .sleep(profile.sleep);
         // Scalable fonts only where the emulated device renders them.
         if !profile.font_packs {
             builder = builder.font_dir("fonts");

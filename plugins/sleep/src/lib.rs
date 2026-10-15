@@ -1,0 +1,287 @@
+//! The sleep screen (slot `core.sleep`): what the screen shows while the
+//! device sleeps, e-ink keeping it without power.
+//!
+//! Setting `sleep.show`:
+//!
+//! - *Cover* (the default): the cover of the book read last;
+//! - *Picture*: the pictures (JPEG, PNG) of a folder (`sleep.folder`,
+//!   `sleep` at first, as on CrossPoint), one after the other;
+//! - *Message*: just "Sleeping";
+//! - *Page*: the screen stays as it is.
+//!
+//! Without a cover or a picture the message shows. The screen closes when
+//! the device wakes. Only where QuireInk shows the sleep screen itself
+//! (the X4, not Android): elsewhere its settings are hidden.
+
+#![no_std]
+
+extern crate alloc;
+
+use alloc::borrow::Cow;
+use alloc::boxed::Box;
+use alloc::format;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+
+use quireink_sdk::builtin::{events, groups, params, slots};
+use quireink_sdk::document::ImageRef;
+use quireink_sdk::ui::{self, UiStyle};
+use quireink_sdk::{
+    Canvas, Color, Command, Cx, Env, Handled, Id, Manifest, MenuNeed, Params, Plugin, Priority,
+    Rect, RefreshMode, RegisterError, Registrar, SDK_VERSION, Screen, ScreenSpec, SettingKind,
+    SettingSpec, SettingValue, Storage, Version,
+};
+
+pub const PLUGIN: Id = Id::new_static("sleep");
+/// What the sleep screen shows: one of [`COVER`], [`PICTURE`],
+/// [`MESSAGE`], [`PAGE`].
+pub const SHOW: Id = Id::new_static("sleep.show");
+pub const COVER: &str = "sleep.show.cover";
+pub const PICTURE: &str = "sleep.show.picture";
+pub const MESSAGE: &str = "sleep.show.message";
+pub const PAGE: &str = "sleep.show.page";
+/// The folder of the pictures.
+pub const FOLDER: Id = Id::new_static("sleep.folder");
+const SCREEN: Id = Id::new_static("sleep.screen");
+const SECTION: &str = "sleep.section";
+/// The folder chooser of the `files` plugin, if installed.
+const CHOOSE_FOLDER: Id = Id::new_static("files.choose-folder");
+
+fn data(name: &str) -> String {
+    format!("{}/{name}", Env::plugin_dir(PLUGIN.as_str()))
+}
+
+/// The sleep screen plugin.
+#[derive(Debug, Default)]
+pub struct Sleep;
+
+impl Plugin for Sleep {
+    fn manifest(&self) -> Manifest {
+        Manifest {
+            id: PLUGIN,
+            name: Cow::Borrowed("Sleep screen"),
+            description: Cow::Borrowed(
+                "Shows the book's cover, your pictures or a message while the device sleeps.",
+            ),
+            version: Version::new(0, 1, 0),
+            sdk: SDK_VERSION,
+        }
+    }
+
+    fn register(&self, r: &mut dyn Registrar) -> Result<(), RegisterError> {
+        r.add_setting(
+            SettingSpec::new(
+                SHOW,
+                "sleep.setting.show",
+                SettingKind::Choice(
+                    [COVER, PICTURE, MESSAGE, PAGE]
+                        .into_iter()
+                        .map(Cow::Borrowed)
+                        .collect(),
+                ),
+                SettingValue::Text(Cow::Borrowed(COVER)),
+            )
+            .group(groups::DISPLAY)
+            .section(SECTION)
+            .description("sleep.setting.show.help"),
+        )?;
+        r.add_setting(
+            SettingSpec::new(
+                FOLDER,
+                "sleep.setting.folder",
+                SettingKind::Text,
+                SettingValue::Text(Cow::Borrowed("sleep")),
+            )
+            .group(groups::DISPLAY)
+            .section(SECTION)
+            .editor(CHOOSE_FOLDER)
+            .description("sleep.setting.folder.help"),
+        )?;
+        for item in [SHOW, FOLDER] {
+            r.set_menu_need(item, MenuNeed::Sleep)?;
+        }
+        // The book read last, for its cover.
+        r.subscribe(
+            events::BOOK_OPENED,
+            Box::new(|env, params, _| {
+                if let Some(path) = params.get(params::PATH) {
+                    let _ = env.storage.write(&data("book.txt"), path.as_bytes());
+                }
+            }),
+        )?;
+        r.subscribe(
+            events::BOOK_MOVED,
+            Box::new(|env, params, _| {
+                let (Some(from), Some(to)) = (params.get(params::FROM), params.get(params::PATH))
+                else {
+                    return;
+                };
+                if last_book(env.storage).as_deref() == Some(from) {
+                    let _ = env.storage.write(&data("book.txt"), to.as_bytes());
+                }
+            }),
+        )?;
+        r.add_screen(ScreenSpec {
+            id: SCREEN,
+            title: Cow::Borrowed("sleep.title"),
+            factory: Box::new(|env, _| Box::new(SleepScreen::new(env))),
+        })?;
+        r.bind_slot(slots::SLEEP, SCREEN, Priority::DEFAULT)?;
+        r.add_translations(Cow::Borrowed(include_str!("../i18n/en.ini")))?;
+        r.add_translations(Cow::Borrowed(include_str!("../i18n/de.ini")))?;
+        Ok(())
+    }
+}
+
+fn last_book(storage: &dyn Storage) -> Option<String> {
+    let data = quireink_sdk::read_file(storage, &data("book.txt"), 1024).ok()?;
+    String::from_utf8(data).ok().filter(|p| !p.is_empty())
+}
+
+/// The cover of the book read last. Where it is is kept, so the book
+/// is opened for it only once (memory is short while a book is open).
+fn cover(env: &Env<'_>) -> Option<ImageRef> {
+    let path = last_book(env.storage)?;
+    let kept = quireink_sdk::read_file(env.storage, &data("cover.txt"), 2048)
+        .ok()
+        .and_then(|d| String::from_utf8(d).ok())
+        .and_then(|text| {
+            let mut f = text.splitn(4, '\t');
+            let (book, width, height, image) = (f.next()?, f.next()?, f.next()?, f.next()?);
+            if book != path || !env.storage.exists(image) {
+                return None;
+            }
+            Some(ImageRef {
+                path: image.to_string(),
+                width: width.parse().ok()?,
+                height: height.parse().ok()?,
+            })
+        });
+    if kept.is_some() {
+        return kept;
+    }
+    let document = env.formats.open(env.storage, &path).ok()?;
+    let image = document.cover(env.storage).ok().flatten()?;
+    let line = format!("{path}\t{}\t{}\t{}", image.width, image.height, image.path);
+    let _ = env.storage.write(&data("cover.txt"), line.as_bytes());
+    Some(image)
+}
+
+/// The next picture of the folder, decoded to fit the screen.
+fn picture(env: &Env<'_>) -> Option<ImageRef> {
+    let folder = env
+        .settings
+        .text(FOLDER.as_str())
+        .trim_matches('/')
+        .to_string();
+    let mut pictures = Vec::new();
+    let _ = env.storage.list(&folder, &mut |entry| {
+        let name = entry.name.to_lowercase();
+        if !entry.is_dir
+            && !entry.name.starts_with('.')
+            && [".jpg", ".jpeg", ".png"].iter().any(|e| name.ends_with(e))
+        {
+            pictures.push(entry.name.to_string());
+        }
+    });
+    if pictures.is_empty() {
+        return None;
+    }
+    pictures.sort_unstable();
+    // One after the other, from where the last sleep left off.
+    let next = quireink_sdk::read_file(env.storage, &data("next.txt"), 32)
+        .ok()
+        .and_then(|n| String::from_utf8(n).ok()?.trim().parse::<usize>().ok())
+        .unwrap_or(0);
+    let name = &pictures[next % pictures.len()];
+    let _ = env
+        .storage
+        .write(&data("next.txt"), format!("{}", next + 1).as_bytes());
+    let display = env.device.display;
+    let side = u32::from(display.width.max(display.height));
+    quireink_sdk::image::gray_from_file(
+        env.storage,
+        &format!("{folder}/{name}"),
+        &data("picture.gray"),
+        side,
+    )
+}
+
+/// What the screen shows while the device sleeps.
+struct SleepScreen {
+    show: String,
+    image: Option<ImageRef>,
+}
+
+impl SleepScreen {
+    fn new(env: &Env<'_>) -> Self {
+        let show = env.settings.text(SHOW.as_str()).to_string();
+        let image = match show.as_str() {
+            PICTURE => picture(env),
+            MESSAGE | PAGE => None,
+            _ => cover(env),
+        };
+        Self { show, image }
+    }
+}
+
+impl Screen for SleepScreen {
+    fn region(&self, _: &Env<'_>) -> Option<Rect> {
+        // The page stays: nothing is drawn over it.
+        (self.show == PAGE).then_some(Rect::new(0, 0, 0, 0))
+    }
+
+    fn draw(&mut self, canvas: &mut Canvas<'_>, env: &Env<'_>) {
+        if self.show == PAGE {
+            return;
+        }
+        let display = env.device.display;
+        let screen = Rect::new(0, 0, display.width, display.height);
+        match &self.image {
+            Some(image) => {
+                // As large as fits, in the middle, on black.
+                ui::fill(canvas, screen, Color::BLACK);
+                let (w, h) = ui::fit_image(image, display.width, display.height);
+                let area = Rect::new((display.width - w) / 2, (display.height - h) / 2, w, h);
+                ui::draw_image(canvas, env.storage, image, area);
+            }
+            None => {
+                let style = UiStyle::new(env);
+                ui::draw_message(canvas, env, &style, screen, env.i18n.tr("sleep.sleeping"));
+            }
+        }
+    }
+
+    fn on_show(&mut self, cx: &mut Cx<'_, '_>) {
+        if self.show != PAGE {
+            cx.request_refresh(RefreshMode::Full);
+        }
+    }
+
+    fn on_action(&mut self, _: &Id, _: &mut Cx<'_, '_>) -> Handled {
+        // Nothing to do while asleep.
+        Handled::Yes
+    }
+
+    fn on_event(&mut self, event: &Id, _: &Params, cx: &mut Cx<'_, '_>) {
+        if *event == events::RESUME {
+            cx.command(Command::Back);
+            if self.show != PAGE {
+                cx.request_refresh(RefreshMode::Full);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use quireink_i18n::{Catalog, check};
+
+    #[test]
+    fn translations_are_complete() {
+        let en = Catalog::parse(include_str!("../i18n/en.ini")).unwrap();
+        let de = Catalog::parse(include_str!("../i18n/de.ini")).unwrap();
+        let issues = check::compare(&en, &de);
+        assert!(issues.is_empty(), "{issues:?}");
+    }
+}

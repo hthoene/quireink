@@ -40,6 +40,9 @@ pub enum MenuNeed {
     /// A device that speaks ([`Env::speech`](crate::Env)): hidden
     /// elsewhere, also where the user listed it.
     Speech,
+    /// A device where QuireInk shows the sleep screen
+    /// ([`Env::sleep`](crate::Env)), hidden elsewhere.
+    Sleep,
     /// A device without a touch screen, where it is the way to do what a
     /// tap or a long press does elsewhere (e.g. choosing a link). On touch
     /// devices it is left out of the menus plugins define; users can still
@@ -71,9 +74,11 @@ pub struct Menus {
     icons: VecMap<Id, Cow<'static, str>>,
     sections: Vec<Id>,
     needs: VecMap<Id, MenuNeed>,
-    /// The device has a touch screen; it cannot speak.
+    /// The device has a touch screen; it cannot speak; QuireInk shows
+    /// its sleep screen.
     touch: bool,
     mute: bool,
+    sleeps: bool,
 }
 
 impl Menus {
@@ -100,6 +105,12 @@ impl Menus {
         self.mute = !speech;
     }
 
+    /// Whether QuireInk shows the sleep screen here, for entries that
+    /// need it ([`MenuNeed::Sleep`]).
+    pub fn set_sleep(&mut self, sleeps: bool) {
+        self.sleeps = sleeps;
+    }
+
     /// Offers `item` only where `need` is met.
     pub fn set_need(&mut self, item: Id, need: MenuNeed) {
         self.needs.insert(item, need);
@@ -124,6 +135,7 @@ impl Menus {
     fn offered(&self, item: &str, listed: bool) -> bool {
         match self.needs.get(item) {
             Some(MenuNeed::Speech) => !self.mute,
+            Some(MenuNeed::Sleep) => self.sleeps,
             Some(MenuNeed::NoTouch) => listed || !self.touch,
             None => true,
         }
