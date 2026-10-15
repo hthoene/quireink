@@ -83,7 +83,8 @@ impl Translator {
         &self.language
     }
 
-    /// Available languages as `(tag, name)`, each listed once.
+    /// Available languages as `(tag, name)`, each listed once: English,
+    /// QuireInk's own language, first, then the others by tag.
     pub fn languages(&self) -> Vec<(&str, &str)> {
         let mut languages: Vec<(&str, &str)> = Vec::new();
         for catalog in &self.catalogs {
@@ -91,7 +92,8 @@ impl Translator {
                 languages.push((catalog.language(), catalog.name()));
             }
         }
-        languages.sort_unstable();
+        let english = |tag: &str| tag == "en" || tag.starts_with("en-");
+        languages.sort_unstable_by_key(|&(tag, _)| (!english(tag), tag));
         languages
     }
 
@@ -228,7 +230,7 @@ mod tests {
         let mut t = translator("de");
         t.add(Catalog::parse(DE_OVERRIDE).unwrap());
         let tags: Vec<&str> = t.languages().into_iter().map(|(tag, _)| tag).collect();
-        assert_eq!(tags, ["de", "de-AT", "en"]);
+        assert_eq!(tags, ["en", "de", "de-AT"]);
     }
 
     #[test]
