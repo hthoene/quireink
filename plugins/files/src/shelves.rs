@@ -33,6 +33,8 @@ pub(crate) const MODE_SERIES: &str = "series";
 pub(crate) const MODE_TAGS: &str = "tags";
 /// The favourite books (`favourites`).
 pub(crate) const MODE_FAVOURITES: &str = "favourites";
+/// The books matching a search (`search`, the words as `text`).
+pub(crate) const MODE_SEARCH: &str = "search";
 /// Between a book's tags in the catalog.
 const TAG_SEPARATOR: char = '\u{1f}';
 
@@ -44,6 +46,8 @@ pub(crate) enum Shelf {
     Tags,
     /// No names: the favourite books at once.
     Favourites,
+    /// No names: the books a search finds.
+    Search,
 }
 
 impl Shelf {
@@ -52,6 +56,7 @@ impl Shelf {
             Some(MODE_SERIES) => Shelf::Series,
             Some(MODE_TAGS) => Shelf::Tags,
             Some(MODE_FAVOURITES) => Shelf::Favourites,
+            Some(MODE_SEARCH) => Shelf::Search,
             _ => Shelf::Authors,
         }
     }
@@ -122,8 +127,23 @@ impl Line {
                 .split(TAG_SEPARATOR)
                 .filter(|t| !t.is_empty())
                 .collect(),
-            Shelf::Favourites => Vec::new(),
+            Shelf::Favourites | Shelf::Search => Vec::new(),
         }
+    }
+
+    /// Whether all of the words of `query` (lowercase) are in its title,
+    /// author, series, tags or file name.
+    fn matches(&self, query: &[String]) -> bool {
+        let text = format!(
+            "{} {} {} {} {}",
+            self.title,
+            self.author,
+            self.series,
+            self.tags.replace(TAG_SEPARATOR, " "),
+            files::name(&self.path)
+        )
+        .to_lowercase();
+        query.iter().all(|word| text.contains(word.as_str()))
     }
 }
 
@@ -260,6 +280,40 @@ fn names(storage: &dyn Storage, shelf: Shelf) -> Vec<(String, usize)> {
     names
 }
 
+/// A book's format as its file says, e.g. `EPUB`; a zipped book by
+/// what is inside (`FB2` for `.fb2.zip`).
+fn format_of(path: &str) -> String {
+    let name = files::name(path);
+    let lower = name.to_ascii_lowercase();
+    let name = match lower.strip_suffix(".zip") {
+        Some(inner) if inner.contains('.') => &name[..inner.len()],
+        _ => name,
+    };
+    name.rsplit_once('.')
+        .map(|(_, ext)| ext.to_uppercase())
+        .unwrap_or_default()
+}
+
+/// The books of the catalog matching `query`, by title.
+fn search(storage: &dyn Storage, query: &str) -> Vec<Line> {
+    let words: Vec<String> = query
+        .to_lowercase()
+        .split_whitespace()
+        .map(String::from)
+        .collect();
+    let mut found = Vec::new();
+    if words.is_empty() {
+        return found;
+    }
+    each_line(storage, &catalog_path(), &mut |line| {
+        if found.len() < MAX_NAMES && line.matches(&words) {
+            found.push(line);
+        }
+    });
+    found.sort_by_key(|l| l.title.to_lowercase());
+    found
+}
+
 /// The favourite books still there, as catalog lines from the details
 /// the library keeps.
 fn favourites(env: &Env<'_>) -> Vec<Line> {
@@ -328,7 +382,19 @@ impl ShelfScreen {
         let top = header.area.height + style.gap as u16;
         let area = Rect::new(0, top, display.width, display.height.saturating_sub(top));
         let shelf = Shelf::of(params.get(params::MODE));
-        let chosen = (shelf == Shelf::Favourites).then(|| (String::new(), favourites(env)));
+        let chosen = match shelf {
+            Shelf::Favourites => Some((String::new(), favourites(env))),
+            Shelf::Search => {
+                let query = params
+                    .get(params::TEXT)
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string();
+                let found = search(env.storage, &query);
+                Some((query, found))
+            }
+            _ => None,
+        };
         Self {
             list: ListView::new(area, style.noted_row()).focus_on_keys(env),
             names: names(env.storage, shelf),
@@ -380,6 +446,9 @@ impl ShelfScreen {
     fn title(&self, env: &Env<'_>) -> String {
         match &self.chosen {
             _ if self.shelf == Shelf::Favourites => env.i18n.tr("files.favourites").to_string(),
+            Some((query, _)) if self.shelf == Shelf::Search => env
+                .i18n
+                .format("files.search.title", &[("text", Arg::Str(query))]),
             Some((name, _)) if name.is_empty() => env.i18n.tr("files.unknown-author").to_string(),
             Some((name, _)) => name.clone(),
             None => env
@@ -389,6 +458,7 @@ impl ShelfScreen {
                     Shelf::Series => "files.by-series",
                     Shelf::Tags => "files.by-tag",
                     Shelf::Favourites => "files.favourites",
+                    Shelf::Search => "files.search",
                 })
                 .to_string(),
         }
@@ -410,13 +480,14 @@ impl Screen for ShelfScreen {
                 _ if self.shelf == Shelf::Favourites => {
                     env.i18n.tr("files.no-favourites").to_string()
                 }
+                _ if self.shelf == Shelf::Search => env.i18n.tr("files.search.none").to_string(),
                 None => env.i18n.tr("files.no-books").to_string(),
             };
             ui::draw_message(canvas, env, &style, self.list.area, &message);
             return;
         }
         let series = self.shelf == Shelf::Series;
-        let tags = matches!(self.shelf, Shelf::Tags | Shelf::Favourites);
+        let tags = matches!(self.shelf, Shelf::Tags | Shelf::Favourites | Shelf::Search);
         let (names, chosen) = (&self.names, &self.chosen);
         self.list.draw(
             canvas,
@@ -437,6 +508,13 @@ impl Screen for ShelfScreen {
                             .i18n
                             .format("files.series-number", &[("number", Arg::Str(&book.number))]);
                         format!("{} · {number}", book.series)
+                    };
+                    // The format, so editions of a book are told apart.
+                    let format = format_of(&book.path);
+                    let note = match (note.is_empty(), format.is_empty()) {
+                        (_, true) => note,
+                        (true, false) => format,
+                        (false, false) => format!("{note} · {format}"),
                     };
                     ui::draw_noted_row(canvas, env, &style, rect, focused, &book.title, "", &note);
                 }
@@ -488,7 +566,11 @@ impl Screen for ShelfScreen {
         self.walked = true;
         self.names = names(env.storage, self.shelf);
         if let Some((name, books)) = &mut self.chosen {
-            *books = books_of(env.storage, self.shelf, name);
+            *books = if self.shelf == Shelf::Search {
+                search(env.storage, name)
+            } else {
+                books_of(env.storage, self.shelf, name)
+            };
         }
         self.list.focus = self.list.focus.min(self.len().saturating_sub(1));
         self.redraw(cx);
@@ -510,7 +592,9 @@ impl Screen for ShelfScreen {
             self.activate(self.list.focus, cx);
             return Handled::Yes;
         } else if *a == actions::BACK {
-            if self.shelf != Shelf::Favourites && self.chosen.take().is_some() {
+            if !matches!(self.shelf, Shelf::Favourites | Shelf::Search)
+                && self.chosen.take().is_some()
+            {
                 self.list.focus = self.names_focus;
                 self.redraw(cx);
             } else {
@@ -607,6 +691,16 @@ mod tests {
             [(String::from("Fantasy"), 2), (String::from("Kids"), 1)]
         );
         assert_eq!(books_of(&storage, Shelf::Tags, "Kids")[0].title, "Second");
+        // Searching: every word, anywhere, in any case.
+        let found: Vec<String> = search(&storage, "ann TALES")
+            .into_iter()
+            .map(|l| l.title)
+            .collect();
+        assert_eq!(found, ["First", "Second"]);
+        assert_eq!(search(&storage, "kids")[0].title, "Second");
+        assert!(search(&storage, "nothing").is_empty());
+        assert_eq!(format_of("b/x.epub"), "EPUB");
+        assert_eq!(format_of("b/y.FB2.zip"), "FB2");
         let tales = books_of(&storage, Shelf::Series, "Tales");
         assert_eq!(tales[0].title, "First", "by number");
         assert_eq!(tales[1].path, "b/2.epub");

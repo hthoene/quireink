@@ -65,6 +65,10 @@ pub const BY_SERIES: Id = Id::new_static("files.by-series");
 pub const BY_TAG: Id = Id::new_static("files.by-tag");
 /// The favourite books.
 pub const FAVOURITES: Id = Id::new_static("files.favourites");
+/// Searches the library (asks for words on the keyboard).
+pub const SEARCH: Id = Id::new_static("files.search");
+/// The keyboard's reply with the words.
+const SEARCH_ENTERED: Id = Id::new_static("files.search-entered");
 /// What can be done with a book (held in the list).
 const CHOICE: Id = Id::new_static("files.choice");
 const CHOSEN: Id = Id::new_static("files.book-chosen");
@@ -173,6 +177,36 @@ impl Plugin for Files {
             .group(groups::LIBRARY)
             .description("files.setting.sort.help"),
         )?;
+        r.add_action(quireink_sdk::ActionSpec {
+            id: SEARCH,
+            title: Cow::Borrowed("files.search"),
+            handler: Some(Box::new(|env: &Env<'_>, out: &mut Vec<Command>| {
+                out.push(Command::OpenSlot(
+                    slots::KEYBOARD,
+                    Params::new()
+                        .with(
+                            params::TITLE,
+                            env.i18n.tr("files.search.prompt").to_string(),
+                        )
+                        .with(params::REPLY, SEARCH_ENTERED.as_str()),
+                ));
+            })),
+        })?;
+        r.add_icon(SEARCH, Cow::Borrowed("search"))?;
+        r.subscribe(
+            SEARCH_ENTERED,
+            Box::new(|_, params, out| {
+                let text = params.get(params::TEXT).unwrap_or_default().trim();
+                if !text.is_empty() {
+                    out.push(Command::OpenScreen(
+                        SHELF_SCREEN,
+                        Params::new()
+                            .with(params::MODE, shelves::MODE_SEARCH)
+                            .with(params::TEXT, text.to_string()),
+                    ));
+                }
+            }),
+        )?;
         // The shelves as a submenu: an action named like its menu.
         r.add_action(quireink_sdk::ActionSpec {
             id: SHELVES_MENU,
@@ -199,6 +233,7 @@ impl Plugin for Files {
         }
         for (item, order) in [
             (SORT, 10),
+            (SEARCH, 11),
             (SHELVES_MENU, 12),
             (ROOT, 20),
             (core_settings::NIGHT_MODE, 30),
