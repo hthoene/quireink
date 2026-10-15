@@ -21,6 +21,7 @@ members = [
     "crates/quireink-core",
     "crates/quireink-app",
     "crates/quireink-fs",
+    "crates/quireink-x4",
     "plugins/diagnostics",
     "plugins/dictionary",
     "plugins/fonts-default",
@@ -81,6 +82,7 @@ quireink-zip = { path = "crates/quireink-zip", version = "0.1.0" }
 quireink-xml = { path = "crates/quireink-xml", version = "0.1.0" }
 quireink-stardict = { path = "crates/quireink-stardict", version = "0.1.0" }
 quireink-layout = { path = "crates/quireink-layout", version = "0.1.0" }
+quireink-x4 = { path = "crates/quireink-x4", version = "0.1.0" }
 quireink-sdk = { path = "crates/quireink-sdk", version = "0.1.0" }
 quireink-core = { path = "crates/quireink-core", version = "0.1.0" }
 quireink-hyphen = { path = "crates/quireink-hyphen", version = "0.1.0" }

@@ -392,6 +392,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "edf234dd1594d6dd434a8fb8cada51ddbbc593e40e4a01556a0b31c62da2775b"
 
 [[package]]
+name = "embedded-hal"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "361a90feb7004eca4019fb28352a9465666b24f840f5c3cddf0ff13920590b89"
+
+[[package]]
 name = "env_filter"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1690,6 +1696,14 @@ dependencies = [
  "quireink-graphics",
  "quireink-platform",
  "skrifa",
+]
+
+[[package]]
+name = "quireink-x4"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal",
+ "quireink-platform",
 ]
 
 [[package]]

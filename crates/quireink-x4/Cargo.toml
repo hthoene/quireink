@@ -1,0 +1,19 @@
+[package]
+name = "quireink-x4"
+description = "The Xteink X4's hardware for QuireInk's firmware: its SSD1677 display, button ladders and battery, against embedded-hal"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+categories = ["no-std", "embedded"]
+keywords = ["e-reader", "e-ink", "epaper", "ssd1677", "xteink"]
+
+[dependencies]
+embedded-hal = "1.0"
+quireink-platform.workspace = true
+
+[lints]
+workspace = true
