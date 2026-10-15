@@ -124,6 +124,31 @@ pub(crate) fn register(r: &mut dyn Registrar) -> Result<(), RegisterError> {
         .group(crate::GROUP)
         .description("stats.setting.goal.help"),
     )?;
+    // A goal set shows on the home screen: the widget is added if missing.
+    r.subscribe(
+        quireink_sdk::builtin::events::SETTING_CHANGED,
+        Box::new(|env, params, out| {
+            let widgets = Id::new_static("home.widgets");
+            if params.get(quireink_sdk::builtin::params::ID) != Some(GOAL.as_str())
+                || goal(env).is_none()
+            {
+                return;
+            }
+            if let Some(SettingValue::Text(list)) = env.settings.get(widgets.as_str())
+                && !quireink_sdk::status::item_ids(list).any(|id| id == TODAY.as_str())
+            {
+                let list = if list.trim().is_empty() {
+                    String::from(TODAY.as_str())
+                } else {
+                    format!("{list}, {TODAY}")
+                };
+                out.push(quireink_sdk::Command::SetSetting(
+                    widgets,
+                    SettingValue::Text(Cow::Owned(list)),
+                ));
+            }
+        }),
+    )?;
     r.add_widget(WidgetSpec {
         id: TODAY,
         title: Cow::Borrowed("stats.widget.today"),
