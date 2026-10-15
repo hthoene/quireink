@@ -109,7 +109,8 @@ impl Choice {
                 row * options.len() as u16,
             ),
             style.row,
-        );
+        )
+        .focus_on_keys(env);
         Self {
             style,
             region,

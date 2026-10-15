@@ -35,6 +35,7 @@ quireink-plugin-stats.workspace = true
 quireink-plugin-file-manager.workspace = true
 quireink-plugin-transfer.workspace = true
 quireink-plugin-browser.workspace = true
+quireink-plugin-opds.workspace = true
 quireink-plugin-plugin-manager.workspace = true
 quireink-plugin-reader.workspace = true
 quireink-plugin-settings.workspace = true
