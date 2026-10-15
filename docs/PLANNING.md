@@ -802,7 +802,7 @@ makes it replaceable. ✅ done, 🔶 partly, ⬜ open.
 | C15 | Export of highlights and notes: Markdown in `Notes` beside the library; Obsidian, Joplin, Readwise, KOReader by plugins | Event `reader.notes-exported` for exporter plugins | 🔶 (Markdown done; exporter plugins open) |
 | C16 | More sync: WebDAV folders (Nextcloud, ownCloud) browsed and synced like catalogs; Calibre wireless, Syncthing | `opds` plugin (catalogs of kind WebDAV, `PROPFIND`); Android sends any HTTP method | 🔶 (Calibre wireless needs sockets in the kernel) |
 | C17 | Buttons, held buttons, tap zones, held taps and swipes changed on the device, everywhere or while reading; a left-handed layout | `keys` plugin, `Command::Bind`, `Env::keys`, action `core.nothing`, preset `core.left-handed` | ✅ (custom zone shapes open) |
-| C18 | Home screen widgets: clock and date, today's reading, any plugin's; chosen under Appearance | `Registrar::add_widget`, `Env::widgets`; `home.clock`, `stats.widget.today` | ✅ (reading goal open) |
+| C18 | Home screen widgets: clock and date, today's reading with a daily goal (bar, time left, days in a row), any plugin's; chosen under Appearance | `Registrar::add_widget`, `Env::widgets`; `home.clock`, `stats.widget.today`, setting `stats.goal` | ✅ |
 | C19 | OPDS: covers in lists (devices with the memory), a folder per catalog, automatic sync (rules), OPDS 2 (JSON) | `opds` plugin, C5, C20 | 🔶 (OPDS 2 open) |
 | C20 | Large-memory devices may use more (covers in lists, caches) without separate code | `DeviceInfo::memory` (`MemoryClass::Small`/`Large`) | ✅ |
 
