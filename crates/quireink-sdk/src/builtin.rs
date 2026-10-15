@@ -85,6 +85,12 @@ pub mod slots {
     /// can pass along anything it needs to know (e.g. which setting). Bind
     /// another screen here for a different keyboard, handwriting or voice.
     pub const KEYBOARD: Id = Id::new_static("core.keyboard");
+    /// Asks for text typed on another device, e.g. a phone that opens an
+    /// address shown as a QR code: handy for passwords and keys. Same
+    /// parameters as [`KEYBOARD`]; the text comes back as the event named
+    /// by [`REPLY`](super::params::REPLY). The keyboard offers it where a
+    /// screen is bound here and there is a network.
+    pub const REMOTE_KEYBOARD: Id = Id::new_static("core.remote-keyboard");
     /// Shows a web page: parameter [`URL`](super::params::URL), and
     /// [`ID`](super::params::ID) different for every request (opening a
     /// slot with the parameters it is open with only brings it forward).

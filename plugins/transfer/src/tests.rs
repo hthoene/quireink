@@ -137,3 +137,35 @@ fn paths_are_checked() {
 fn json_is_escaped() {
     assert_eq!(web::json_string("a\"b\\c</\n"), r#""a\"b\\c\u003c/\u000a""#);
 }
+
+#[test]
+fn text_typed_on_a_phone_comes_back() {
+    use crate::phone::{Request, answer};
+    let page = "<html>page</html>";
+    let ask = |method, target, body: Option<&[u8]>| {
+        let request = Request {
+            method,
+            target,
+            body: body.map(<[u8]>::to_vec),
+        };
+        let (response, text) = answer(7, "abc", page, &request);
+        (response.status, response.body, text)
+    };
+    // Without the key: nothing.
+    assert_eq!(ask("GET", "/", None).0, 403);
+    assert_eq!(ask("POST", "/send?k=wrong", Some(b"x")).2, None);
+    // The page, then the text.
+    let (status, body, text) = ask("GET", "/?k=abc", None);
+    assert_eq!(
+        (status, body.as_slice(), text),
+        (200, page.as_bytes(), None)
+    );
+    let (status, _, text) = ask("POST", "/send?k=abc", Some("Schlüssel:fx".as_bytes()));
+    assert_eq!((status, text.as_deref()), (200, Some("Schlüssel:fx")));
+    assert_eq!(ask("GET", "/other?k=abc", None).0, 404);
+}
+
+#[test]
+fn the_phone_page_takes_its_texts() {
+    assert!(include_str!("phone.html").contains("/*STRINGS*/{}"));
+}

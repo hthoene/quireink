@@ -18,6 +18,10 @@
 //! - When there is text on the clipboard, *Paste* in the text field
 //!   inserts it, and so does a long press in the field (with buttons: up
 //!   from the first row).
+//! - Where there is a network and a screen for it (slot
+//!   `core.remote-keyboard`, e.g. the `transfer` plugin's), *Phone* in the
+//!   text field lets one type the text on a phone instead: handy for
+//!   passwords and keys.
 //!
 //! Bind another screen to `core.keyboard` for a different keyboard
 //! altogether.
@@ -52,6 +56,8 @@ pub const LAYOUTS_SETTING: Id = Id::new_static("keyboard.layouts");
 const CHOOSE_SCREEN: Id = Id::new_static("keyboard.choose");
 /// The clipboard's text, asked for by *Paste*.
 const PASTED: Id = Id::new_static("keyboard.pasted");
+/// The text typed on another device, asked for by *Phone*.
+const REMOTE_TEXT: Id = Id::new_static("keyboard.remote-text");
 
 /// Longest text the keyboard accepts, in characters.
 const MAX_CHARS: usize = 200;
@@ -59,8 +65,26 @@ const MAX_CHARS: usize = 200;
 /// The rows of the symbol layer (the last one also gets *Delete*).
 const SYMBOLS: [&str; 3] = ["1234567890", "@#&_-+()/%", "*\"':;!?"];
 
-/// The focus "row" of the *Paste* button in the text field.
+/// The focus "row" of the buttons in the text field.
 const PASTE_ROW: usize = usize::MAX;
+
+/// A button in the text field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FieldButton {
+    /// Type the text on another device.
+    Phone,
+    /// Insert the clipboard's text.
+    Paste,
+}
+
+impl FieldButton {
+    fn label(self) -> &'static str {
+        match self {
+            FieldButton::Phone => "keyboard.phone",
+            FieldButton::Paste => "keyboard.paste",
+        }
+    }
+}
 
 /// The keyboard plugin.
 #[derive(Debug, Default)]
@@ -217,8 +241,9 @@ struct KeyboardScreen {
     rows: Vec<Vec<Slot>>,
     /// The key chosen with buttons, as `(row, index)`; none while tapping.
     focus: Option<(usize, usize)>,
-    /// Where *Paste* is, when there is text on the clipboard.
-    paste: Option<Rect>,
+    /// The buttons in the text field (*Phone*, *Paste*) where they work,
+    /// left to right.
+    buttons: Vec<(FieldButton, Rect)>,
     popup: Option<Popup>,
     style: UiStyle,
     region: Rect,
@@ -265,7 +290,7 @@ impl KeyboardScreen {
             shift: false,
             rows,
             focus: (!env.device.input.touch).then_some((0, 0)),
-            paste: None,
+            buttons: Vec::new(),
             popup: None,
             style,
             region,
@@ -273,7 +298,7 @@ impl KeyboardScreen {
             keys,
             key_height,
         };
-        screen.paste = screen.paste_button(env);
+        screen.buttons = screen.field_buttons(env);
         screen
     }
 
@@ -297,33 +322,70 @@ impl KeyboardScreen {
         ui::button_border(&self.style) * 3
     }
 
-    /// *Paste* at the right end of the text field, when there is text on
-    /// the clipboard.
-    fn paste_button(&self, env: &Env<'_>) -> Option<Rect> {
-        let font = self.style.font(env)?;
-        if !env.clipboard {
-            return None;
+    /// The buttons at the right end of the text field: *Phone* where text
+    /// can come from another device, *Paste* when there is text on the
+    /// clipboard.
+    fn field_buttons(&self, env: &Env<'_>) -> Vec<(FieldButton, Rect)> {
+        let Some(font) = self.style.font(env) else {
+            return Vec::new();
+        };
+        let mut kinds = Vec::new();
+        if env.network && env.has_slot(&slots::REMOTE_KEYBOARD) {
+            kinds.push(FieldButton::Phone);
+        }
+        if env.clipboard {
+            kinds.push(FieldButton::Paste);
         }
         let b = self.text_box();
-        let label = env.i18n.tr("keyboard.paste");
-        // Room for the label (rounded up) and the button's padding.
-        let label_width = (font.measure(self.style.small, label) + 1.0) as u16;
-        let width = label_width + self.style.gap as u16 * 3;
         let height = ui::button_height(b);
         let pad = (b.height - height) / 2;
-        Some(Rect::new(
-            b.x + b.width - width - pad,
-            b.y + pad,
-            width,
-            height,
-        ))
+        // From the right: each as wide as its label (rounded up) and the
+        // button's padding.
+        let mut right = b.x + b.width - pad;
+        let mut buttons: Vec<(FieldButton, Rect)> = kinds
+            .into_iter()
+            .rev()
+            .map(|kind| {
+                let label = env.i18n.tr(kind.label());
+                let label_width = (font.measure(self.style.small, label) + 1.0) as u16;
+                let width = label_width + self.style.gap as u16 * 3;
+                let area = Rect::new(right - width, b.y + pad, width, height);
+                right -= width + pad;
+                (kind, area)
+            })
+            .collect();
+        buttons.reverse();
+        buttons
     }
 
-    /// Where key `index` of row `row` is (the *Paste* button for
+    /// What a field button does.
+    fn field_button(&mut self, kind: FieldButton, cx: &mut Cx<'_, '_>) {
+        match kind {
+            FieldButton::Paste => self.paste(cx),
+            FieldButton::Phone => {
+                // The text so far goes along, but never a password.
+                let text = if self.password {
+                    String::new()
+                } else {
+                    self.text.clone()
+                };
+                let mut params = Params::new()
+                    .with(params::TITLE, self.title.clone())
+                    .with(params::TEXT, text)
+                    .with(params::REPLY, REMOTE_TEXT.as_str());
+                if self.password {
+                    params = params.with(params::MODE, "password");
+                }
+                cx.command(Command::OpenSlot(slots::REMOTE_KEYBOARD, params));
+            }
+        }
+    }
+
+    /// Where key `index` of row `row` is (the field's buttons for
     /// [`PASTE_ROW`]).
     fn key_area(&self, row: usize, index: usize) -> Rect {
         if row == PASTE_ROW {
-            return self.paste.unwrap_or(self.field);
+            return self.buttons.get(index).map_or(self.field, |b| b.1);
         }
         let keys = &self.rows[row];
         let total: u32 = keys.iter().map(|(_, w)| u32::from(*w)).sum::<u32>().max(1);
@@ -339,8 +401,8 @@ impl KeyboardScreen {
     }
 
     fn key_at(&self, point: quireink_sdk::Point) -> Option<(usize, usize)> {
-        if self.paste.is_some_and(|a| a.contains(point)) {
-            return Some((PASTE_ROW, 0));
+        if let Some(index) = self.buttons.iter().position(|b| b.1.contains(point)) {
+            return Some((PASTE_ROW, index));
         }
         (0..self.rows.len()).find_map(|row| {
             (0..self.rows[row].len())
@@ -511,13 +573,16 @@ impl KeyboardScreen {
         let up = *a == actions::UP || *a == actions::PREV_PAGE;
         let down = *a == actions::DOWN || *a == actions::NEXT_PAGE;
         let to = if row == PASTE_ROW {
-            // *Paste* sits above the first row.
-            if down || *a == actions::NEXT {
+            // The field's buttons sit above the first row.
+            let last = self.buttons.len().saturating_sub(1);
+            if down || *a == actions::NEXT && index == last {
                 self.nearest(row, index, 0)
             } else if up {
                 self.nearest(row, index, last_row)
-            } else if [actions::LEFT, actions::RIGHT, actions::PREVIOUS].contains(a) {
-                (row, index)
+            } else if *a == actions::RIGHT || *a == actions::NEXT {
+                (row, (index + 1).min(last))
+            } else if *a == actions::LEFT || *a == actions::PREVIOUS {
+                (row, index.saturating_sub(1))
             } else {
                 return false;
             }
@@ -541,7 +606,7 @@ impl KeyboardScreen {
         } else if up {
             match row.checked_sub(1) {
                 Some(above) => self.nearest(row, index, above),
-                None if self.paste.is_some() => (PASTE_ROW, 0),
+                None if !self.buttons.is_empty() => (PASTE_ROW, self.buttons.len() - 1),
                 None => self.nearest(row, index, last_row),
             }
         } else if down {
@@ -634,10 +699,10 @@ impl KeyboardScreen {
         } else {
             self.text.clone()
         };
-        let paste_width = self
-            .paste
-            .map_or(0.0, |area| f32::from(area.width) + margin);
-        let room = f32::from(box_area.width) - margin * 1.5 - paste_width;
+        let buttons_width = self.buttons.first().map_or(0.0, |(_, area)| {
+            f32::from(box_area.x + box_area.width - area.x) + margin
+        });
+        let room = f32::from(box_area.width) - margin * 1.5 - buttons_width;
         let mut start = 0;
         while font.measure(style.text, &text[start..]) > room {
             start += text[start..].chars().next().map_or(1, char::len_utf8);
@@ -654,9 +719,9 @@ impl KeyboardScreen {
             cursor,
             Color::BLACK,
         );
-        if let Some(area) = self.paste {
-            let focused = self.focus == Some((PASTE_ROW, 0));
-            let label = env.i18n.tr("keyboard.paste");
+        for (index, &(kind, area)) in self.buttons.iter().enumerate() {
+            let focused = self.focus == Some((PASTE_ROW, index));
+            let label = env.i18n.tr(kind.label());
             ui::draw_button(canvas, env, &style, area, label, false, focused);
         }
     }
@@ -793,7 +858,11 @@ impl Screen for KeyboardScreen {
         }
         if *action == actions::CONFIRM {
             match self.focus {
-                Some((PASTE_ROW, _)) => self.paste(cx),
+                Some((PASTE_ROW, index)) => {
+                    if let Some(&(kind, _)) = self.buttons.get(index) {
+                        self.field_button(kind, cx);
+                    }
+                }
                 Some((row, index)) => self.press(self.rows[row][index].0, cx),
                 None => {
                     self.move_focus(action, cx);
@@ -825,6 +894,10 @@ impl Screen for KeyboardScreen {
     fn on_event(&mut self, event: &Id, params: &Params, cx: &mut Cx<'_, '_>) {
         if *event == PASTED {
             self.pasted(params.get(params::TEXT).unwrap_or_default(), cx);
+        } else if *event == REMOTE_TEXT {
+            // Typed on the phone with the text so far: it replaces it.
+            self.text.clear();
+            self.pasted(params.get(params::TEXT).unwrap_or_default(), cx);
         }
     }
 
@@ -849,10 +922,15 @@ impl Screen for KeyboardScreen {
             self.redraw(cx, self.key_area(r, i));
         }
         match (gesture.kind, key) {
-            (GestureKind::Tap, Some((PASTE_ROW, _))) => self.paste(cx),
+            (GestureKind::Tap, Some((PASTE_ROW, index))) => {
+                if let Some(&(kind, _)) = self.buttons.get(index) {
+                    self.field_button(kind, cx);
+                }
+            }
             // A long press in the text field pastes too, as elsewhere.
             (GestureKind::LongPress, _)
-                if self.paste.is_some() && self.field.contains(gesture.start) =>
+                if self.field.contains(gesture.start)
+                    && self.buttons.iter().any(|b| b.0 == FieldButton::Paste) =>
             {
                 self.paste(cx);
             }

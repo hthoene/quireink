@@ -1,0 +1,63 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QuireInk</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 24px auto; max-width: 520px; padding: 0 16px; }
+  h1 { font-size: 1.25em; font-weight: 600; }
+  textarea, input[type=password], input[type=text] { width: 100%; box-sizing: border-box; font-size: 1.1em; padding: 10px; }
+  label { display: block; margin-top: 8px; }
+  button { margin-top: 16px; font-size: 1.1em; padding: 10px 24px; }
+  #m { margin-top: 16px; }
+</style>
+</head>
+<body>
+<h1 id="t"></h1>
+<div id="f"></div>
+<button id="b"></button>
+<p id="m"></p>
+<script>
+const S = /*STRINGS*/{};
+const key = new URLSearchParams(location.search).get('k');
+document.getElementById('t').textContent = S.title;
+const field = document.createElement(S.password ? 'input' : 'textarea');
+if (S.password) {
+  field.type = 'password';
+  field.autocomplete = 'current-password';
+} else {
+  field.rows = 4;
+}
+field.value = S.text;
+document.getElementById('f').appendChild(field);
+if (S.password) {
+  const label = document.createElement('label');
+  const show = document.createElement('input');
+  show.type = 'checkbox';
+  show.onchange = () => { field.type = show.checked ? 'text' : 'password'; };
+  label.append(show, ' ' + S.show);
+  document.getElementById('f').appendChild(label);
+}
+const button = document.getElementById('b');
+const message = document.getElementById('m');
+button.textContent = S.send;
+button.onclick = async () => {
+  button.disabled = true;
+  try {
+    const answer = await fetch('/send?k=' + encodeURIComponent(key), {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+      body: field.value,
+    });
+    message.textContent = answer.ok ? S.sent : S.failed;
+    if (!answer.ok) button.disabled = false;
+  } catch (e) {
+    message.textContent = S.failed;
+    button.disabled = false;
+  }
+};
+field.focus();
+</script>
+</body>
+</html>

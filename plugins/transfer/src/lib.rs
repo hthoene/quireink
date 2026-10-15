@@ -6,11 +6,15 @@
 //! The screen shows the page's address as text and as a QR code. The
 //! address carries a key made anew each time, so others in the network
 //! cannot get at the files. Closing the screen ends the transfer.
+//!
+//! The same way, the plugin lets one type text on a phone for the
+//! keyboard (slot `core.remote-keyboard`, see `phone`).
 
 #![no_std]
 
 extern crate alloc;
 
+mod phone;
 mod web;
 
 use alloc::borrow::Cow;
@@ -19,13 +23,13 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use quireink_sdk::builtin::{actions, menus, params};
+use quireink_sdk::builtin::{actions, menus, params, slots};
 use quireink_sdk::qr::QrCode;
 use quireink_sdk::ui::{self, UiStyle};
 use quireink_sdk::{
     ActionSpec, Arg, Canvas, Color, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Manifest,
-    MenuEntry, Params, Plugin, Rect, RefreshMode, RegisterError, Registrar, SDK_VERSION, Screen,
-    ScreenSpec, Version, server_params as p,
+    MenuEntry, Params, Plugin, Priority, Rect, RefreshMode, RegisterError, Registrar, SDK_VERSION,
+    Screen, ScreenSpec, Version, server_params as p,
 };
 
 pub const PLUGIN: Id = Id::new_static("transfer");
@@ -34,9 +38,11 @@ pub const OPEN: Id = Id::new_static("transfer.open");
 const SCREEN: Id = Id::new_static("transfer.screen");
 const SERVER: Id = Id::new_static("transfer.server");
 const SERVER_EVENT: Id = Id::new_static("transfer.server-event");
+/// Typing on a phone for the keyboard.
+const PHONE_SCREEN: Id = Id::new_static("transfer.phone");
 
 /// The port asked for; the next free one is taken if it is in use.
-const PORT: u16 = 8080;
+pub(crate) const PORT: u16 = 8080;
 
 /// Lines of the hint below the code, at most.
 const HINT_LINES: usize = 5;
@@ -80,6 +86,12 @@ impl Plugin for Transfer {
             order: 46,
         })?;
         r.add_icon(OPEN, Cow::Borrowed("wifi"))?;
+        r.add_screen(ScreenSpec {
+            id: PHONE_SCREEN,
+            title: Cow::Borrowed("transfer.phone.title"),
+            factory: Box::new(|env, params| Box::new(phone::PhoneScreen::new(env, params))),
+        })?;
+        r.bind_slot(slots::REMOTE_KEYBOARD, PHONE_SCREEN, Priority::DEFAULT)?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/en.ini")))?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/de.ini")))?;
         Ok(())
@@ -188,7 +200,7 @@ impl TransferScreen {
 
 /// A key for this transfer: hard to guess for others in the network,
 /// short enough to type.
-fn key(env: &Env<'_>) -> String {
+pub(crate) fn key(env: &Env<'_>) -> String {
     let mut hash = quireink_sdk::md5::Md5::new();
     hash.update(env.device.id.as_bytes());
     hash.update(&env.now.0.to_le_bytes());
@@ -231,6 +243,103 @@ fn page(env: &Env<'_>) -> String {
     PAGE.replace("/*STRINGS*/{}", &json)
 }
 
+/// The page's address as a QR code and as text, `hint` below it (up to
+/// [`HINT_LINES`] lines) and `last`, what happened last.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn draw_address(
+    canvas: &mut Canvas<'_>,
+    env: &Env<'_>,
+    style: &UiStyle,
+    area: Rect,
+    url: &str,
+    qr: Option<&QrCode>,
+    hint: &str,
+    last: Option<&str>,
+) {
+    let Some(font) = style.font(env) else {
+        return;
+    };
+    let margin = style.margin as u16;
+    let line = font.line_metrics(style.text).line_height as u16;
+    let small = font.line_metrics(style.small).line_height as u16;
+    // Below the code: the address, the hint (up to five lines) and
+    // what happened last.
+    let width = f32::from(area.width - 2 * margin);
+    let hint_lines = font.wrap(style.small, hint, width);
+    let text_height =
+        line + small * (hint_lines.len().min(HINT_LINES) as u16 + 1) + style.gap as u16 * 3;
+    let room = area.height.saturating_sub(text_height + style.gap as u16);
+    let side = room.min(area.width - 2 * margin);
+    let mut y = area.y;
+    if let Some(qr) = qr {
+        // Four modules of white around the code, as scanners expect.
+        let modules = qr.size() as u16 + 8;
+        let scale = (side / modules).max(1);
+        let size = scale * modules;
+        let x0 = (area.width - size) / 2 + 4 * scale;
+        let y0 = area.y + (side - size) / 2 + 4 * scale;
+        for my in 0..qr.size() {
+            for mx in 0..qr.size() {
+                if qr.dark(mx, my) {
+                    canvas.fill_rect(
+                        i32::from(x0 + mx as u16 * scale),
+                        i32::from(y0 + my as u16 * scale),
+                        u32::from(scale),
+                        u32::from(scale),
+                        Color::BLACK,
+                    );
+                }
+            }
+        }
+        y += side;
+    }
+    y += style.gap as u16;
+    let shown = url.strip_prefix("http://").unwrap_or(url);
+    let row = |y: u16, height: u16| Rect::new(margin, y, area.width - 2 * margin, height);
+    let centered = |text: &str, size: f32| {
+        let text = ui::fit(&font, size, text, width);
+        let x = f32::from(margin) + (width - font.measure(size, &text)) / 2.0;
+        (text, x.max(f32::from(margin)))
+    };
+    let (text, x) = centered(shown, style.text);
+    ui::draw_label(
+        canvas,
+        &font,
+        style.text,
+        x,
+        row(y, line),
+        &text,
+        Color::BLACK,
+    );
+    y += line + style.gap as u16;
+    for range in hint_lines.into_iter().take(HINT_LINES) {
+        let (text, x) = centered(&hint[range], style.small);
+        ui::draw_label(
+            canvas,
+            &font,
+            style.small,
+            x,
+            row(y, small),
+            &text,
+            Color::gray(60),
+        );
+        y += small;
+    }
+    y += style.gap as u16;
+    if let Some(last) = last {
+        let (text, x) = centered(last, style.small);
+        ui::draw_label(
+            canvas,
+            &font,
+            style.small,
+            x,
+            row(y, small),
+            &text,
+            Color::BLACK,
+        );
+    }
+}
+
 impl Screen for TransferScreen {
     fn draw(&mut self, canvas: &mut Canvas<'_>, env: &Env<'_>) {
         let style = self.style;
@@ -252,89 +361,17 @@ impl Screen for TransferScreen {
             }
             State::Serving { url, qr } => (url, qr),
         };
-        let Some(font) = style.font(env) else {
-            return;
-        };
-        let margin = style.margin as u16;
-        let line = font.line_metrics(style.text).line_height as u16;
-        let small = font.line_metrics(style.small).line_height as u16;
-        // Below the code: the address, the hint (up to five lines) and
-        // what happened last.
         let hint = env.i18n.tr("transfer.hint");
-        let width = f32::from(area.width - 2 * margin);
-        let hint_lines = font.wrap(style.small, hint, width);
-        let text_height =
-            line + small * (hint_lines.len().min(HINT_LINES) as u16 + 1) + style.gap as u16 * 3;
-        let room = area.height.saturating_sub(text_height + style.gap as u16);
-        let side = room.min(area.width - 2 * margin);
-        let mut y = area.y;
-        if let Some(qr) = qr {
-            // Four modules of white around the code, as scanners expect.
-            let modules = qr.size() as u16 + 8;
-            let scale = (side / modules).max(1);
-            let size = scale * modules;
-            let x0 = (area.width - size) / 2 + 4 * scale;
-            let y0 = area.y + (side - size) / 2 + 4 * scale;
-            for my in 0..qr.size() {
-                for mx in 0..qr.size() {
-                    if qr.dark(mx, my) {
-                        canvas.fill_rect(
-                            i32::from(x0 + mx as u16 * scale),
-                            i32::from(y0 + my as u16 * scale),
-                            u32::from(scale),
-                            u32::from(scale),
-                            Color::BLACK,
-                        );
-                    }
-                }
-            }
-            y += side;
-        }
-        y += style.gap as u16;
-        let shown = url.strip_prefix("http://").unwrap_or(url);
-        let row = |y: u16, height: u16| Rect::new(margin, y, area.width - 2 * margin, height);
-        let centered = |text: &str, size: f32| {
-            let text = ui::fit(&font, size, text, width);
-            let x = f32::from(margin) + (width - font.measure(size, &text)) / 2.0;
-            (text, x.max(f32::from(margin)))
-        };
-        let (text, x) = centered(shown, style.text);
-        ui::draw_label(
+        draw_address(
             canvas,
-            &font,
-            style.text,
-            x,
-            row(y, line),
-            &text,
-            Color::BLACK,
+            env,
+            &style,
+            area,
+            url,
+            qr.as_ref(),
+            hint,
+            self.last.as_deref(),
         );
-        y += line + style.gap as u16;
-        for range in hint_lines.into_iter().take(HINT_LINES) {
-            let (text, x) = centered(&hint[range], style.small);
-            ui::draw_label(
-                canvas,
-                &font,
-                style.small,
-                x,
-                row(y, small),
-                &text,
-                Color::gray(60),
-            );
-            y += small;
-        }
-        y += style.gap as u16;
-        if let Some(last) = &self.last {
-            let (text, x) = centered(last, style.small);
-            ui::draw_label(
-                canvas,
-                &font,
-                style.small,
-                x,
-                row(y, small),
-                &text,
-                Color::BLACK,
-            );
-        }
     }
 
     fn on_show(&mut self, cx: &mut Cx<'_, '_>) {
