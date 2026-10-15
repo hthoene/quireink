@@ -2,6 +2,8 @@
 //! numbers (e.g. a sync server's, an encyclopedia's summary). Nested
 //! values are skipped.
 
+pub mod stream;
+
 use alloc::string::String;
 use alloc::vec::Vec;
 
