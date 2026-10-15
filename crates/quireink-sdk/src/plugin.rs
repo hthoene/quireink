@@ -7,7 +7,7 @@ use crate::fonts::FontSpec;
 use crate::formats::FormatSpec;
 use crate::hyphenation::HyphenationSpec;
 use crate::id::Id;
-use crate::menus::MenuEntry;
+use crate::menus::{MenuEntry, MenuSection};
 use crate::screen::ScreenSpec;
 use crate::settings::{SettingGroupSpec, SettingSpec};
 use crate::status::StatusItemSpec;
@@ -114,6 +114,15 @@ pub trait Registrar {
     /// Puts an action into a menu. Menus can be extended by any plugin and
     /// redefined by the user.
     fn add_menu_entry(&mut self, entry: MenuEntry) -> Result<(), RegisterError>;
+
+    /// Adds a heading to a menu; entries ordered after it, up to the next
+    /// heading, belong to it.
+    fn add_menu_section(&mut self, section: MenuSection) -> Result<(), RegisterError>;
+
+    /// Gives an action or setting an icon by name (see
+    /// [`icons`](crate::icons)), shown with it in menus. Any item may get
+    /// one, e.g. by an icon theme; the last registered wins.
+    fn add_icon(&mut self, item: Id, icon: Cow<'static, str>) -> Result<(), RegisterError>;
 
     /// Adds a group for the settings screen.
     fn add_setting_group(&mut self, group: SettingGroupSpec) -> Result<(), RegisterError>;

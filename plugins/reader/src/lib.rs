@@ -400,6 +400,18 @@ impl Plugin for Reader {
         for (menu, item, order) in entries {
             r.add_menu_entry(quireink_sdk::MenuEntry { menu, item, order })?;
         }
+        for (item, icon) in [
+            (actions::TOC, "list"),
+            (actions::SEARCH, "search"),
+            (actions::GO_TO_PAGE, "hash"),
+            (actions::ANNOTATIONS, "bookmarks"),
+            (actions::QUICK_SETTINGS, "typography"),
+            (MORE_MENU, "dots"),
+            (actions::TOGGLE_BOOKMARK, "bookmark"),
+            (actions::SELECT, "highlight"),
+        ] {
+            r.add_icon(item, Cow::Borrowed(icon))?;
+        }
 
         r.subscribe(events::STARTED, Box::new(reopen_last_book))?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/en.ini")))?;

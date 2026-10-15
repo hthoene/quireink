@@ -254,6 +254,20 @@ pub mod groups {
     pub const OTHER: Id = Id::new_static("core.group.other");
 }
 
+/// Sections of the main menu ([`menus::MAIN`]): plugins put their
+/// entries in one by their order (reading 1 to 29, tools 31 to 79,
+/// system 81 to 99).
+pub mod sections {
+    use crate::Id;
+
+    /// Home, library and the like.
+    pub const READING: Id = Id::new_static("core.section.reading");
+    /// What plugins add: files, statistics, transfers, catalogs.
+    pub const TOOLS: Id = Id::new_static("core.section.tools");
+    /// Settings and the device.
+    pub const SYSTEM: Id = Id::new_static("core.section.system");
+}
+
 pub mod fonts {
     use crate::Id;
 
@@ -267,6 +281,9 @@ pub mod fonts {
     pub const READING_ITALIC: Id = Id::new_static("core.font-reading-italic");
     /// Bold italic book text; readers fall back to [`READING_BOLD`].
     pub const READING_BOLD_ITALIC: Id = Id::new_static("core.font-reading-bold-italic");
+    /// Icons (see [`icons`](crate::icons)); without a font here, menus
+    /// show text only.
+    pub const ICONS: Id = Id::new_static("core.font-icons");
 }
 
 /// The name of the key map layer that applies everywhere.

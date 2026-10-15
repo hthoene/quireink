@@ -23,7 +23,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use quireink_sdk::builtin::{actions, events, menus, params, slots};
-use quireink_sdk::ui::{self, ListChange, ListView, UiStyle};
+use quireink_sdk::ui::{self, ListChange, UiStyle};
 use quireink_sdk::{
     Canvas, Color, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Manifest, Params, Plugin,
     Priority, Rect, RefreshMode, RegisterError, Registrar, SDK_VERSION, Screen, ScreenSpec,
@@ -36,9 +36,7 @@ pub const SCREEN: Id = Id::new_static("menu.list");
 pub const PANEL: Id = Id::new_static("menu.panel");
 
 mod panel;
-
-/// Most of the screen a menu may cover.
-const MAX_SHARE: f32 = 0.75;
+mod rows;
 
 /// The menu plugin.
 #[derive(Debug, Default)]
@@ -76,17 +74,32 @@ impl Plugin for Menu {
     }
 }
 
+/// An entry of the menu, or a heading.
+#[derive(Debug)]
+struct Item {
+    /// Action, setting or section.
+    id: Id,
+    /// Translation key of the label.
+    title: String,
+    icon: Option<String>,
+    heading: bool,
+}
+
 #[derive(Debug)]
 struct MenuScreen {
-    /// `(action or setting, translation key of the label)`.
-    items: Vec<(Id, String)>,
+    items: Vec<Item>,
     style: UiStyle,
     region: Rect,
-    list: ListView,
+    rows: rows::Rows,
     /// Shown when the items need more than one page.
     pager: Option<ui::Pager>,
     /// The focused number is being changed with buttons.
     editing: bool,
+    /// The focus is shown: always with buttons only, on touch screens
+    /// once buttons are used (a tap needs no focus).
+    keys: bool,
+    /// Room for icons left of the labels, if any entry has one.
+    icon_width: u16,
     /// How many menus are open below this one (submenus).
     depth: usize,
 }
@@ -101,17 +114,46 @@ impl MenuScreen {
     fn new(env: &Env<'_>, params: &Params) -> Self {
         let main = menus::MAIN;
         let menu = params.get(params::MENU).unwrap_or(main.as_str());
-        let items: Vec<(Id, String)> = env
+        let mut items: Vec<Item> = env
             .menus
             .items(menu)
             .into_iter()
-            .map(|item| (item.id.clone(), String::from(item.title)))
+            .map(|item| Item {
+                id: item.id.clone(),
+                title: String::from(item.title),
+                icon: item.icon.map(String::from),
+                heading: item.section,
+            })
             .collect();
+        // Headings with nothing below them are left out.
+        let keep: Vec<bool> = (0..items.len())
+            .map(|i| !items[i].heading || items.get(i + 1).is_some_and(|next| !next.heading))
+            .collect();
+        let mut keep = keep.into_iter();
+        items.retain(|_| keep.next().unwrap_or(true));
         let style = UiStyle::new(env);
         let display = env.device.display;
         let border = style.line * 2;
-        let wanted = items.len().max(1) as u32 * style.row + 2 * style.gap + border;
-        let height = wanted.min((f32::from(display.height) * MAX_SHARE) as u32) as u16;
+        let heading = Self::heading_height(env, &style);
+        let heights: Vec<u16> = items
+            .iter()
+            .map(|item| {
+                if item.heading {
+                    heading
+                } else {
+                    style.row as u16
+                }
+            })
+            .collect();
+        let total: u32 = heights
+            .iter()
+            .map(|&h| u32::from(h))
+            .sum::<u32>()
+            .max(style.row);
+        let wanted = total + 2 * style.gap + border;
+        // Up to the header of the screen below, which stays in sight.
+        let most = u32::from(display.height).saturating_sub(style.header);
+        let height = wanted.min(most) as u16;
         let region = Rect::new(0, display.height - height, display.width, height);
         let mut list_area = Rect::new(
             0,
@@ -128,15 +170,32 @@ impl MenuScreen {
             let area = Rect::new(0, region.y + region.height - bar, display.width, bar);
             pager = Some(ui::Pager::new(env, area));
         }
+        let icons = ui::has_icons(env) && items.iter().any(|i| i.icon.is_some() && !i.heading);
+        let icon_width = if icons {
+            (style.text * ICON_SCALE) as u16 + style.gap as u16
+        } else {
+            0
+        };
+        let headings = items.iter().map(|i| i.heading).collect();
         Self {
             items,
             region,
-            list: ListView::new(list_area, style.row),
+            rows: rows::Rows::new(list_area, heights, headings),
             pager,
-            style,
             editing: false,
+            keys: !env.device.input.touch,
+            icon_width,
             depth: params.get(DEPTH).and_then(|d| d.parse().ok()).unwrap_or(0),
+            style,
         }
+    }
+
+    /// Headings: small text with a little room above.
+    fn heading_height(env: &Env<'_>, style: &UiStyle) -> u16 {
+        let line = style.font(env).map_or(style.small * 1.3, |f| {
+            f.line_metrics(style.small).line_height
+        });
+        (line * 1.25) as u16 + style.gap as u16
     }
 
     /// The setting behind item `index`, if it is one.
@@ -165,9 +224,10 @@ impl MenuScreen {
     /// Chooses item `index`: runs an action, or changes a setting.
     fn run(&mut self, index: usize, cx: &mut Cx<'_, '_>) {
         let env = *cx.env();
-        let Some((id, _)) = self.items.get(index) else {
+        let Some(item) = self.items.get(index).filter(|i| !i.heading) else {
             return;
         };
+        let id = &item.id;
         if is_menu(&env, id) {
             cx.command(Command::OpenScreen(
                 SCREEN,
@@ -209,7 +269,62 @@ impl MenuScreen {
             _ => self.step(&env, spec, 1, cx),
         }
     }
+
+    /// Draws entry `item` in `rect`: its icon, label and value.
+    fn draw_entry(
+        &self,
+        canvas: &mut Canvas<'_>,
+        env: &Env<'_>,
+        item: &Item,
+        rect: Rect,
+        focused: bool,
+    ) {
+        let style = self.style;
+        let Some(font) = style.font(env) else {
+            return;
+        };
+        let ink = if focused { Color::WHITE } else { Color::BLACK };
+        if let Some(icon) = item.icon.as_deref().filter(|_| self.icon_width > 0) {
+            let size = style.text * ICON_SCALE;
+            ui::draw_icon(canvas, env, icon, size, style.margin as f32, rect, ink);
+        }
+        // The label and value right of the icons.
+        let rect = Rect::new(
+            rect.x + self.icon_width,
+            rect.y,
+            rect.width.saturating_sub(self.icon_width),
+            rect.height,
+        );
+        let label = env.i18n.tr(&item.title);
+        match Self::setting(env, &item.id) {
+            Some(spec) if focused && matches!(spec.kind, SettingKind::Int { .. }) => {
+                let value = ui::setting_value(env, spec);
+                ui::draw_stepper(canvas, env, &style, rect, label, &value, self.editing);
+            }
+            Some(spec) => {
+                let mut value = ui::setting_value(env, spec);
+                if spec.editor.is_some()
+                    || matches!(spec.kind, SettingKind::Choice(_) | SettingKind::Language)
+                {
+                    value.push_str(" ›");
+                }
+                ui::draw_value_row(canvas, env, &style, rect, focused, label, &value);
+            }
+            None if is_menu(env, &item.id) => {
+                ui::draw_value_row(canvas, env, &style, rect, focused, label, "›");
+            }
+            None => {
+                let x = f32::from(rect.x) + style.margin as f32;
+                let width = f32::from(rect.width) - 2.0 * style.margin as f32;
+                let label = ui::fit(&font, style.text, label, width);
+                ui::draw_label(canvas, &font, style.text, x, rect, &label, ink);
+            }
+        }
+    }
 }
+
+/// Icons are this much larger than the text beside them.
+const ICON_SCALE: f32 = 1.25;
 
 /// Whether `id` names a menu with entries (a submenu).
 pub(crate) fn is_menu(env: &Env<'_>, id: &Id) -> bool {
@@ -239,62 +354,60 @@ impl Screen for MenuScreen {
                 canvas,
                 env,
                 &style,
-                self.list.area,
+                self.rows.area,
                 env.i18n.tr("menu.empty"),
             );
             return;
         }
-        let items = &self.items;
-        let editing = self.editing;
-        self.list.draw(
-            canvas,
-            &style,
-            items.len(),
-            |canvas, index, rect, focused| {
-                let (id, title) = &items[index];
-                let label = env.i18n.tr(title);
-                match Self::setting(env, id) {
-                    Some(spec) if focused && matches!(spec.kind, SettingKind::Int { .. }) => {
-                        let value = ui::setting_value(env, spec);
-                        ui::draw_stepper(canvas, env, &style, rect, label, &value, editing);
-                    }
-                    Some(spec) => {
-                        let mut value = ui::setting_value(env, spec);
-                        if spec.editor.is_some()
-                            || matches!(spec.kind, SettingKind::Choice(_) | SettingKind::Language)
-                        {
-                            value.push_str(" ›");
-                        }
-                        ui::draw_value_row(canvas, env, &style, rect, focused, label, &value);
-                    }
-                    None if is_menu(env, id) => {
-                        ui::draw_value_row(canvas, env, &style, rect, focused, label, "›");
-                    }
-                    None => {
-                        let color = if focused { Color::WHITE } else { Color::BLACK };
-                        let x = style.margin as f32;
-                        let width = f32::from(rect.width) - 2.0 * x;
-                        let label = ui::fit(&font, style.text, label, width);
-                        ui::draw_label(canvas, &font, style.text, x, rect, &label, color);
-                    }
-                }
-            },
-        );
-        if let (Some(pager), Some(page)) = (&self.pager, self.list.paging(items.len())) {
-            pager.draw(canvas, env, &style, page);
+        let visible = self.rows.visible();
+        for (n, &(index, rect)) in visible.iter().enumerate() {
+            let item = &self.items[index];
+            if item.heading {
+                // Small and gray, low in its room: it reads as belonging
+                // to the entries below.
+                let text = env.i18n.tr(&item.title);
+                let line = font.line_metrics(style.small).line_height as u16;
+                let area = Rect::new(
+                    rect.x,
+                    rect.y + rect.height.saturating_sub(line + style.gap as u16 / 2),
+                    rect.width,
+                    line,
+                );
+                let x = style.margin as f32;
+                ui::draw_label(canvas, &font, style.small, x, area, text, Color::gray(90));
+                continue;
+            }
+            let focused = self.keys && index == self.rows.focus;
+            if focused {
+                ui::fill(canvas, rect, Color::BLACK);
+            } else if visible
+                .get(n + 1)
+                .is_some_and(|&(next, _)| !self.items[next].heading)
+            {
+                // Lines between entries, not before a heading.
+                let line = Rect::new(
+                    rect.x + style.margin as u16,
+                    rect.y + rect.height - style.line as u16,
+                    rect.width.saturating_sub(2 * style.margin as u16),
+                    style.line as u16,
+                );
+                ui::fill(canvas, line, Color::gray(190));
+            }
+            self.draw_entry(canvas, env, item, rect, focused);
+        }
+        if let Some(pager) = &self.pager {
+            pager.draw(canvas, env, &style, self.rows.paging());
         }
     }
 
     fn on_action(&mut self, action: &Id, cx: &mut Cx<'_, '_>) -> Handled {
-        let len = self.items.len();
-        let rows = self.list.rows() as isize;
         let a = action;
         if self.editing {
             let env = *cx.env();
             let spec = self
                 .items
-                .get(self.list.focus)
-                .and_then(|(id, _)| Self::setting(&env, id));
+                .get(self.rows.focus)
+                .and_then(|item| Self::setting(&env, &item.id));
             let decrease = [
                 actions::LEFT,
                 actions::DOWN,
@@ -319,16 +432,33 @@ impl Screen for MenuScreen {
             }
             return Handled::Yes;
         }
+        let navigation = [
+            actions::UP,
+            actions::LEFT,
+            actions::PREVIOUS,
+            actions::DOWN,
+            actions::RIGHT,
+            actions::NEXT,
+            actions::NEXT_PAGE,
+            actions::PREV_PAGE,
+        ];
+        if navigation.contains(a) && !self.keys {
+            // The first button press shows where the focus is.
+            self.keys = true;
+            cx.request_redraw();
+            cx.request_refresh(RefreshMode::Fast);
+            return Handled::Yes;
+        }
         if *a == actions::UP || *a == actions::LEFT || *a == actions::PREVIOUS {
-            Self::moved(self.list.move_focus(-1, len), cx);
+            Self::moved(self.rows.step(false), cx);
         } else if *a == actions::DOWN || *a == actions::RIGHT || *a == actions::NEXT {
-            Self::moved(self.list.move_focus(1, len), cx);
+            Self::moved(self.rows.step(true), cx);
         } else if *a == actions::NEXT_PAGE {
-            Self::moved(self.list.move_focus(rows, len), cx);
+            Self::moved(self.rows.turn(true), cx);
         } else if *a == actions::PREV_PAGE {
-            Self::moved(self.list.move_focus(-rows, len), cx);
+            Self::moved(self.rows.turn(false), cx);
         } else if *a == actions::CONFIRM {
-            self.run(self.list.focus, cx);
+            self.run(self.rows.focus, cx);
         } else if *a == actions::MENU {
             // The menu button toggles the menu.
             cx.command(Command::Back);
@@ -343,32 +473,42 @@ impl Screen for MenuScreen {
             return Handled::No;
         }
         if let Some(action) = self.pager.and_then(|pager| pager.tap(gesture.start)) {
-            cx.command(Command::RunAction(action));
+            let forward = action == actions::NEXT_PAGE;
+            Self::moved(self.rows.turn(forward), cx);
             return Handled::Yes;
         }
-        let Some(index) = self.list.hit(gesture.start, self.items.len()) else {
+        let Some(index) = self.rows.hit(gesture.start) else {
             // Taps between the items do nothing; outside, they close it.
             return Handled::Yes;
         };
         let env = *cx.env();
-        let number = self.items.get(index).and_then(|(id, _)| {
-            Self::setting(&env, id).filter(|s| matches!(s.kind, SettingKind::Int { .. }))
+        let number = self.items.get(index).and_then(|item| {
+            Self::setting(&env, &item.id).filter(|s| matches!(s.kind, SettingKind::Int { .. }))
         });
         let Some(spec) = number else {
-            self.list.focus = index;
+            self.rows.focus = index;
             self.editing = false;
             self.run(index, cx);
             return Handled::Yes;
         };
         // The first tap selects a number; its − and + buttons change it.
-        if index != self.list.focus {
-            self.list.focus = index;
+        if index != self.rows.focus || !self.keys {
+            self.rows.focus = index;
+            self.keys = true;
             self.editing = false;
             cx.request_redraw();
             cx.request_refresh(RefreshMode::Fast);
             return Handled::Yes;
         }
-        let rect = self.list.row_rect(index % self.list.rows());
+        let Some(rect) = self.rows.rect_of(index) else {
+            return Handled::Yes;
+        };
+        let rect = Rect::new(
+            rect.x + self.icon_width,
+            rect.y,
+            rect.width.saturating_sub(self.icon_width),
+            rect.height,
+        );
         let value = ui::setting_value(&env, spec);
         if let Some((minus, plus)) = ui::stepper(&env, &self.style, rect, &value) {
             let x = gesture.start.x;

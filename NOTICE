@@ -11,3 +11,7 @@ Font License, Version 1.1:
   (https://github.com/googlefonts/literata)
 - Atkinson Hyperlegible Next, Copyright 2020-2024 The Atkinson Hyperlegible
   Next Project Authors (https://github.com/googlefonts/atkinson-hyperlegible-next)
+
+The icon font (plugins/fonts-default/fonts/QuireInkIcons.ttf) is a subset of
+Tabler Icons, Copyright 2020-2025 Paweł Kuna (https://tabler.io/icons),
+licensed under the MIT License (fonts/TablerIcons-MIT.txt).

@@ -4,13 +4,15 @@
 //!   texts on screens, with bold, italic and bold italic faces.
 //! - **Atkinson Hyperlegible Next** for the UI (`fonts-default.atkinson`),
 //!   designed for maximum legibility.
+//! - **QuireInk Icons** (`fonts-default.icons`): the icons of the menus,
+//!   taken from Tabler Icons (MIT licence; see `tools/icons/subset.py`).
 //!
 //! [`DefaultFonts`] ships them as scalable fonts when built with the
 //! `outline` feature, else as bitmap packs. [`DefaultFontPacks`] always uses
 //! bitmap packs (feature `packs`), e.g. to emulate small devices.
 //!
-//! Both are under the SIL Open Font License 1.1. Users can bind other fonts
-//! to the roles:
+//! The text fonts are under the SIL Open Font License 1.1. Users can bind
+//! other fonts to the roles:
 //!
 //! ```ini
 //! [fonts]
@@ -34,6 +36,7 @@ pub const LITERATA_BOLD: Id = Id::new_static("fonts-default.literata-bold");
 pub const LITERATA_ITALIC: Id = Id::new_static("fonts-default.literata-italic");
 pub const LITERATA_BOLD_ITALIC: Id = Id::new_static("fonts-default.literata-bold-italic");
 pub const ATKINSON: Id = Id::new_static("fonts-default.atkinson");
+pub const ICONS: Id = Id::new_static("fonts-default.icons");
 
 /// The faces: id, role, font data and weight (for variable fonts).
 type Faces = [(Id, Id, &'static [u8], f32); 5];
@@ -43,6 +46,7 @@ mod outlines {
     const LITERATA: &[u8] = include_bytes!("../fonts/Literata.ttf");
     const LITERATA_ITALIC: &[u8] = include_bytes!("../fonts/Literata-Italic.ttf");
     const ATKINSON: &[u8] = include_bytes!("../fonts/AtkinsonHyperlegibleNext.ttf");
+    pub const ICONS: &[u8] = include_bytes!("../fonts/QuireInkIcons.ttf");
 
     /// Bold faces are instances of the variable fonts.
     pub fn faces() -> super::Faces {
@@ -74,6 +78,8 @@ mod packs {
             include_bytes!(concat!(env!("OUT_DIR"), "/", $name, ".qifp"))
         };
     }
+
+    pub const ICONS: &[u8] = pack!("icons");
 
     pub fn faces() -> super::Faces {
         use super::*;
@@ -126,7 +132,11 @@ fn manifest() -> Manifest {
     }
 }
 
-fn register(r: &mut dyn Registrar, faces: Faces) -> Result<(), RegisterError> {
+fn register(
+    r: &mut dyn Registrar,
+    faces: Faces,
+    icons: &'static [u8],
+) -> Result<(), RegisterError> {
     r.add_translations(Cow::Borrowed(include_str!("../i18n/de.ini")))?;
     for (id, role, data, weight) in faces {
         let font =
@@ -142,6 +152,12 @@ fn register(r: &mut dyn Registrar, faces: Faces) -> Result<(), RegisterError> {
         r.add_font(FontSpec::new(id.clone(), font).family(family, weight >= 600.0, italic))?;
         r.bind_font(role, id, Priority::DEFAULT)?;
     }
+    // Outside any family, so it is never offered for text.
+    let font = Font::from_data(icons, &[]).map_err(|e| RegisterError::Invalid {
+        message: Cow::Owned(alloc::format!("{ICONS}: {e}")),
+    })?;
+    r.add_font(FontSpec::new(ICONS, font))?;
+    r.bind_font(fonts::ICONS, ICONS, Priority::DEFAULT)?;
     Ok(())
 }
 
@@ -151,7 +167,7 @@ impl Plugin for DefaultFonts {
     }
 
     fn register(&self, r: &mut dyn Registrar) -> Result<(), RegisterError> {
-        register(r, preferred::faces())
+        register(r, preferred::faces(), preferred::ICONS)
     }
 }
 
@@ -162,6 +178,6 @@ impl Plugin for DefaultFontPacks {
     }
 
     fn register(&self, r: &mut dyn Registrar) -> Result<(), RegisterError> {
-        register(r, packs::faces())
+        register(r, packs::faces(), packs::ICONS)
     }
 }

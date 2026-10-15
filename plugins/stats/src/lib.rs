@@ -382,6 +382,7 @@ impl Plugin for Stats {
                 order,
             })?;
         }
+        r.add_icon(OPEN, Cow::Borrowed("chart-bar"))?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/en.ini")))?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/de.ini")))?;
         Ok(())

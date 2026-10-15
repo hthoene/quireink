@@ -1332,6 +1332,12 @@ impl Kernel {
         for entry in staging.menu_entries.drain(..) {
             self.shared.menus.add(entry);
         }
+        for section in staging.menu_sections.drain(..) {
+            self.shared.menus.add_section(section);
+        }
+        for (item, icon) in staging.icons.drain(..) {
+            self.shared.menus.set_icon(item, icon);
+        }
         for item in staging.status_items.drain(..) {
             self.shared.status_items.add(item);
         }
@@ -1434,6 +1440,7 @@ impl Kernel {
             .filter(|id| {
                 !self.shared.actions.contains(id.as_str())
                     && self.shared.settings.get(id.as_str()).is_none()
+                    && !self.shared.menus.is_section(id.as_str())
             })
             .collect();
         unknown.sort();

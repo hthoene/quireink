@@ -575,6 +575,7 @@ impl Plugin for Kosync {
             item: SYNC_NOW,
             order: 25,
         })?;
+        r.add_icon(SYNC_NOW, Cow::Borrowed("refresh"))?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/en.ini")))?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/de.ini")))?;
         Ok(())

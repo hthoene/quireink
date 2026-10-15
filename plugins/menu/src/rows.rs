@@ -1,0 +1,176 @@
+//! Rows of different heights on pages: entries and the headings of
+//! sections, which take less room and are never focused.
+
+use alloc::vec::Vec;
+use core::ops::Range;
+
+use quireink_sdk::ui::ListChange;
+use quireink_sdk::{Point, Rect};
+
+#[derive(Debug)]
+pub(crate) struct Rows {
+    pub area: Rect,
+    heights: Vec<u16>,
+    headings: Vec<bool>,
+    pages: Vec<Range<usize>>,
+    /// The focused row; never a heading while there are entries.
+    pub focus: usize,
+}
+
+impl Rows {
+    /// Rows of `heights` in `area`; `headings` marks the headings.
+    pub fn new(area: Rect, heights: Vec<u16>, headings: Vec<bool>) -> Self {
+        let mut pages: Vec<Range<usize>> = Vec::new();
+        let mut start = 0;
+        let mut used = 0u16;
+        for (i, &height) in heights.iter().enumerate() {
+            if i > start && used + height > area.height {
+                // A heading never ends a page: it goes with its entries.
+                let end = if headings[i - 1] && i - 1 > start {
+                    i - 1
+                } else {
+                    i
+                };
+                pages.push(start..end);
+                used = heights[end..i].iter().sum();
+                start = end;
+            }
+            used += height;
+        }
+        pages.push(start..heights.len());
+        let focus = headings.iter().position(|h| !h).unwrap_or(0);
+        Self {
+            area,
+            heights,
+            headings,
+            pages,
+            focus,
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.heights.len()
+    }
+
+    /// The page holding row `index`.
+    fn page_of(&self, index: usize) -> usize {
+        self.pages
+            .iter()
+            .position(|p| p.contains(&index))
+            .unwrap_or(0)
+    }
+
+    /// The page with the focus, and the number of pages.
+    pub fn paging(&self) -> (usize, usize) {
+        (self.page_of(self.focus), self.pages.len())
+    }
+
+    /// The rows of the page with the focus and where they are.
+    pub fn visible(&self) -> Vec<(usize, Rect)> {
+        let page = self.pages[self.page_of(self.focus)].clone();
+        let mut y = self.area.y;
+        page.map(|i| {
+            let rect = Rect::new(self.area.x, y, self.area.width, self.heights[i]);
+            y += self.heights[i];
+            (i, rect)
+        })
+        .collect()
+    }
+
+    pub fn rect_of(&self, index: usize) -> Option<Rect> {
+        self.visible()
+            .into_iter()
+            .find(|(i, _)| *i == index)
+            .map(|(_, rect)| rect)
+    }
+
+    pub fn is_heading(&self, index: usize) -> bool {
+        self.headings.get(index).copied().unwrap_or(false)
+    }
+
+    /// The entry at `point`, if any (headings are not hit).
+    pub fn hit(&self, point: Point) -> Option<usize> {
+        self.visible()
+            .into_iter()
+            .find(|(i, rect)| rect.contains(point) && !self.is_heading(*i))
+            .map(|(i, _)| i)
+    }
+
+    fn set_focus(&mut self, focus: usize) -> ListChange {
+        if focus == self.focus {
+            return ListChange::None;
+        }
+        let page = self.page_of(self.focus);
+        self.focus = focus;
+        if self.page_of(focus) == page {
+            ListChange::Focus
+        } else {
+            ListChange::Page
+        }
+    }
+
+    /// Moves the focus to the next (`forward`) or previous entry.
+    pub fn step(&mut self, forward: bool) -> ListChange {
+        let next = if forward {
+            (self.focus + 1..self.len()).find(|&i| !self.is_heading(i))
+        } else {
+            (0..self.focus).rev().find(|&i| !self.is_heading(i))
+        };
+        next.map_or(ListChange::None, |i| self.set_focus(i))
+    }
+
+    /// Turns to the next (`forward`) or previous page, focusing its
+    /// first entry.
+    pub fn turn(&mut self, forward: bool) -> ListChange {
+        let page = self.page_of(self.focus);
+        let target = if forward {
+            page + 1
+        } else {
+            match page.checked_sub(1) {
+                Some(page) => page,
+                None => return ListChange::None,
+            }
+        };
+        let Some(range) = self.pages.get(target).cloned() else {
+            return ListChange::None;
+        };
+        match range.clone().find(|&i| !self.is_heading(i)) {
+            Some(first) => self.set_focus(first),
+            None => ListChange::None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn headings_go_with_their_entries() {
+        // Heading, two entries, heading, two entries; three rows a page.
+        let heights = Vec::from([5, 10, 10, 5, 10, 10]);
+        let headings = Vec::from([true, false, false, true, false, false]);
+        let mut rows = Rows::new(Rect::new(0, 0, 100, 30), heights, headings);
+        assert_eq!(rows.pages, [0..3, 3..6]);
+        assert_eq!(rows.focus, 1, "the first entry");
+        assert_eq!(rows.step(true), ListChange::Focus);
+        assert_eq!(rows.step(true), ListChange::Page, "over the heading");
+        assert_eq!(rows.focus, 4);
+        assert_eq!(rows.paging(), (1, 2));
+        assert_eq!(rows.turn(false), ListChange::Page);
+        assert_eq!(rows.focus, 1);
+        let visible = rows.visible();
+        assert_eq!(visible[0].1, Rect::new(0, 0, 100, 5));
+        assert_eq!(visible[1].1, Rect::new(0, 5, 100, 10));
+        assert_eq!(rows.hit(Point { x: 3, y: 2 }), None, "a heading");
+        assert_eq!(rows.hit(Point { x: 3, y: 7 }), Some(1));
+    }
+
+    #[test]
+    fn a_heading_never_ends_a_page() {
+        let heights = Vec::from([10, 10, 5, 10]);
+        let headings = Vec::from([false, false, true, false]);
+        let rows = Rows::new(Rect::new(0, 0, 100, 25), heights, headings);
+        assert_eq!(rows.pages, [0..2, 2..4]);
+    }
+}

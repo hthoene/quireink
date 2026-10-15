@@ -46,6 +46,13 @@ fn main() {
         let pack = quireink_text::build_pack(&font, &sizes, chars);
         write(&out.join(format!("{name}.qifp")), &pack);
     }
+    // Icons sit in the private use area and just above it.
+    let path = "fonts/QuireInkIcons.ttf";
+    let data = std::fs::read(path).unwrap_or_else(|e| panic!("{path}: {e}"));
+    let font = quireink_text::OutlineFont::new(data, &[]).unwrap_or_else(|e| panic!("{path}: {e}"));
+    let chars = ('\u{e000}'..='\u{ffff}').filter(|ch| font.has_char(*ch));
+    let pack = quireink_text::build_pack(&font, &sizes, chars);
+    write(&out.join("icons.qifp"), &pack);
 }
 
 fn write(path: &Path, data: &[u8]) {

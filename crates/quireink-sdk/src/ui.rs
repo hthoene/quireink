@@ -88,6 +88,36 @@ pub const NOTE_LINES: usize = 2;
 /// Line height of notes, relative to the small text size.
 const NOTE_LINE_HEIGHT: f32 = 1.3;
 
+/// Draws icon `name` ([`icons`](crate::icons)) `size` pixels high,
+/// vertically centred in `area`, starting at `x`; returns its width, 0 if
+/// there is no icon font or no such icon.
+pub fn draw_icon(
+    canvas: &mut Canvas<'_>,
+    env: &Env<'_>,
+    name: &str,
+    size: f32,
+    x: f32,
+    area: Rect,
+    color: Color,
+) -> f32 {
+    let (Some(font), Some(ch)) = (
+        env.fonts.bound(crate::builtin::fonts::ICONS.as_str()),
+        crate::icons::char(name),
+    ) else {
+        return 0.0;
+    };
+    let mut text = [0u8; 4];
+    let text = ch.encode_utf8(&mut text);
+    draw_label(canvas, &font, size, x, area, text, color)
+}
+
+/// Whether icons can be drawn (an icon font is there).
+pub fn has_icons(env: &Env<'_>) -> bool {
+    env.fonts
+        .bound(crate::builtin::fonts::ICONS.as_str())
+        .is_some()
+}
+
 /// Draws `text` vertically centred in `area`, starting at `x`; text
 /// longer than the rest of the area is shortened with "…", so a label
 /// never runs into what is next to it.

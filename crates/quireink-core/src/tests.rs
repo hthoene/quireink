@@ -796,8 +796,15 @@ fn menus_follow_order_and_user_definitions() {
             .collect()
     };
     let items = env_items(&kernel);
-    // Entries of the core plugin and this plugin, sorted by order.
-    assert_eq!(items.first().map(String::as_str), Some("core.home"));
+    // Entries of the core plugin and this plugin, sorted by order, under
+    // the core's section headings.
+    assert_eq!(
+        items.iter().take(2).map(String::as_str).collect::<Vec<_>>(),
+        ["core.section.reading", "core.home"]
+    );
+    let section = kernel.shared.menus.items("core.main")[0];
+    assert!(section.section && section.icon.is_none());
+    assert_eq!(kernel.shared.menus.icon("core.library"), Some("books"));
     assert!(items.iter().filter(|a| *a == "core.home").count() == 2);
 
     let kernel = Kernel::builder(DEVICE)

@@ -145,17 +145,44 @@ impl Plugin for CorePlugin {
             factory: Box::new(|_, _| Box::new(PlaceholderScreen)),
         })?;
 
-        for (action, order) in [
-            (actions::HOME, 10),
-            (actions::LIBRARY, 20),
-            (actions::SETTINGS, 30),
-            (settings::NIGHT_MODE, 40),
+        // The main menu in three sections: reading, tools (plugins add
+        // theirs between 30 and 79) and the device.
+        for (id, title, order) in [
+            (
+                quireink_sdk::builtin::sections::READING,
+                "core.section.reading",
+                0,
+            ),
+            (
+                quireink_sdk::builtin::sections::TOOLS,
+                "core.section.tools",
+                30,
+            ),
+            (
+                quireink_sdk::builtin::sections::SYSTEM,
+                "core.section.system",
+                80,
+            ),
+        ] {
+            r.add_menu_section(quireink_sdk::MenuSection {
+                id,
+                title: Cow::Borrowed(title),
+                menu: menus::MAIN,
+                order,
+            })?;
+        }
+        for (action, order, icon) in [
+            (actions::HOME, 10, "home"),
+            (actions::LIBRARY, 20, "books"),
+            (settings::NIGHT_MODE, 85, "moon"),
+            (actions::SETTINGS, 90, "settings"),
         ] {
             r.add_menu_entry(MenuEntry {
                 menu: menus::MAIN,
-                item: action,
+                item: action.clone(),
                 order,
             })?;
+            r.add_icon(action, Cow::Borrowed(icon))?;
         }
 
         for (id, title, order) in [

@@ -40,7 +40,8 @@ impl OutlineFont {
     ) -> Result<OutlineFont, FontError> {
         let data = data.into();
         let font = FontRef::new(&data).map_err(|_| FontError::Invalid)?;
-        if font.charmap().map('a').is_none() && font.charmap().map('A').is_none() {
+        // Any mapping will do: icon fonts have no letters.
+        if font.charmap().mappings().next().is_none() {
             return Err(FontError::NoCharmap);
         }
         let location = font.axes().location(variations.iter().copied());

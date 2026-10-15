@@ -19,13 +19,30 @@ pub struct MenuEntry {
     pub order: i16,
 }
 
+/// A heading in a menu: the entries after it, up to the next heading,
+/// belong to it (see [`Registrar::add_menu_section`](crate::Registrar::add_menu_section)).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MenuSection {
+    /// `<plugin>.<name>`; also usable in the user's menu definitions.
+    pub id: Id,
+    /// Translation key of the heading.
+    pub title: Cow<'static, str>,
+    pub menu: Id,
+    /// Position among the menu's entries; lower comes first.
+    pub order: i16,
+}
+
 /// One entry of a resolved menu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MenuItem<'a> {
-    /// An action or a setting.
+    /// An action or a setting, or a section.
     pub id: &'a Id,
     /// Translation key of the label.
     pub title: &'a str,
+    /// The icon's name ([`icons`](crate::icons)), if it has one.
+    pub icon: Option<&'a str>,
+    /// A heading rather than an entry ([`MenuSection`]).
+    pub section: bool,
 }
 
 /// All menus: contributed entries, the user's menu definitions and the
@@ -36,6 +53,8 @@ pub struct Menus {
     /// Menus redefined by the user (`[menus] reader.menu = a, b, c`).
     custom: VecMap<Id, Vec<Id>>,
     titles: VecMap<Id, Cow<'static, str>>,
+    icons: VecMap<Id, Cow<'static, str>>,
+    sections: Vec<Id>,
 }
 
 impl Menus {
@@ -51,6 +70,8 @@ impl Menus {
             menu.shrink_to_fit();
         }
         self.titles.shrink_to_fit();
+        self.icons.shrink_to_fit();
+        self.sections.shrink_to_fit();
     }
 
     pub fn add(&mut self, entry: MenuEntry) {
@@ -111,6 +132,33 @@ impl Menus {
         self.titles.insert(item, title);
     }
 
+    /// Gives an action or setting an icon (by name; see
+    /// [`icons`](crate::icons)), wherever it is shown.
+    pub fn set_icon(&mut self, item: Id, icon: Cow<'static, str>) {
+        self.icons.insert(item, icon);
+    }
+
+    /// The icon of an action or setting, if it has one.
+    pub fn icon(&self, item: &str) -> Option<&str> {
+        self.icons.get(item).map(AsRef::as_ref)
+    }
+
+    /// Adds a heading to a menu.
+    pub fn add_section(&mut self, section: MenuSection) {
+        self.titles.insert(section.id.clone(), section.title);
+        self.sections.push(section.id.clone());
+        self.entries.push(MenuEntry {
+            menu: section.menu,
+            item: section.id,
+            order: section.order,
+        });
+    }
+
+    /// Whether `item` is a heading.
+    pub fn is_section(&self, item: &str) -> bool {
+        self.sections.iter().any(|s| s.as_str() == item)
+    }
+
     /// The entries of `menu`, in display order. Items without a known
     /// title are skipped.
     pub fn items(&self, menu: &str) -> Vec<MenuItem<'_>> {
@@ -133,6 +181,8 @@ impl Menus {
         self.titles.get(id).map(|title| MenuItem {
             id,
             title: title.as_ref(),
+            icon: self.icon(id.as_str()),
+            section: self.is_section(id.as_str()),
         })
     }
 

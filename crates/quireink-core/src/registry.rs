@@ -108,6 +108,8 @@ pub(crate) struct Staging {
     pub(crate) setting_groups: Vec<SettingGroupSpec>,
     pub(crate) subscriptions: Vec<(Id, EventHandler)>,
     pub(crate) menu_entries: Vec<MenuEntry>,
+    pub(crate) menu_sections: Vec<quireink_sdk::MenuSection>,
+    pub(crate) icons: Vec<(Id, Cow<'static, str>)>,
     pub(crate) keymap_presets: Vec<(Id, Cow<'static, str>)>,
     pub(crate) setting_defaults: Vec<(Id, Cow<'static, str>)>,
     pub(crate) status_items: Vec<StatusItemSpec>,
@@ -287,6 +289,20 @@ impl Registrar for PluginRegistrar<'_> {
 
     fn add_menu_entry(&mut self, entry: MenuEntry) -> Result<(), RegisterError> {
         self.staging.menu_entries.push(entry);
+        Ok(())
+    }
+
+    fn add_menu_section(
+        &mut self,
+        section: quireink_sdk::MenuSection,
+    ) -> Result<(), RegisterError> {
+        self.check_namespace(&section.id)?;
+        self.staging.menu_sections.push(section);
+        Ok(())
+    }
+
+    fn add_icon(&mut self, item: Id, icon: Cow<'static, str>) -> Result<(), RegisterError> {
+        self.staging.icons.push((item, icon));
         Ok(())
     }
 

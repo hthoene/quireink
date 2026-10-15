@@ -79,6 +79,7 @@ impl Plugin for Transfer {
             item: OPEN,
             order: 46,
         })?;
+        r.add_icon(OPEN, Cow::Borrowed("wifi"))?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/en.ini")))?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/de.ini")))?;
         Ok(())
