@@ -77,6 +77,10 @@ impl Plugin for Home {
                 event,
                 Box::new(|env, params, _| recent::record(env, params)),
             )?;
+            r.subscribe(
+                events::BOOK_MOVED,
+                Box::new(|env, params, _| recent::moved(env, params)),
+            )?;
         }
         widgets::register(r)?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/en.ini")))?;

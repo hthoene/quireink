@@ -38,6 +38,7 @@ use listing::{Entry, Listing, UNRANKED};
 use quireink_sdk::builtin::{
     actions as core_actions, events, groups, params, settings as core_settings, slots,
 };
+use quireink_sdk::files;
 use quireink_sdk::ui::{self, ListChange, ListView, UiStyle};
 use quireink_sdk::{
     Arg, Canvas, Color, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Manifest, MenuEntry,
@@ -55,6 +56,8 @@ pub const SORT: Id = Id::new_static("files.sort");
 pub const SORT_RECENT: &str = "files.sort.recent";
 /// By file name.
 pub const SORT_NAME: &str = "files.sort.name";
+/// The folder finished books are moved to (by the book's options).
+pub const ARCHIVE: Id = Id::new_static("files.archive");
 /// How books are shown: as a list ([`VIEW_LIST`]) or a grid of covers
 /// ([`VIEW_COVERS`]).
 pub const VIEW: Id = Id::new_static("files.view");
@@ -168,6 +171,27 @@ impl Plugin for Files {
             .group(groups::LIBRARY)
             .editor(CHOOSE_FOLDER)
             .description("files.setting.root.help"),
+        )?;
+        r.add_setting(
+            SettingSpec::new(
+                ARCHIVE,
+                "files.setting.archive",
+                SettingKind::Text,
+                SettingValue::Text(Cow::Borrowed("books/Archive")),
+            )
+            .group(groups::LIBRARY)
+            .editor(CHOOSE_FOLDER)
+            .advanced()
+            .description("files.setting.archive.help"),
+        )?;
+        r.subscribe(
+            events::BOOK_MOVED,
+            Box::new(|env, params, _| {
+                if let (Some(from), Some(to)) = (params.get(params::FROM), params.get(params::PATH))
+                {
+                    books::moved(env.storage, from, to);
+                }
+            }),
         )?;
         r.add_setting(
             SettingSpec::new(
@@ -509,6 +533,11 @@ impl Browser {
             if finished { "unfinished" } else { "finished" },
             "info",
         ];
+        // Not for books already in the archive.
+        let archive = env.settings.text(ARCHIVE.as_str()).trim_matches('/');
+        if !archive.is_empty() && files::parent(&path) != archive {
+            options.push("archive");
+        }
         if !env.device.input.touch {
             options.push("menu");
         }
@@ -546,6 +575,31 @@ impl Browser {
             }
             "finished" | "unfinished" => {
                 books::set_finished(env.storage, path, option == "finished");
+                self.load(&env);
+                cx.request_redraw();
+            }
+            "archive" => {
+                let archive = env
+                    .settings
+                    .text(ARCHIVE.as_str())
+                    .trim_matches('/')
+                    .to_string();
+                let _ = env.storage.create_dir(&archive);
+                let target = files::free_path(env.storage, &archive, files::name(path));
+                match files::move_to(env.storage, path, &target) {
+                    Ok(()) => {
+                        cx.command(Command::Emit(
+                            events::BOOK_MOVED,
+                            Params::new()
+                                .with(params::FROM, path.to_string())
+                                .with(params::PATH, target),
+                        ));
+                        cx.command(Command::Notify(env.i18n.tr("files.archived").to_string()));
+                    }
+                    Err(_) => cx.command(Command::Notify(
+                        env.i18n.tr("files.archive-failed").to_string(),
+                    )),
+                }
                 self.load(&env);
                 cx.request_redraw();
             }

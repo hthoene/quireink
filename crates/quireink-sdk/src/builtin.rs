@@ -150,6 +150,9 @@ pub mod params {
     pub const URL: &str = "url";
     /// An action to run, e.g. when the title of a menu bar is tapped.
     pub const ACTION: &str = "action";
+    /// Where something was before, e.g. a moved book
+    /// ([`events::BOOK_MOVED`](super::events::BOOK_MOVED)).
+    pub const FROM: &str = "from";
 }
 
 /// Events emitted by the kernel.
@@ -173,6 +176,11 @@ pub mod events {
     /// The reader moved to another page; same parameters as
     /// [`BOOK_OPENED`].
     pub const PAGE_TURNED: Id = Id::new_static("core.page-turned");
+    /// A book file was moved or renamed: parameters
+    /// [`FROM`](super::params::FROM) (the old path) and
+    /// [`PATH`](super::params::PATH) (the new one). Plugins that keep data
+    /// by a book's path move it along (progress, notes, statistics).
+    pub const BOOK_MOVED: Id = Id::new_static("core.book-moved");
     /// A menu was redefined or reset; parameter [`ID`](super::params::ID).
     pub const MENU_CHANGED: Id = Id::new_static("core.menu-changed");
     /// The device goes to sleep or the app to the background: a moment to

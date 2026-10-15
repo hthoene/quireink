@@ -416,6 +416,17 @@ impl WordBox {
 }
 
 /// The data folder of the book at `path`.
+/// Remembers `path` as the book read last (reopened at start-up).
+pub(crate) fn remember_last(storage: &dyn quireink_sdk::Storage, path: &str) {
+    let state = format!(
+        "[reader]
+last = \"{}\"
+",
+        escape(path)
+    );
+    let _ = storage.write(&state_path(), state.as_bytes());
+}
+
 pub(crate) fn book_dir(path: &str) -> String {
     format!(
         "{}/books/{:016x}",
@@ -1325,8 +1336,7 @@ impl Book {
         book.update_chapter(env);
         book.update_links(env);
         if !book.web() {
-            let state = format!("[reader]\nlast = \"{}\"\n", escape(&book.path));
-            let _ = env.storage.write(&state_path(), state.as_bytes());
+            remember_last(env.storage, &book.path);
         }
         Ok(book)
     }

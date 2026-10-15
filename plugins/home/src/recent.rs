@@ -85,6 +85,22 @@ fn quote(value: &str) -> String {
     out
 }
 
+/// A book was moved: its entry follows.
+pub(crate) fn moved(env: &Env<'_>, event: &Params) {
+    let (Some(from), Some(to)) = (event.get(params::FROM), event.get(params::PATH)) else {
+        return;
+    };
+    let mut books = load(env.storage);
+    let mut changed = false;
+    for book in books.iter_mut().filter(|b| b.path == from) {
+        book.path = to.to_string();
+        changed = true;
+    }
+    if changed {
+        save(env.storage, &books);
+    }
+}
+
 /// Moves the book of a reading event to the top of the list.
 pub(crate) fn record(env: &Env<'_>, event: &Params) {
     let Some(path) = event.get(params::PATH) else {

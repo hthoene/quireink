@@ -603,6 +603,7 @@ impl Plugin for Reader {
         }
 
         r.subscribe(events::STARTED, Box::new(reopen_last_book))?;
+        r.subscribe(events::BOOK_MOVED, Box::new(book_moved))?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/en.ini")))?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/de.ini")))?;
         Ok(())
@@ -614,21 +615,35 @@ fn state_path() -> String {
     alloc::format!("{}/state.ini", Env::plugin_dir(PLUGIN.as_str()))
 }
 
+/// A book was moved: its data folder (position, notes, its own settings)
+/// goes along, and so does the last book read.
+fn book_moved(env: &Env<'_>, params: &Params, _: &mut Vec<Command>) {
+    let (Some(from), Some(to)) = (params.get(params::FROM), params.get(params::PATH)) else {
+        return;
+    };
+    let _ = env
+        .storage
+        .rename(&screen::book_dir(from), &screen::book_dir(to));
+    if last_book(env).as_deref() == Some(from) {
+        screen::remember_last(env.storage, to);
+    }
+}
+
+/// The book read last, as remembered.
+fn last_book(env: &Env<'_>) -> Option<String> {
+    let data = quireink_sdk::read_file(env.storage, &state_path(), 4096).ok()?;
+    let text = core::str::from_utf8(&data).ok()?;
+    quireink_sdk::config::parse(text)
+        .filter_map(Result::ok)
+        .find(|e| e.section == "reader" && e.key == "last")
+        .map(|e| String::from(e.value.as_str()))
+}
+
 fn reopen_last_book(env: &Env<'_>, _: &Params, out: &mut Vec<Command>) {
     if !env.settings.bool(settings::OPEN_LAST.as_str()) {
         return;
     }
-    let Ok(data) = quireink_sdk::read_file(env.storage, &state_path(), 4096) else {
-        return;
-    };
-    let Ok(text) = core::str::from_utf8(&data) else {
-        return;
-    };
-    let last = quireink_sdk::config::parse(text)
-        .filter_map(Result::ok)
-        .find(|e| e.section == "reader" && e.key == "last")
-        .map(|e| String::from(e.value.as_str()));
-    if let Some(path) = last
+    if let Some(path) = last_book(env)
         && env.storage.size(&path).is_ok()
     {
         out.push(Command::OpenSlot(

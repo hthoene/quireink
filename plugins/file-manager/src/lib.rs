@@ -21,7 +21,7 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use quireink_sdk::builtin::{actions, groups, menus, params, slots};
+use quireink_sdk::builtin::{actions, events, groups, menus, params, slots};
 use quireink_sdk::ui::choice::{self, Choice};
 use quireink_sdk::ui::{self, ListChange, ListView, UiStyle};
 use quireink_sdk::{
@@ -297,7 +297,11 @@ impl Browser {
                     // Moved where it is: nothing to do.
                     Ok(())
                 } else {
-                    ops::move_to(env.storage, &picked.path, &target)
+                    let moved = ops::move_to(env.storage, &picked.path, &target);
+                    if moved.is_ok() {
+                        tell_moved(&env, &picked.path, &target, cx);
+                    }
+                    moved
                 };
                 self.message = result.err().map(|e| error(&env, e));
                 self.focus = Focus::List;
@@ -583,9 +587,11 @@ impl Screen for Browser {
                 return;
             }
             let target = ops::free_path(env.storage, ops::parent(&path), name);
-            self.message = ops::move_to(env.storage, &path, &target)
-                .err()
-                .map(|e| error(&env, e));
+            let moved = ops::move_to(env.storage, &path, &target);
+            if moved.is_ok() {
+                tell_moved(&env, &path, &target, cx);
+            }
+            self.message = moved.err().map(|e| error(&env, e));
             self.load(&env);
             if let Some(at) = self
                 .entries
@@ -618,6 +624,36 @@ impl Screen for Browser {
                 self.list.focus = at;
             }
             self.redraw(cx);
+        }
+    }
+}
+
+/// Most books whose moving is told for one moved folder.
+const MAX_MOVED: usize = 2000;
+
+/// Tells the other plugins that the files at `from` are now at `to`
+/// ([`events::BOOK_MOVED`]), so the data they keep by a book's path
+/// (progress, notes, statistics) goes along; for a folder, of every file
+/// in it.
+fn tell_moved(env: &Env<'_>, from: &str, to: &str, cx: &mut Cx<'_, '_>) {
+    let mut pending = alloc::vec![(from.to_string(), to.to_string())];
+    let mut told = 0;
+    while let Some((from, to)) = pending.pop() {
+        if !ops::is_dir(env.storage, &to) {
+            cx.command(Command::Emit(
+                events::BOOK_MOVED,
+                Params::new()
+                    .with(params::FROM, from)
+                    .with(params::PATH, to),
+            ));
+            told += 1;
+            continue;
+        }
+        for entry in ops::list(env.storage, &to, true).unwrap_or_default() {
+            if told + pending.len() >= MAX_MOVED {
+                return;
+            }
+            pending.push((ops::join(&from, &entry.name), ops::join(&to, &entry.name)));
         }
     }
 }

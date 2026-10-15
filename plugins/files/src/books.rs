@@ -217,6 +217,21 @@ pub(crate) fn record(env: &Env<'_>, params: &Params, opened: bool) {
     }
 }
 
+/// Moves what the library keeps of a book from `from` to `to`: its
+/// details, its place among the recently opened and the favourites.
+pub(crate) fn moved(storage: &dyn Storage, from: &str, to: &str) {
+    let _ = storage.rename(&book_file(from), &book_file(to));
+    let replace = |list: Vec<String>| -> Vec<String> {
+        list.into_iter()
+            .map(|p| if p == from { to.to_string() } else { p })
+            .collect()
+    };
+    let opened = replace(load_opened(storage));
+    let _ = storage.write(&opened_file(), opened.join("\n").as_bytes());
+    let favourites = replace(favourites(storage));
+    let _ = storage.write(&favourites_file(), favourites.join("\n").as_bytes());
+}
+
 /// Marks the book at `path` as read to the end, or as not read at all.
 pub(crate) fn set_finished(storage: &dyn Storage, path: &str, finished: bool) {
     let mut book = load(storage, path).unwrap_or_else(|| Book {

@@ -315,6 +315,24 @@ impl Plugin for Stats {
                 }
             }),
         )?;
+        r.subscribe(
+            events::BOOK_MOVED,
+            Box::new(|env, params, _| {
+                let (Some(from), Some(to)) = (params.get(params::FROM), params.get(params::PATH))
+                else {
+                    return;
+                };
+                let mut books = store::books(env.storage);
+                let mut changed = false;
+                for book in books.iter_mut().filter(|b| b.path == from) {
+                    book.path = to.to_string();
+                    changed = true;
+                }
+                if changed {
+                    store::save_books(env.storage, &books);
+                }
+            }),
+        )?;
         let s = state.clone();
         r.subscribe(
             events::SUSPEND,
