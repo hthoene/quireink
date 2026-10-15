@@ -36,6 +36,10 @@ pub const SCREEN: Id = Id::new_static("menu.list");
 pub const PANEL: Id = Id::new_static("menu.panel");
 /// Shows short messages (`core.notice`).
 pub const NOTICE: Id = Id::new_static("menu.notice");
+/// How menus look: a list ([`STYLE_LIST`]) or tiles ([`STYLE_TILES`]).
+pub const STYLE: Id = Id::new_static("menu.style");
+pub const STYLE_LIST: &str = "menu.style.list";
+pub const STYLE_TILES: &str = "menu.style.tiles";
 
 mod bar;
 mod notice;
@@ -63,7 +67,7 @@ impl Plugin for Menu {
             id: SCREEN,
             title: Cow::Borrowed("menu.title"),
             factory: Box::new(|env, params| {
-                if params.get(params::MODE) == Some(bar::MODE) {
+                if params.get(params::MODE) == Some(bar::MODE) || tiles(env, params) {
                     Box::new(bar::BarScreen::new(env, params))
                 } else {
                     Box::new(MenuScreen::new(env, params))
@@ -83,6 +87,19 @@ impl Plugin for Menu {
             factory: Box::new(|env, params| Box::new(notice::NoticeScreen::new(env, params))),
         })?;
         r.bind_slot(slots::NOTICE, NOTICE, Priority::DEFAULT)?;
+        r.add_setting(
+            SettingSpec::new(
+                STYLE,
+                "menu.setting.style",
+                SettingKind::Choice(alloc::vec![
+                    Cow::Borrowed(STYLE_LIST),
+                    Cow::Borrowed(STYLE_TILES),
+                ]),
+                quireink_sdk::SettingValue::Text(Cow::Borrowed(STYLE_LIST)),
+            )
+            .group(quireink_sdk::builtin::groups::LOOK)
+            .description("menu.setting.style.help"),
+        )?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/en.ini")))?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/de.ini")))?;
         Ok(())
@@ -330,6 +347,19 @@ impl MenuScreen {
             }
         }
     }
+}
+
+/// Whether the menu in `params` opens as tiles: the user wants them, it
+/// is a menu of its own (not a submenu) and every entry has an icon.
+fn tiles(env: &Env<'_>, params: &Params) -> bool {
+    if env.settings.text(STYLE.as_str()) != STYLE_TILES || params.get(DEPTH).is_some() {
+        return false;
+    }
+    let items = env
+        .menus
+        .items(params.get(params::MENU).unwrap_or_default());
+    let entries: Vec<_> = items.iter().filter(|i| !i.section).collect();
+    !entries.is_empty() && entries.iter().all(|i| i.icon.is_some())
 }
 
 /// Whether `id` names a menu with entries (a submenu).

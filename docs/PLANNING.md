@@ -783,7 +783,7 @@ makes it replaceable. ✅ done, 🔶 partly, ⬜ open.
 | C5 | Rules: "every day at 22:00: night mode on", "when QuireInk starts: sync the catalogs"; when: start, time of day, book opened, waking up; then: any action, any switch on or off | `rules` plugin, `Command::Schedule` (timers for plugins) | ✅ (more triggers, e.g. Wi-Fi, once the shells report them) |
 | C6 | Reading profiles: named sets of settings ("Night", "Commute", "Large print"), switched with a tap, a button or a rule | `profiles` plugin (reading, display and status line settings; action "Next profile") | ✅ |
 | C7 | Themes: menu text size, margins, row height, lines, dark or light headers; icon packs (icons are a font role) | Settings group "Appearance"; themes are data plugins with setting defaults (sample `samples/plugins/airy-theme`) | 🔶 (gray levels, corners and an icon pack sample open) |
-| C8 | Menus as a grid of tiles besides lists | Menu presentation setting or plugin | ⬜ |
+| C8 | Menus as tiles with their icons besides lists | Setting `menu.style` (Appearance); other looks by replacing the `core.menu` slot | ✅ |
 | C9 | Sleep screen: cover, own picture, calendar, statistics | Slot `core.sleep` | ⬜ |
 | C10 | Text filters between format and layout: a style sheet per book, replaced words, reading aids, fonts for dyslexia | Document filter stage (§7.5) | ⬜ |
 | C11 | Footnotes over the page or jumped to; note marks recognised by their text (1, [2], *) | Setting `reader.footnotes`, screen `reader.footnote`, event `reader.follow` | ✅ |
