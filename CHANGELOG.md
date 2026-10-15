@@ -4,7 +4,7 @@ What changes from one release of QuireInk to the next. Versions follow
 [Semantic Versioning](https://semver.org); before 1.0, a minor version may
 change the plugin SDK.
 
-## [0.1.0] - unreleased
+## [0.1.0] - 2026-10-15
 
 The first release: QuireInk on Android e-readers (tested on a Boox Go 7)
 and in the desktop emulator, with its plugin SDK. The firmware for the
