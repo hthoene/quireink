@@ -101,6 +101,41 @@ pub mod http_params {
     pub const FINAL_URL: &str = "final-url";
 }
 
+/// Text to speak aloud (see [`Command::Speak`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Speech {
+    pub text: alloc::string::String,
+    /// The language of the text, e.g. `de` or `en-GB`, for the voice;
+    /// empty for the system's.
+    pub language: alloc::string::String,
+    /// How fast, in percent of the voice's normal speed.
+    pub rate: u16,
+    /// Emitted with `params` once the text has been spoken, with
+    /// [`speech_params::FAILED`] if it could not be.
+    pub reply: Id,
+    pub params: Params,
+}
+
+impl Speech {
+    /// `text` in the system's language at normal speed.
+    pub fn new(text: impl Into<alloc::string::String>, reply: Id) -> Self {
+        Self {
+            text: text.into(),
+            language: alloc::string::String::new(),
+            rate: 100,
+            reply,
+            params: Params::new(),
+        }
+    }
+}
+
+/// Parameters of the reply to [`Command::Speak`].
+pub mod speech_params {
+    /// Present (`1`) when the text could not be spoken, e.g. without a
+    /// voice for it.
+    pub const FAILED: &str = "failed";
+}
+
 /// A request from a plugin to the kernel.
 ///
 /// Plugins never mutate kernel state directly; commands are queued and
@@ -183,6 +218,13 @@ pub enum Command {
     /// empty if there is none. Read it only when the user asks to paste:
     /// some systems tell the user every time an app reads the clipboard.
     ReadClipboard(Id, Params),
+    /// Speaks text aloud where the device can
+    /// ([`Env::speech`](crate::Env)), instead of what is being spoken.
+    /// Without speech the reply comes at once, failed. Speech stops when
+    /// the screen that started it is closed.
+    Speak(Speech),
+    /// Stops speaking; no reply comes for the text cut off.
+    StopSpeaking,
 }
 
 /// The most text the clipboard holds, in bytes.

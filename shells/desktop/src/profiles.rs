@@ -27,6 +27,9 @@ pub struct Profile {
     pub frame_rows: Option<u16>,
     /// Device-specific setting defaults, as `(id, value)`.
     pub settings: &'static [(&'static str, &'static str)],
+    /// The device speaks text aloud (emulated: the text is logged and
+    /// takes as long as it would to speak).
+    pub speech: bool,
     /// One-line description for `--list-profiles`.
     pub summary: &'static str,
 }
@@ -71,6 +74,7 @@ pub const PROFILES: &[Profile] = &[
         frame_rows: Some(100),
         // A 4.3" screen: smaller text, so menus and pages hold enough.
         settings: &[("core.ui-size", "9"), ("reader.font-size", "9")],
+        speech: false,
         summary: "ESP32-C3, 4.3\" 800x480, buttons only, 192 KiB heap budget",
     },
     Profile {
@@ -107,6 +111,7 @@ pub const PROFILES: &[Profile] = &[
         frame_rows: Some(100),
         // A 4.3" screen: smaller text, so menus and pages hold enough.
         settings: &[("core.ui-size", "9"), ("reader.font-size", "9")],
+        speech: false,
         summary: "ESP32-S3 (unverified), 4.3\" 800x480, touch + buttons, 256 KiB heap budget",
     },
     Profile {
@@ -134,6 +139,7 @@ pub const PROFILES: &[Profile] = &[
         font_packs: false,
         frame_rows: None,
         settings: &[],
+        speech: true,
         summary: "Android, 7\" Carta 1300 1264x1680, touch + page buttons",
     },
     Profile {
@@ -164,6 +170,7 @@ pub const PROFILES: &[Profile] = &[
         font_packs: false,
         frame_rows: None,
         settings: &[],
+        speech: false,
         summary: "Linux, 7\" Kaleido 3 colour 1264x1680, touch + page buttons",
     },
     Profile {
@@ -191,6 +198,7 @@ pub const PROFILES: &[Profile] = &[
         font_packs: false,
         frame_rows: None,
         settings: &[],
+        speech: false,
         summary: "Linux, 6.8\" 1236x1648, touch only",
     },
     Profile {
@@ -218,6 +226,7 @@ pub const PROFILES: &[Profile] = &[
         font_packs: false,
         frame_rows: None,
         settings: &[],
+        speech: false,
         summary: "Linux, 6\" 1072x1448, touch only",
     },
     Profile {
@@ -246,6 +255,7 @@ pub const PROFILES: &[Profile] = &[
         frame_rows: None,
         // Only two buttons: everything works with forward and back.
         settings: &[("core.keymap-preset", "core.two-buttons")],
+        speech: false,
         summary: "Generic 6\" 600x800, only page buttons (also: Bluetooth page turners)",
     },
 ];

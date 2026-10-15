@@ -429,6 +429,8 @@ pub(crate) struct ReaderScreen {
     last_search: String,
     /// What the status lines showed when last drawn.
     status_shown: String,
+    /// The book is being read aloud.
+    aloud: bool,
 }
 
 impl ReaderScreen {
@@ -439,6 +441,70 @@ impl ReaderScreen {
             linking: None,
             last_search: String::new(),
             status_shown: String::new(),
+            aloud: false,
+        }
+    }
+
+    /// Starts reading aloud from the page shown, where the device can.
+    fn start_aloud(&mut self, cx: &mut Cx<'_, '_>) {
+        let env = *cx.env();
+        if !env.speech {
+            cx.command(Command::Notify(
+                env.i18n.tr("reader.aloud.unavailable").to_string(),
+            ));
+            return;
+        }
+        self.aloud = true;
+        cx.command(Command::Notify(
+            env.i18n.tr("reader.aloud.started").to_string(),
+        ));
+        self.speak_page(cx);
+    }
+
+    /// Stops reading aloud.
+    fn stop_aloud(&mut self, cx: &mut Cx<'_, '_>) {
+        self.aloud = false;
+        cx.command(Command::StopSpeaking);
+    }
+
+    /// Reads the page shown aloud.
+    fn speak_page(&mut self, cx: &mut Cx<'_, '_>) {
+        let Ok(book) = &self.book else {
+            return;
+        };
+        let env = *cx.env();
+        let text = crate::aloud::spoken_text(book.page.lines.iter().map(|l| l.text.as_str()));
+        let mut speech = quireink_sdk::Speech::new(text, crate::SPOKEN);
+        speech.language = book.language.clone();
+        speech.rate = env
+            .settings
+            .int(crate::settings::SPEECH_RATE.as_str())
+            .clamp(50, 300) as u16;
+        speech.params = Params::new().with(params::PATH, book.path.clone());
+        cx.command(Command::Speak(speech));
+    }
+
+    /// A page was read aloud: on to the next one, up to the end.
+    fn spoken(&mut self, params: &Params, cx: &mut Cx<'_, '_>) {
+        if !self.aloud {
+            return;
+        }
+        if params.get(quireink_sdk::speech_params::FAILED).is_some() {
+            self.aloud = false;
+            let env = *cx.env();
+            cx.command(Command::Notify(
+                env.i18n.tr("reader.aloud.failed").to_string(),
+            ));
+            return;
+        }
+        let Ok(book) = &mut self.book else {
+            return;
+        };
+        let end = book.page.end;
+        if book.show(cx, end, true) {
+            self.speak_page(cx);
+        } else {
+            self.aloud = false;
         }
     }
 
@@ -1837,6 +1903,15 @@ impl Screen for ReaderScreen {
     }
 
     fn on_action(&mut self, action: &Id, cx: &mut Cx<'_, '_>) -> Handled {
+        // Any button stops reading aloud, and does nothing else.
+        if self.aloud {
+            self.stop_aloud(cx);
+            return Handled::Yes;
+        }
+        if *action == crate::actions::READ_ALOUD {
+            self.start_aloud(cx);
+            return Handled::Yes;
+        }
         if let Some(selection) = self.selection {
             return self.on_selection(action, selection, cx);
         }
@@ -1938,6 +2013,11 @@ impl Screen for ReaderScreen {
     /// the finger; while text is selected, taps extend the selection or
     /// choose an item of the bar.
     fn on_gesture(&mut self, gesture: Gesture, cx: &mut Cx<'_, '_>) -> Handled {
+        // As does any tap.
+        if self.aloud {
+            self.stop_aloud(cx);
+            return Handled::Yes;
+        }
         if self.linking.is_some() {
             self.set_linking(None, cx);
             return Handled::Yes;
@@ -2035,6 +2115,10 @@ impl Screen for ReaderScreen {
             return;
         };
         let this_book = params.get(params::PATH) == Some(book.path.as_str());
+        if *event == crate::SPOKEN && this_book {
+            self.spoken(params, cx);
+            return;
+        }
         if *event == crate::FOLLOW && this_book {
             let href = params
                 .get(crate::footnote::HREF)

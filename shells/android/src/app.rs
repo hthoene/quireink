@@ -59,6 +59,8 @@ struct Running {
     app: AndroidApp,
     /// Plugins' servers.
     servers: quireink_serve::Servers,
+    /// Reading aloud.
+    speech: crate::speech::Speech,
 }
 
 /// How often the battery and time zone are read again.
@@ -80,10 +82,15 @@ fn android_main(app: AndroidApp) {
     let mut quit = false;
 
     while !quit {
-        let timeout = running
+        let mut timeout = running
             .as_ref()
             .and_then(|r| r.wake_at)
             .map(|at| Duration::from_millis(at.since(now())));
+        // The end of speech is looked for regularly.
+        if running.as_ref().is_some_and(|r| r.speech.active()) {
+            let poll = crate::speech::POLL;
+            timeout = Some(timeout.map_or(poll, |t| t.min(poll)));
+        }
         app.poll_events(timeout, |event| {
             let PollEvent::Main(event) = event else {
                 return;
@@ -193,6 +200,10 @@ fn android_main(app: AndroidApp) {
         if state.kernel.wants_clipboard() {
             let text = crate::clipboard::read(&app);
             let effects = state.kernel.clipboard_text(now(), text);
+            changed |= apply(state, effects);
+        }
+        if let Some((id, spoken)) = state.speech.poll() {
+            let effects = state.kernel.speech_done(now(), id, spoken);
             changed |= apply(state, effects);
         }
         if state.wake_at.is_some_and(|at| at <= now()) {
@@ -317,7 +328,8 @@ fn start_kernel(
     let mut builder = Kernel::builder(device)
         .plugin_dir("plugins")
         .network(true)
-        .system_clipboard(true);
+        .system_clipboard(true)
+        .speech(true);
     builder = match shared {
         Some(shared) => builder
             .storage(removable.into_iter().fold(
@@ -375,6 +387,7 @@ fn start_kernel(
             let waker = app.create_waker();
             quireink_serve::Servers::new(move || waker.wake())
         },
+        speech: crate::speech::Speech::new(app),
     };
     apply(&mut running, effects);
     Some(running)
@@ -426,6 +439,9 @@ fn apply(state: &mut Running, effects: Effects) -> bool {
     }
     for call in state.kernel.take_server_calls() {
         state.servers.apply(call);
+    }
+    for call in state.kernel.take_speech() {
+        state.speech.apply(call);
     }
     state.restart |= effects.restart();
     if let Some((_, mode)) = effects.refresh() {

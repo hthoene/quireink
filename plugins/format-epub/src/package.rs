@@ -331,7 +331,13 @@ pub(crate) fn invalidate(
     chapter_marker: impl Fn(u32) -> String,
 ) {
     let spine = path(cache, "spine.bin");
-    let sections = storage.size(&spine).unwrap_or(0) / 8;
+    let Ok(size) = storage.size(&spine) else {
+        // A cache from before there was a spine file: no telling which of
+        // its files mark chapters, so all go.
+        let _ = storage.remove_dir_all(cache);
+        return;
+    };
+    let sections = size / 8;
     for section in 0..sections as u32 {
         let _ = storage.remove(&chapter_marker(section));
     }

@@ -18,7 +18,7 @@ use quireink_sdk::{
     Registrar, SDK_VERSION, Screen, ScreenSpec, SettingKind, SettingSpec, SettingValue, Version,
 };
 
-use crate::{Kernel, WarningSource};
+use crate::{Kernel, SpeechCall, WarningSource};
 
 const DEVICE: DeviceInfo = DeviceInfo {
     id: "test",
@@ -1570,4 +1570,62 @@ fn banded_frames_match_full_frames() {
         screen(&mut banded, &mut banded_copy)
     );
     assert!(banded.frame().height <= 16);
+}
+
+#[test]
+fn speech_goes_to_the_shell_and_stops_with_its_screen() {
+    let speech = |id: &str| {
+        let mut speech = quireink_sdk::Speech::new("Hello", Id::new_static("ov.reply"));
+        speech.params = quireink_sdk::Params::new().with("id", String::from(id));
+        Command::Speak(speech)
+    };
+    // Without speech, the reply comes at once.
+    let log = log();
+    let mut kernel = Kernel::builder(DEVICE)
+        .plugin(OverlayPlugin { log: log.clone() })
+        .build()
+        .unwrap();
+    kernel.start(Instant(0));
+    assert!(!kernel.shared.env(Instant(0)).speech);
+    kernel.output.commands.push(speech("a"));
+    kernel.run_commands();
+    assert!(kernel.take_speech().is_empty());
+    assert!(log.borrow().contains(&String::from("event ov.reply a")));
+
+    // With it: the shell speaks and says when it is done.
+    let log = self::log();
+    let mut kernel = Kernel::builder(DEVICE)
+        .plugin(OverlayPlugin { log: log.clone() })
+        .speech(true)
+        .build()
+        .unwrap();
+    kernel.start(Instant(0));
+    kernel.output.commands.push(speech("b"));
+    kernel.run_commands();
+    let calls = kernel.take_speech();
+    let [SpeechCall::Say { id, text, rate, .. }] = calls.as_slice() else {
+        panic!("{calls:?}");
+    };
+    assert_eq!((text.as_str(), *rate), ("Hello", 100));
+    assert!(kernel.speaking());
+    assert!(!log.borrow().contains(&String::from("event ov.reply b")));
+    kernel.speech_done(Instant(5), *id, true);
+    assert!(!kernel.speaking());
+    assert!(log.borrow().contains(&String::from("event ov.reply b")));
+
+    // Started over the menu, it stops when the menu closes.
+    kernel.output.commands.push(Command::open_slot(slots::MENU));
+    kernel.run_commands();
+    kernel.output.commands.push(speech("c"));
+    kernel.run_commands();
+    let Some(SpeechCall::Say { id, .. }) = kernel.take_speech().pop() else {
+        panic!("no speech");
+    };
+    kernel.output.commands.push(Command::Back);
+    kernel.run_commands();
+    assert_eq!(kernel.take_speech(), [SpeechCall::Stop]);
+    assert!(!kernel.speaking());
+    // An end reported late is not passed on.
+    kernel.speech_done(Instant(9), id, true);
+    assert!(!log.borrow().contains(&String::from("event ov.reply c")));
 }

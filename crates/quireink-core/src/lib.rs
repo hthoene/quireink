@@ -75,7 +75,7 @@ use crate::core_plugin::{CORE, CorePlugin};
 use crate::input::{Recognized, Recognizer, Thresholds};
 use crate::keymap::{InputKey, Keymap, Origin, Zone};
 pub use crate::net::{
-    HttpCall, HttpResponse, MAX_FILE, MAX_RESPONSE, ServedFile, ServerCall, ServerEvent,
+    HttpCall, HttpResponse, MAX_FILE, MAX_RESPONSE, ServedFile, ServerCall, ServerEvent, SpeechCall,
 };
 use crate::refresh::RefreshPolicy;
 use crate::registry::{PluginRegistrar, Registry, Staging};
@@ -199,6 +199,7 @@ pub struct KernelBuilder {
     glyph_cache: usize,
     network: bool,
     system_clipboard: bool,
+    speech: bool,
     frame_rows: Option<u16>,
     storage: Option<Box<dyn Storage>>,
     setting_defaults: Vec<(String, String)>,
@@ -288,6 +289,13 @@ impl KernelBuilder {
         self
     }
 
+    /// The shell speaks text aloud (see [`Kernel::take_speech`]); without,
+    /// plugins' speech fails at once.
+    pub fn speech(mut self, available: bool) -> Self {
+        self.speech = available;
+        self
+    }
+
     /// Memory for glyphs rasterized at runtime (default 32 KiB). Bitmap font
     /// packs do not use it.
     pub fn glyph_cache(mut self, bytes: usize) -> Self {
@@ -327,6 +335,7 @@ impl KernelBuilder {
                 network: self.network,
                 clipboard: String::new(),
                 system_clipboard: false,
+                speech: self.speech,
                 slots: Vec::new(),
                 font_dirs: Vec::new(),
                 storage: self.storage.unwrap_or_else(|| Box::new(NoStorage)),
@@ -359,6 +368,9 @@ impl KernelBuilder {
             request_bodies: Vec::new(),
             incoming: Vec::new(),
             reads_clipboard: self.system_clipboard,
+            speech_calls: Vec::new(),
+            speaking: None,
+            next_speech: 0,
             awaiting: Vec::new(),
             next_request: 0,
             plugin_defaults: Vec::new(),
@@ -565,6 +577,13 @@ pub struct Kernel {
     /// The shell reads the system's clipboard (see
     /// [`KernelBuilder::system_clipboard`]).
     reads_clipboard: bool,
+    /// What the shell is to do for speech.
+    speech_calls: Vec<SpeechCall>,
+    /// The text being spoken: number for the shell, reply event and
+    /// parameters, and how many screens were open when it started (it
+    /// stops once fewer are).
+    speaking: Option<(u32, Id, Params, usize)>,
+    next_speech: u32,
     /// Requests made and not answered yet: id, reply event, parameters
     /// and where to save the body.
     awaiting: Vec<(u32, Id, Params, Option<String>)>,
@@ -599,6 +618,7 @@ impl Kernel {
             glyph_cache: DEFAULT_GLYPH_CACHE,
             network: false,
             system_clipboard: false,
+            speech: false,
             frame_rows: None,
             storage: None,
             setting_defaults: Vec::new(),
@@ -799,6 +819,68 @@ impl Kernel {
             self.reply_clipboard(reply, params);
         }
         self.finish()
+    }
+
+    /// What to do for speech: say a text, stop. Check after every kernel
+    /// call; report the end of each text with [`Kernel::speech_done`].
+    pub fn take_speech(&mut self) -> Vec<SpeechCall> {
+        mem::take(&mut self.speech_calls)
+    }
+
+    /// Whether a text is being spoken, e.g. to keep watching for its end.
+    pub fn speaking(&self) -> bool {
+        self.speaking.is_some()
+    }
+
+    /// Text `id` of a [`SpeechCall::Say`] was spoken (`spoken`), or could
+    /// not be.
+    pub fn speech_done(&mut self, now: Instant, id: u32, spoken: bool) -> Effects {
+        self.now = now;
+        if self.speaking.as_ref().is_some_and(|(at, ..)| *at == id)
+            && let Some((_, reply, params, _)) = self.speaking.take()
+        {
+            self.reply_speech(reply, params, spoken);
+        }
+        self.finish()
+    }
+
+    /// Emits the reply to a [`Command::Speak`].
+    fn reply_speech(&mut self, reply: Id, params: Params, spoken: bool) {
+        let params = if spoken {
+            params
+        } else {
+            params.with(quireink_sdk::speech_params::FAILED, "1")
+        };
+        self.output.commands.push(Command::Emit(reply, params));
+    }
+
+    /// Starts speaking for a plugin, or tells it that it cannot.
+    fn speak(&mut self, speech: quireink_sdk::Speech) {
+        if !self.shared.speech {
+            return self.reply_speech(speech.reply, speech.params, false);
+        }
+        let id = self.next_speech;
+        self.next_speech = self.next_speech.wrapping_add(1);
+        self.speaking = Some((id, speech.reply, speech.params, self.stack.len()));
+        self.speech_calls.push(SpeechCall::Say {
+            id,
+            text: speech.text,
+            language: speech.language,
+            rate: speech.rate,
+        });
+    }
+
+    /// Stops what closed screens started: servers, speech.
+    fn stop_for_closed_screens(&mut self) {
+        self.stop_servers_of_closed_screens();
+        if self
+            .speaking
+            .as_ref()
+            .is_some_and(|(.., screens)| *screens > self.stack.len())
+        {
+            self.speaking = None;
+            self.speech_calls.push(SpeechCall::Stop);
+        }
     }
 
     /// Stops server `at` and tells its plugin.
@@ -1685,7 +1767,7 @@ impl Kernel {
                     // The slot for something else (e.g. another book):
                     // opened anew in place of the old screen.
                     self.stack.truncate(index);
-                    self.stop_servers_of_closed_screens();
+                    self.stop_for_closed_screens();
                 }
                 match self.registry.resolve_slot(slot.as_str()).cloned() {
                     Some(screen) => self.open(screen, Some(slot), &params),
@@ -1720,6 +1802,12 @@ impl Kernel {
                 self.clipboard_reads.push((reply, params));
             }
             Command::ReadClipboard(reply, params) => self.reply_clipboard(reply, params),
+            Command::Speak(speech) => self.speak(speech),
+            Command::StopSpeaking => {
+                if self.speaking.take().is_some() {
+                    self.speech_calls.push(SpeechCall::Stop);
+                }
+            }
             Command::Serve {
                 server,
                 port,
@@ -1867,7 +1955,7 @@ impl Kernel {
             region = Some(region.map_or(r, |u: Rect| u.union(&r)));
         }
         self.stack.truncate(index + 1);
-        self.stop_servers_of_closed_screens();
+        self.stop_for_closed_screens();
         if let Some(region) = region {
             self.screen_changed(region, overlays_only);
         }
@@ -2353,6 +2441,8 @@ struct Shared {
     /// The system's clipboard has text (see
     /// [`Kernel::set_clipboard_available`]).
     system_clipboard: bool,
+    /// The shell speaks (see [`KernelBuilder::speech`]).
+    speech: bool,
     /// Slots some screen is bound to.
     slots: Vec<Id>,
     /// Folders fonts are read from.
@@ -2381,6 +2471,7 @@ impl Shared {
             text_filters: &self.text_filters,
             network: self.network,
             clipboard: self.system_clipboard || !self.clipboard.is_empty(),
+            speech: self.speech,
             slots: &self.slots,
             font_dirs: &self.font_dirs,
             storage: self.storage.as_ref(),

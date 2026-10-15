@@ -19,6 +19,7 @@
 
 extern crate alloc;
 
+mod aloud;
 mod annotations;
 mod footnote;
 mod index;
@@ -80,6 +81,8 @@ pub const MORE_MENU: Id = Id::new_static("reader.more");
 pub const GOTO: Id = Id::new_static("reader.goto");
 /// Follows a link of the open book: parameters `path` and `href`.
 pub const FOLLOW: Id = Id::new_static("reader.follow");
+/// The reply when a page has been read aloud; parameter `path`.
+const SPOKEN: Id = Id::new_static("reader.spoken");
 /// A footnote over the page (see `footnote`).
 pub const FOOTNOTE_SCREEN: Id = Id::new_static("reader.footnote");
 
@@ -113,6 +116,8 @@ pub mod settings {
     pub const PUBLISHER_STYLES: Id = Id::new_static("reader.publisher-styles");
     /// A tap on the top right corner sets or removes a bookmark.
     pub const CORNER_BOOKMARK: Id = Id::new_static("reader.corner-bookmark");
+    /// How fast books are read aloud, in percent of the voice's speed.
+    pub const SPEECH_RATE: Id = Id::new_static("reader.speech-rate");
 }
 
 /// The reader's menu (`core.menu` on the reader screen). Any plugin can
@@ -149,6 +154,9 @@ pub mod actions {
     pub const QUICK_SETTINGS: Id = Id::new_static("reader.quick-settings");
     /// Goes to a page number (asks for it on the keyboard).
     pub const GO_TO_PAGE: Id = Id::new_static("reader.go-to-page");
+    /// Reads the book aloud from the page shown, turning the pages, until
+    /// a tap or a button (where the device can speak).
+    pub const READ_ALOUD: Id = Id::new_static("reader.read-aloud");
     /// Items of the selection menu that the reader handles itself.
     pub const LOOK_UP: Id = Id::new_static("reader.selection.look-up");
     /// Highlights the selected text, or removes highlights in it.
@@ -218,6 +226,7 @@ impl Plugin for Reader {
         for (id, title) in [
             (actions::SEARCH, "reader.search"),
             (actions::GO_TO_PAGE, "reader.go-to-page"),
+            (actions::READ_ALOUD, "reader.read-aloud"),
             (actions::SELECT, "reader.select"),
             (actions::LINKS, "reader.links"),
             (actions::NEXT_STATUS_LINE, "reader.next-status-line"),
@@ -354,6 +363,17 @@ impl Plugin for Reader {
             )
             .group(groups::CONTROLS)
             .description("reader.setting.corner-bookmark.help"),
+            SettingSpec::new(
+                settings::SPEECH_RATE,
+                "reader.setting.speech-rate",
+                SettingKind::Int { min: 50, max: 300 },
+                SettingValue::Int(100),
+            )
+            .group(groups::READING)
+            .unit("core.unit.percent")
+            .step(10)
+            .section(setting_sections::BEHAVIOUR)
+            .description("reader.setting.speech-rate.help"),
         ] {
             r.add_setting(setting)?;
         }
@@ -444,6 +464,7 @@ impl Plugin for Reader {
             (LAYOUT_MENU, settings::HYPHENATE, 50),
             (LAYOUT_MENU, settings::PUBLISHER_STYLES, 60),
             (MORE_MENU, actions::TOGGLE_BOOKMARK, 10),
+            (MORE_MENU, actions::READ_ALOUD, 15),
             (MORE_MENU, actions::SELECT, 20),
             (MORE_MENU, actions::LINKS, 25),
             (MORE_MENU, core_actions::LIBRARY, 30),
@@ -463,6 +484,7 @@ impl Plugin for Reader {
             (MORE_MENU, "dots"),
             (actions::TOGGLE_BOOKMARK, "bookmark"),
             (actions::SELECT, "highlight"),
+            (actions::READ_ALOUD, "volume"),
         ] {
             r.add_icon(item, Cow::Borrowed(icon))?;
         }

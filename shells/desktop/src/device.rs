@@ -2,7 +2,7 @@
 
 use std::time::Instant as StdInstant;
 
-use quireink_core::{Effects, Kernel, KernelError};
+use quireink_core::{Effects, Kernel, KernelError, SpeechCall};
 use quireink_graphics::Framebuffer;
 use quireink_platform::{Battery, InputEvent, Instant, SystemStatus, WallClock};
 
@@ -32,6 +32,8 @@ pub struct Device {
     pub http: crate::http::Http,
     /// Plugins' servers.
     pub servers: quireink_serve::Servers,
+    /// The text being spoken (emulated): its number and when it ends.
+    speech: Option<(u32, Instant)>,
 }
 
 /// Either real time (interactive) or simulated time (headless, tests).
@@ -64,6 +66,7 @@ impl Device {
             wake_at: None,
             http: crate::http::Http::new(),
             servers: quireink_serve::Servers::new(|| {}),
+            speech: None,
             clock: if simulated_time {
                 Clock::Simulated(0)
             } else {
@@ -157,11 +160,28 @@ impl Device {
             .pump(|path, at, buffer| budget::track(|| kernel.read_served(path, at, buffer).ok()));
     }
 
+    /// When something is due next: a wake-up the kernel asked for, the end
+    /// of speech.
+    pub fn next_wake(&self) -> Option<Instant> {
+        let speech = self.speech.map(|(_, end)| end);
+        match (self.wake_at, speech) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        }
+    }
+
     /// Ticks the kernel if a requested wake-up is due.
     pub fn tick_if_due(&mut self) {
         self.poll_http(None);
         self.poll_servers();
         let now = self.now();
+        if let Some((id, end)) = self.speech
+            && end <= now
+        {
+            self.speech = None;
+            let effects = budget::track(|| self.kernel.speech_done(now, id, true));
+            self.execute(effects);
+        }
         if self.wake_at.is_some_and(|at| at <= now) {
             let effects = budget::track(|| self.kernel.tick(now));
             self.execute(effects);
@@ -189,7 +209,33 @@ impl Device {
         for call in self.kernel.take_server_calls() {
             self.servers.apply(call);
         }
+        for call in self.kernel.take_speech() {
+            self.speak(call);
+        }
         self.report_warnings();
+    }
+
+    /// Speech, emulated: the text is logged and takes as long as it would
+    /// to speak, at about 160 words a minute.
+    fn speak(&mut self, call: SpeechCall) {
+        match call {
+            SpeechCall::Say {
+                id,
+                text,
+                language,
+                rate,
+            } => {
+                let words = text.split_whitespace().count() as u64;
+                let millis = words * 375 * 100 / u64::from(rate.max(1));
+                let start: String = text.chars().take(60).collect();
+                eprintln!("speech ({language}, {rate} %, {millis} ms): {start}");
+                self.speech = Some((id, self.now().add_millis(millis)));
+            }
+            SpeechCall::Stop => {
+                eprintln!("speech stopped");
+                self.speech = None;
+            }
+        }
     }
 
     /// Builds a new kernel, as the device would after a reboot.
@@ -245,7 +291,8 @@ fn build_kernel(
         let mut builder = Kernel::builder(profile.device)
             .storage(storage)
             .glyph_cache(profile.glyph_cache)
-            .network(true);
+            .network(true)
+            .speech(profile.speech);
         // Scalable fonts only where the emulated device renders them.
         if !profile.font_packs {
             builder = builder.font_dir("fonts");

@@ -13,6 +13,13 @@
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
 
+    <!-- Reading aloud: the system's speech engines must be visible. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+    </queries>
+
     <!-- usesCleartextTraffic: self-hosted sync servers often answer over
          plain http in the home network. -->
     <application

@@ -11,19 +11,9 @@ use jni::objects::{JObject, JString, JValue};
 use crate::access::with_activity;
 
 /// The clipboard manager. Its first use creates a `Handler`, which needs
-/// a Java `Looper` on this (native) thread; one is prepared, never run.
+/// a Java `Looper` on this (native) thread.
 fn manager<'a>(env: &mut JNIEnv<'a>, activity: &JObject<'_>) -> jni::errors::Result<JObject<'a>> {
-    let looper = env
-        .call_static_method(
-            "android/os/Looper",
-            "myLooper",
-            "()Landroid/os/Looper;",
-            &[],
-        )?
-        .l()?;
-    if looper.is_null() {
-        env.call_static_method("android/os/Looper", "prepare", "()V", &[])?;
-    }
+    crate::access::prepare_looper(env)?;
     let name = env.new_string("clipboard")?;
     env.call_method(
         activity,

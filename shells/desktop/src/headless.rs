@@ -134,7 +134,7 @@ fn hold(device: &mut Device, millis: u64) {
     let end = device.now().add_millis(millis);
     loop {
         let now = device.now();
-        let next = device.wake_at.filter(|&at| at < end).unwrap_or(end);
+        let next = device.next_wake().filter(|&at| at < end).unwrap_or(end);
         // At least 1 ms per round, so "as soon as possible" requests cannot
         // stall simulated time.
         device.advance(next.since(now).max(1));

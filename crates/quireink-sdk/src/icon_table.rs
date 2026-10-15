@@ -85,6 +85,7 @@ pub(crate) const ICONS: &[(&str, char)] = &[
     ("upload", '\u{eb47}'),
     ("user", '\u{eb4d}'),
     ("vocabulary", '\u{ef1e}'),
+    ("volume", '\u{eb51}'),
     ("wifi", '\u{eb52}'),
     ("world", '\u{eb54}'),
     ("x", '\u{eb55}'),

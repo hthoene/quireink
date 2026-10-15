@@ -49,6 +49,9 @@ pub struct Env<'a> {
     /// the system has a clipboard, in another app; read it with
     /// [`Command::ReadClipboard`](crate::Command::ReadClipboard).
     pub clipboard: bool,
+    /// Whether the device can speak text aloud
+    /// ([`Command::Speak`](crate::Command::Speak)).
+    pub speech: bool,
     /// The slots some screen is bound to (see [`Env::has_slot`]).
     pub slots: &'a [crate::Id],
     /// The folders reading fonts are found in at start-up, the first one

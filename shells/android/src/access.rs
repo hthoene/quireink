@@ -41,6 +41,23 @@ pub(crate) fn with_activity<T>(
     result.ok()
 }
 
+/// Prepares a Java `Looper` on this (native) thread, never run: some
+/// system services create a `Handler` on first use, which needs one.
+pub(crate) fn prepare_looper(env: &mut JNIEnv<'_>) -> jni::errors::Result<()> {
+    let looper = env
+        .call_static_method(
+            "android/os/Looper",
+            "myLooper",
+            "()Landroid/os/Looper;",
+            &[],
+        )?
+        .l()?;
+    if looper.is_null() {
+        env.call_static_method("android/os/Looper", "prepare", "()V", &[])?;
+    }
+    Ok(())
+}
+
 fn sdk_int(env: &mut JNIEnv<'_>) -> jni::errors::Result<i32> {
     env.get_static_field("android/os/Build$VERSION", "SDK_INT", "I")?
         .i()

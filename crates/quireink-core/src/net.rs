@@ -102,3 +102,20 @@ pub enum ServerEvent {
 pub const MAX_RESPONSE: usize = 1 << 20;
 /// Longest response body saved to a file, and longest file sent.
 pub const MAX_FILE: usize = 64 << 20;
+
+/// What a shell does for speech (see `Kernel::take_speech`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SpeechCall {
+    /// Speak `text` instead of anything spoken now, and report with
+    /// `Kernel::speech_done` and `id` when it is done.
+    Say {
+        id: u32,
+        text: String,
+        /// E.g. `de` or `en-GB`; empty for the system's language.
+        language: String,
+        /// In percent of the normal speed.
+        rate: u16,
+    },
+    /// Stop speaking.
+    Stop,
+}
