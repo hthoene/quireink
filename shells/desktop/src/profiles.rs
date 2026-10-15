@@ -25,6 +25,10 @@ pub struct Profile {
     /// Draw frames in bands of this many rows (see
     /// `KernelBuilder::frame_rows`); `None` keeps the whole frame in RAM.
     pub frame_rows: Option<u16>,
+    /// Rows passed from the frame start and end at multiples of this (see
+    /// `KernelBuilder::row_align`): 8 where the panel controller takes 8
+    /// of them in a byte.
+    pub row_align: u16,
     /// Device-specific setting defaults, as `(id, value)`.
     pub settings: &'static [(&'static str, &'static str)],
     /// The device speaks text aloud (emulated: the text is logged and
@@ -75,7 +79,9 @@ pub const PROFILES: &[Profile] = &[
         glyph_cache: 0,
         font_packs: true,
         // 100 of 800 rows: 11.7 KiB instead of 94 KiB, eight bands a frame.
-        frame_rows: Some(100),
+        // The controller takes 8 rows (turned) in a byte.
+        frame_rows: Some(96),
+        row_align: 8,
         // A 4.3" screen: smaller text, so menus and pages hold enough.
         settings: &[("core.ui-size", "9"), ("reader.font-size", "9")],
         speech: false,
@@ -114,7 +120,9 @@ pub const PROFILES: &[Profile] = &[
         heap_budget: Some(256 * KIB),
         glyph_cache: 0,
         font_packs: true,
-        frame_rows: Some(100),
+        // The controller takes 8 rows (turned) in a byte.
+        frame_rows: Some(96),
+        row_align: 8,
         // A 4.3" screen: smaller text, so menus and pages hold enough.
         settings: &[("core.ui-size", "9"), ("reader.font-size", "9")],
         speech: false,
@@ -146,6 +154,7 @@ pub const PROFILES: &[Profile] = &[
         glyph_cache: 256 * KIB,
         font_packs: false,
         frame_rows: None,
+        row_align: 1,
         settings: &[],
         speech: true,
         sleep: false,
@@ -179,6 +188,7 @@ pub const PROFILES: &[Profile] = &[
         glyph_cache: 256 * KIB,
         font_packs: false,
         frame_rows: None,
+        row_align: 1,
         settings: &[],
         speech: false,
         sleep: true,
@@ -209,6 +219,7 @@ pub const PROFILES: &[Profile] = &[
         glyph_cache: 256 * KIB,
         font_packs: false,
         frame_rows: None,
+        row_align: 1,
         settings: &[],
         speech: false,
         sleep: true,
@@ -239,6 +250,7 @@ pub const PROFILES: &[Profile] = &[
         glyph_cache: 256 * KIB,
         font_packs: false,
         frame_rows: None,
+        row_align: 1,
         settings: &[],
         speech: false,
         sleep: true,
@@ -269,6 +281,7 @@ pub const PROFILES: &[Profile] = &[
         glyph_cache: 64 * KIB,
         font_packs: false,
         frame_rows: None,
+        row_align: 1,
         // Only two buttons: everything works with forward and back.
         settings: &[("core.keymap-preset", "core.two-buttons")],
         speech: false,

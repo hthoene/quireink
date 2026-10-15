@@ -1616,6 +1616,47 @@ fn banded_frames_match_full_frames() {
 }
 
 #[test]
+fn bands_pass_whole_aligned_rows_and_again() {
+    let mut kernel = Kernel::builder(DEVICE)
+        .plugin(OverlayPlugin { log: log() })
+        .frame_rows(16)
+        .row_align(8)
+        .build()
+        .unwrap();
+    let passed = |kernel: &mut Kernel, again: bool| {
+        let mut parts = Vec::new();
+        let mut out = |top: u16, rows: quireink_platform::FrameView<'_>| {
+            parts.push((top, rows.height, rows.width))
+        };
+        if again {
+            kernel.rerender(&mut out);
+        } else {
+            kernel.render(&mut out);
+        }
+        parts
+    };
+    kernel.start(Instant(0));
+    passed(&mut kernel, false);
+    // The overlay covers rows 45 to 90: passed from row 40, in bands of 16.
+    for (at, state) in [(100, ButtonState::Pressed), (150, ButtonState::Released)] {
+        kernel.handle(
+            Instant(at),
+            InputEvent::Button {
+                name: "menu",
+                state,
+            },
+        );
+    }
+    let parts = passed(&mut kernel, false);
+    assert_eq!(
+        parts,
+        [(40, 8, 90), (48, 16, 90), (64, 16, 90), (80, 10, 90)]
+    );
+    // Drawn again the same, e.g. for the controller's memory of the frame shown.
+    assert_eq!(passed(&mut kernel, true), parts);
+}
+
+#[test]
 fn the_power_button_puts_the_device_to_sleep_where_the_shell_can() {
     // Where the system sleeps on its own (Android), nothing happens.
     let mut kernel = Kernel::builder(DEVICE).build().unwrap();

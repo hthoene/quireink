@@ -379,6 +379,7 @@ fn build_kernel(
         if let Some(rows) = profile.frame_rows {
             builder = builder.frame_rows(rows);
         }
+        builder = builder.row_align(profile.row_align);
         for (id, value) in profile.settings {
             builder = builder.setting_default(id, value);
         }

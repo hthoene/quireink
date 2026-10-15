@@ -214,6 +214,7 @@ pub struct KernelBuilder {
     sleep: bool,
     rotation: bool,
     frame_rows: Option<u16>,
+    row_align: u16,
     storage: Option<Box<dyn Storage>>,
     setting_defaults: Vec<(String, String)>,
     plugin_dirs: Vec<String>,
@@ -340,6 +341,15 @@ impl KernelBuilder {
         self
     }
 
+    /// Passes frames to [`Kernel::render`] in rows starting and ending at
+    /// multiples of `rows`, e.g. 8 where the panel controller takes 8 of
+    /// them in a byte (the X4's, turned). Frame bands should be a multiple
+    /// of it.
+    pub fn row_align(mut self, rows: u16) -> Self {
+        self.row_align = rows.max(1);
+        self
+    }
+
     pub fn build(self) -> Result<Kernel, KernelError> {
         let display = self.device.display;
         let rows = self.frame_rows.unwrap_or(display.height);
@@ -373,6 +383,8 @@ impl KernelBuilder {
             },
             pending: None,
             unrendered: None,
+            rendered: None,
+            row_align: self.row_align,
             framebuffer,
             registry: Registry::default(),
             keymap_sources: Vec::new(),
@@ -593,6 +605,10 @@ pub struct Kernel {
     pending: Option<Rect>,
     /// What changed but has not been passed to [`Kernel::render`] yet.
     unrendered: Option<Rect>,
+    /// What [`Kernel::render`] passed last, for [`Kernel::rerender`].
+    rendered: Option<Rect>,
+    /// See [`KernelBuilder::row_align`].
+    row_align: u16,
     recognizer: Recognizer,
     /// Pointer ids captured by the active screen.
     captured: Vec<u8>,
@@ -676,6 +692,7 @@ impl Kernel {
             sleep: false,
             rotation: false,
             frame_rows: None,
+            row_align: 1,
             storage: None,
             setting_defaults: Vec::new(),
             plugin_dirs: Vec::new(),
@@ -826,8 +843,27 @@ impl Kernel {
         let Some(region) = self.unrendered.take() else {
             return;
         };
-        // A screenshot is written as the frame is drawn, a band at a time.
         let bounds = self.framebuffer.bounds();
+        // Rows are passed whole: drawn in bands, the rest of a row would be
+        // left from another band. And aligned as the shell asks.
+        let rows = self.framebuffer.rows();
+        let region = if rows < bounds.height {
+            Rect::new(0, region.y, bounds.width, region.height)
+        } else {
+            region
+        };
+        let align = self.row_align;
+        let first = region.y - region.y % align;
+        let last = (region.bottom().div_ceil(u32::from(align)) * u32::from(align))
+            .min(u32::from(bounds.height));
+        let region = Rect::new(
+            region.x,
+            first,
+            region.width,
+            (last - u32::from(first)) as u16,
+        );
+        self.rendered = Some(region);
+        // A screenshot is written as the frame is drawn, a band at a time.
         let shot = self.screenshot.take().filter(|_| region == bounds);
         let mut writer = shot.as_deref().and_then(|path| {
             quireink_sdk::image::PngWriter::new(
@@ -839,7 +875,6 @@ impl Kernel {
             .ok()
         });
         let mut gray = Vec::new();
-        let rows = self.framebuffer.rows();
         let mut top = region.y - region.y % rows;
         while u32::from(top) < region.bottom() {
             self.framebuffer.set_top(top);
@@ -880,6 +915,19 @@ impl Kernel {
                 .translator
                 .format(key, &[("path", quireink_sdk::Arg::Str(&path))]);
             self.output.commands.push(Command::Notify(text));
+        }
+    }
+
+    /// Draws again what [`Kernel::render`] drew last, passing it the same
+    /// way: for panel controllers that compare a new frame with the one
+    /// shown (the X4's), whose memory for the shown one is written after
+    /// a refresh, so the shell keeps no frame of its own. Call it right
+    /// after the refresh, before anything else changes the screen; with
+    /// changes not rendered yet it does nothing.
+    pub fn rerender(&mut self, out: &mut dyn FnMut(u16, FrameView<'_>)) {
+        if self.unrendered.is_none() {
+            self.unrendered = self.rendered;
+            self.render(out);
         }
     }
 
