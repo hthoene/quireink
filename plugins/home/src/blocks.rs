@@ -407,7 +407,10 @@ fn tool_items(env: &Env<'_>) -> Vec<(Id, String)> {
     let mut items: Vec<(Id, String)> = Vec::new();
     for menu in [ACTIONS, menus::TOOLS] {
         for item in env.menus.items(menu.as_str()) {
-            if !item.section && !items.iter().any(|(id, _)| id == item.id) {
+            // A screenshot from here shows only the home screen: it is
+            // for the tools opened over a book (unless listed above).
+            let here_useless = menu == menus::TOOLS && *item.id == actions::SCREENSHOT;
+            if !item.section && !here_useless && !items.iter().any(|(id, _)| id == item.id) {
                 items.push((item.id.clone(), item.title.to_string()));
             }
         }
