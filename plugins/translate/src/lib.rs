@@ -270,10 +270,8 @@ impl Panel {
         cx.command(Command::OpenSlot(
             slots::KEYBOARD,
             Params::new()
-                .with(
-                    params::TITLE,
-                    env.i18n.tr("translate.setting.key").to_string(),
-                )
+                .with(params::TITLE, env.i18n.tr("translate.key").to_string())
+                .with(params::MODE, "password")
                 .with(params::REPLY, KEY_ENTERED.as_str()),
         ));
     }

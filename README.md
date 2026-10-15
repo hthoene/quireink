@@ -141,7 +141,7 @@ cargo run -p quireink-emulator -- --headless --profile boox-go-7 --set core.lang
 | `crates/quireink-core` | The kernel: plugin host, registries, input routing, refresh policy |
 | `crates/quireink-app` | The standard app: the first-party plugin set shells install |
 | `crates/quireink-fs` | Storage in a host directory, for shells with an operating system |
-| `plugins/` | First-party plugins: home screen, reader, library, file manager, menu, settings, plugin manager, menu editor, keyboard, profiles, dictionary, vocabulary, translation, Wikipedia, news feeds, sleep screen, reading statistics, progress sync, catalogs (OPDS), browser, Wi-Fi transfer, formats (EPUB, FB2, CBZ, Markdown, TXT, XTC), hyphenation, reading aids, default fonts, diagnostics |
+| `plugins/` | First-party plugins: home screen, reader, library, file manager, menu, settings, plugin manager, menu editor, keyboard, profiles, dictionary, vocabulary, translation, Readwise, Wikipedia, news feeds, sleep screen, reading statistics, progress sync, catalogs (OPDS), browser, Wi-Fi transfer, formats (EPUB, FB2, CBZ, Markdown, TXT, XTC), hyphenation, reading aids, default fonts, diagnostics |
 | `tools/fontgen` | Converts fonts into bitmap font packs for small devices |
 | `shells/desktop` | Desktop emulator with device profiles |
 | `shells/android` | Android app for e-readers such as Boox ([build and install](shells/android/README.md)) |

@@ -25,7 +25,8 @@ use crate::GOTO;
 use crate::toc::locator_params;
 
 /// Emitted after the notes of a book were exported: parameters `path`
-/// (the Markdown file) and `title` (the book's).
+/// (the Markdown file) and `title` (the book's). Plugins read the file
+/// (e.g. `readwise`), so its form (see [`markdown`]) stays as it is.
 pub const EXPORTED: Id = Id::new_static("reader.notes-exported");
 /// Where exported notes go, beside the library folder.
 const NOTES: &str = "Notes";
