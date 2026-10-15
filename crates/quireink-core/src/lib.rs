@@ -379,6 +379,7 @@ impl KernelBuilder {
             warnings: Vec::new(),
             restart: false,
             sleep: false,
+            last_activity: Instant(0),
             scope: None,
             requests: Vec::new(),
             copied: None,
@@ -581,6 +582,9 @@ pub struct Kernel {
     restart: bool,
     /// Sleep was requested (see [`Command::Sleep`]).
     sleep: bool,
+    /// When the device was last used (input, a page turned), for sleeping
+    /// by itself ([`settings::SLEEP_AFTER`](core_settings::SLEEP_AFTER)).
+    last_activity: Instant,
     /// The active settings scope: its file and the screen that set it.
     scope: Option<(String, Option<usize>)>,
     /// HTTP requests for the shell to make.
@@ -658,6 +662,7 @@ impl Kernel {
     /// building.
     pub fn start(&mut self, now: Instant) -> Effects {
         self.now = now;
+        self.last_activity = now;
         self.output.commands.push(Command::open_slot(slots::HOME));
         self.output
             .commands
@@ -668,6 +673,7 @@ impl Kernel {
     /// Handles an input event.
     pub fn handle(&mut self, now: Instant, event: InputEvent) -> Effects {
         self.now = now;
+        self.last_activity = now;
         match event {
             InputEvent::Button { name, state } => {
                 if let Some(recognized) = self.recognizer.button(name, state, now) {
@@ -703,9 +709,28 @@ impl Kernel {
         self.finish()
     }
 
+    /// When the device is to go to sleep by itself, where it does.
+    fn sleep_due(&self) -> Option<Instant> {
+        let minutes = self
+            .shared
+            .settings
+            .int(core_settings::SLEEP_AFTER.as_str());
+        (self.shared.sleep && minutes > 0)
+            .then(|| self.last_activity.add_millis(minutes as u64 * 60_000))
+    }
+
     /// Advances time, e.g. when a requested [`Effect::WakeAt`] is due.
     pub fn tick(&mut self, now: Instant) -> Effects {
         self.now = now;
+        if self.sleep_due().is_some_and(|at| at <= now) {
+            self.last_activity = now;
+            // Busy: reading aloud, downloading, serving. Else asleep.
+            if self.speaking.is_empty() && self.awaiting.is_empty() && self.servers.is_empty() {
+                self.output
+                    .commands
+                    .push(Command::RunAction(quireink_sdk::builtin::actions::SLEEP));
+            }
+        }
         let thresholds = self.thresholds();
         for recognized in self.recognizer.tick(now, &thresholds) {
             self.recognized(recognized);
@@ -1231,6 +1256,7 @@ impl Kernel {
     /// Back from [`Kernel::suspend`].
     pub fn resume(&mut self, now: Instant) -> Effects {
         self.now = now;
+        self.last_activity = now;
         self.output
             .commands
             .push(Command::Emit(events::RESUME, Params::new()));
@@ -1759,10 +1785,16 @@ impl Kernel {
         let input = self.recognizer.next_deadline(&self.thresholds());
         let notice = self.notice.as_ref().map(|(_, until)| *until);
         let scheduled = self.scheduled.iter().map(|(at, ..)| *at).min();
-        effects.wake_at = [input, self.screen_timer, notice, scheduled]
-            .into_iter()
-            .flatten()
-            .min();
+        effects.wake_at = [
+            input,
+            self.screen_timer,
+            notice,
+            scheduled,
+            self.sleep_due(),
+        ]
+        .into_iter()
+        .flatten()
+        .min();
         effects
     }
 
@@ -1815,6 +1847,10 @@ impl Kernel {
             }
             Command::OpenScreen(screen, params) => self.open(screen, None, &params),
             Command::Emit(event, params) => {
+                // A page turned, also by itself, is use.
+                if event == events::PAGE_TURNED {
+                    self.last_activity = self.now;
+                }
                 let env = self.shared.env(self.now);
                 for (_, handler) in self.subscriptions.iter().filter(|(id, _)| *id == event) {
                     handler(&env, &params, &mut self.output.commands);

@@ -1588,6 +1588,30 @@ fn the_power_button_puts_the_device_to_sleep_where_the_shell_can() {
 }
 
 #[test]
+fn the_device_sleeps_by_itself_after_a_while_unused() {
+    let mut kernel = Kernel::builder(DEVICE)
+        .sleep(true)
+        .setting_default("core.sleep-after", "1")
+        .build()
+        .unwrap();
+    let effects = kernel.start(Instant(0));
+    // A wake-up is asked for when the minute is over.
+    assert_eq!(effects.wake_at(), Some(Instant(60_000)));
+    // Use puts it off.
+    press(&mut kernel, 30_000, "confirm");
+    assert!(!kernel.tick(Instant(60_000)).sleep());
+    assert!(kernel.tick(Instant(90_100)).sleep());
+    // Never, where the setting says so.
+    let mut kernel = Kernel::builder(DEVICE)
+        .sleep(true)
+        .setting_default("core.sleep-after", "0")
+        .build()
+        .unwrap();
+    assert_eq!(kernel.start(Instant(0)).wake_at(), None);
+    assert!(!kernel.tick(Instant(10_000_000)).sleep());
+}
+
+#[test]
 fn speech_goes_to_the_shell_and_stops_with_its_screen() {
     let speech = |id: &str| {
         let mut speech = quireink_sdk::Speech::new("Hello", Id::new_static("ov.reply"));

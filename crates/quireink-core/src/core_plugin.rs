@@ -353,6 +353,19 @@ impl Plugin for CorePlugin {
         )?;
         r.add_setting(
             SettingSpec::new(
+                settings::SLEEP_AFTER,
+                "core.setting.sleep-after",
+                SettingKind::Int { min: 0, max: 120 },
+                SettingValue::Int(10),
+            )
+            .group(groups::SYSTEM)
+            .unit("core.unit.minutes")
+            .step(5)
+            .description("core.setting.sleep-after.help"),
+        )?;
+        r.set_menu_need(settings::SLEEP_AFTER, quireink_sdk::MenuNeed::Sleep)?;
+        r.add_setting(
+            SettingSpec::new(
                 settings::NOTICE_SECONDS,
                 "core.setting.notice-seconds",
                 SettingKind::Int { min: 1, max: 60 },

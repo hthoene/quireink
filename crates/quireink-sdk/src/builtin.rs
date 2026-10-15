@@ -254,6 +254,11 @@ pub mod settings {
     /// Partial refreshes between two full refreshes; `0` disables full
     /// refreshes for ghosting removal.
     pub const FULL_REFRESH_INTERVAL: Id = Id::new_static("core.full-refresh-interval");
+    /// Minutes without use after which the device goes to sleep by itself
+    /// (`0`: never), where QuireInk puts it to sleep
+    /// ([`Env::sleep`](crate::Env)). Turning pages, also by themselves,
+    /// counts as use; reading aloud, downloads and servers keep it awake.
+    pub const SLEEP_AFTER: Id = Id::new_static("core.sleep-after");
     /// Margin of menus and lists, in millimetres.
     pub const UI_MARGIN: Id = Id::new_static("core.ui-margin");
     /// Height of list rows, in percent of a line of text.

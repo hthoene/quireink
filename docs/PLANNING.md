@@ -831,7 +831,7 @@ replaceable by plugins.
 | L4 | Marking a book finished, moving it to an archive folder | KOReader | ✅ (hold a book: "Mark as finished", "Move to the archive"; the event `core.book-moved` takes progress, notes and statistics along, also for moves in the file manager) |
 | F1 | More formats: FB2, Markdown, CBZ, Xteink's own XTC/XTCH, pictures; PDF on Android through the system's renderer | KOReader, CrossPoint | 🔶 (FB2, FB2.zip, CBZ, XTC/XTCH done: `format-epub.fb2`, `format-epub.cbz`, `format-xtc`, Markdown (`format-epub.markdown`), comics and XTC shown edge to edge; PDF on Android through `PdfRenderer` (`android.pdf`, pages rendered to fit the screen, no text yet); pictures as books open) |
 | D1 | Sleep screen: the cover, own pictures, minimal, today's reading (C9) | CrossPoint, CrossInk, KOReader | 🔶 (cover, pictures from `sleep`, message, page; in the emulator, the X4 firmware sleeps on `Effect::Sleep`; today's reading open) |
-| D2 | Sleeping and switching off by themselves after a while | KOReader, X4 firmware | ⬜ |
+| D2 | Sleeping and switching off by themselves after a while | KOReader, X4 firmware | 🔶 (setting "Sleep after" (`core.sleep-after`, 10 min), not while reading aloud, downloading or serving; switching off open) |
 | D3 | Turning the screen, also to landscape | CrossPoint | ⬜ |
 | D4 | Firmware updates over Wi-Fi (X4) | CrossPoint | ⬜ |
 | D5 | Screenshots | CrossPoint, KOReader | ⬜ |
