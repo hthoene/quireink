@@ -369,6 +369,10 @@ fn start_kernel(
         quireink_app::install(builder, quireink_app::Fonts::Outline).plugin(AndroidPlugin {
             app: app.clone(),
             shared_storage,
+            screen: (
+                u32::from(device.display.width),
+                u32::from(device.display.height),
+            ),
             frontlight: lights.map(|lights| Frontlight {
                 lights,
                 brightness: lights.brightness(app),
@@ -593,5 +597,9 @@ impl Storage for Volumes {
 
     fn remove_dir_all(&self, path: &str) -> Result<(), StorageError> {
         self.0.remove_dir_all(path)
+    }
+
+    fn local_path(&self, path: &str, with: &mut dyn FnMut(&str)) {
+        self.0.local_path(path, with);
     }
 }

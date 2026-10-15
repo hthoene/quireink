@@ -101,6 +101,13 @@ pub trait Storage {
         let _ = path;
         Err(StorageError::Unsupported)
     }
+
+    /// Calls `with` with the file's path in the device's own file system,
+    /// for platform code that opens files only by name (e.g. a system PDF
+    /// renderer); does nothing where files have none.
+    fn local_path(&self, path: &str, with: &mut dyn FnMut(&str)) {
+        let _ = (path, with);
+    }
 }
 
 /// Storage for devices without any: everything is empty and read-only.
@@ -234,6 +241,11 @@ impl<B: Storage, M: Storage> Storage for Mounted<B, M> {
         }
         let (storage, path) = self.route(path);
         storage.remove_dir_all(path)
+    }
+
+    fn local_path(&self, path: &str, with: &mut dyn FnMut(&str)) {
+        let (storage, path) = self.route(path);
+        storage.local_path(path, with);
     }
 }
 

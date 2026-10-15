@@ -183,6 +183,12 @@ impl Storage for DirStorage {
             _ => Ok(()),
         }
     }
+
+    fn local_path(&self, path: &str, with: &mut dyn FnMut(&str)) {
+        if let Some(real) = self.resolve(path).ok().as_deref().and_then(Path::to_str) {
+            with(real);
+        }
+    }
 }
 
 #[cfg(test)]

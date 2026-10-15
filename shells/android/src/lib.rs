@@ -30,6 +30,8 @@ mod lights;
 #[cfg(target_os = "android")]
 mod net;
 #[cfg(target_os = "android")]
+mod pdf;
+#[cfg(target_os = "android")]
 mod plugin;
 #[cfg(target_os = "android")]
 mod speech;

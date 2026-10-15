@@ -5,9 +5,10 @@ use std::borrow::Cow;
 
 use android_activity::AndroidApp;
 use quireink_sdk::builtin::{events, groups, menus, params};
+use quireink_sdk::document::Document;
 use quireink_sdk::{
-    ActionSpec, Command, Env, Id, Manifest, MenuEntry, Params, Plugin, RegisterError, Registrar,
-    SDK_VERSION, SettingKind, SettingSpec, SettingValue, Version,
+    ActionSpec, Command, Env, FormatSpec, Id, Manifest, MenuEntry, Params, Plugin, RegisterError,
+    Registrar, SDK_VERSION, SettingKind, SettingSpec, SettingValue, Version,
 };
 
 use crate::lights::Lights;
@@ -15,6 +16,8 @@ use crate::lights::Lights;
 pub const PLUGIN: Id = Id::new_static("android");
 /// Asks for access to the shared storage, where the books are.
 pub const ALLOW_STORAGE: Id = Id::new_static("android.allow-storage");
+/// PDF books, rendered by the system (see `pdf`).
+pub const PDF: Id = Id::new_static("android.pdf");
 /// Frontlight brightness (0 switches it off).
 pub const FRONTLIGHT: Id = Id::new_static("android.frontlight");
 /// Frontlight colour temperature (higher is warmer).
@@ -39,6 +42,8 @@ pub struct AndroidPlugin {
     /// QuireInk can already read the shared storage.
     pub shared_storage: bool,
     pub frontlight: Option<Frontlight>,
+    /// The screen's size in pixels, which PDF pages are rendered to fit.
+    pub screen: (u32, u32),
 }
 
 impl Plugin for AndroidPlugin {
@@ -72,6 +77,16 @@ impl Plugin for AndroidPlugin {
         if let Some(frontlight) = self.frontlight {
             self.register_frontlight(r, frontlight)?;
         }
+        let (app, screen) = (self.app.clone(), self.screen);
+        r.add_format(FormatSpec {
+            id: PDF,
+            title: Cow::Borrowed("android.pdf"),
+            extensions: vec![Cow::Borrowed("pdf")],
+            open: Box::new(move |storage, path, _| {
+                crate::pdf::PdfDocument::open(&app, storage, path, screen)
+                    .map(|d| Box::new(d) as Box<dyn Document>)
+            }),
+        })?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/en.ini")))?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/de.ini")))?;
         Ok(())
