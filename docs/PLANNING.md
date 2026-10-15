@@ -819,7 +819,7 @@ not yet. Each idea stays simple by default and replaceable by plugins.
 | I3 | "Back" after any jump (contents, search, go to page, skimming), not only after links | KOReader | ✅ |
 | I4 | Turning pages by itself every few seconds | KOReader (Autoturn), CrossPoint | ⬜ |
 | I5 | Notes on highlights; highlight styles (marker, underline, strikeout) | KOReader | ⬜ |
-| I6 | Book information: description, subjects, series, file, from the library and the reader | KOReader | 🔶 (from the library: hold a book; from the reader open) |
+| I6 | Book information: description, subjects, series, file, from the library and the reader | KOReader | ✅ (hold a book in the library; tap the title in the reader's menu; slot `core.book-info`) |
 | I7 | The printed edition's page numbers (EPUB `page-list`) | KOReader | ⬜ |
 | I8 | Contents made from the headings where a book has none or a poor one | KOReader | ⬜ |
 | I9 | Vocabulary: words looked up, with their sentence, to review later | KOReader (vocabulary builder) | ⬜ |

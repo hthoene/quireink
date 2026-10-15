@@ -167,6 +167,8 @@ pub mod actions {
     pub const LOOK_UP: Id = Id::new_static("reader.selection.look-up");
     /// Highlights the selected text, or removes highlights in it.
     pub const HIGHLIGHT: Id = Id::new_static("reader.selection.highlight");
+    /// Shows the book's information (slot `core.book-info`).
+    pub const BOOK_INFO: Id = Id::new_static("reader.book-info");
     /// Reads aloud from the selected text on.
     pub const READ_FROM: Id = Id::new_static("reader.selection.read-aloud");
     /// Copies the selected text to the clipboard.
@@ -245,6 +247,7 @@ impl Plugin for Reader {
             (actions::HIGHLIGHT, "reader.select.highlight"),
             (actions::COPY, "reader.select.copy"),
             (actions::READ_FROM, "reader.select.read-aloud"),
+            (actions::BOOK_INFO, "reader.book-info"),
             (actions::EXTEND, "reader.select.extend"),
             (actions::CANCEL, "reader.select.cancel"),
             (actions::MORE, "reader.select.more"),

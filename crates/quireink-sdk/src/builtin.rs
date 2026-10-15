@@ -92,6 +92,8 @@ pub mod slots {
     /// emitted with all of the parameters and [`PATH`](super::params::PATH)
     /// set to the folder; [`TEXT`](super::params::TEXT), where to start.
     pub const CHOOSE_FOLDER: Id = Id::new_static("core.choose-folder");
+    /// Shows what is known of a book: parameter [`PATH`](super::params::PATH).
+    pub const BOOK_INFO: Id = Id::new_static("core.book-info");
     /// Shows a short message ([`Command::Notify`](crate::Command::Notify))
     /// over whatever is open, for a few seconds: parameter
     /// [`TEXT`](super::params::TEXT). It gets no input and is closed by
@@ -146,6 +148,8 @@ pub mod params {
     pub const LANGUAGE: &str = "language";
     /// A web address, e.g. for [`slots::BROWSER`](super::slots::BROWSER).
     pub const URL: &str = "url";
+    /// An action to run, e.g. when the title of a menu bar is tapped.
+    pub const ACTION: &str = "action";
 }
 
 /// Events emitted by the kernel.

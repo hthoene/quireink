@@ -4,7 +4,9 @@
 //!
 //! Opened like any menu, with the parameter `mode` set to `bar`, and
 //! optionally `title` and `text` for the two lines, and `page` shown at the
-//! end of the second (always whole; the text is shortened instead). Labels are the
+//! end of the second (always whole; the text is shortened instead); with
+//! `action`, tapping the two lines runs it (e.g. the book's information).
+//! Labels are the
 //! translation of an entry's title key followed by `.short` where there is
 //! one (`reader.toc.short` = "Contents"), else its title.
 //!
@@ -48,6 +50,8 @@ pub(crate) struct BarScreen {
     page: String,
     /// Where the title and text are.
     info: Rect,
+    /// Run when they are tapped.
+    info_action: Option<Id>,
     /// Where each entry is drawn (as wide as its icon or label).
     cells: Vec<Rect>,
     /// Where each entry is tapped.
@@ -175,6 +179,7 @@ impl BarScreen {
             text,
             page,
             info,
+            info_action: params.get(params::ACTION).and_then(|a| Id::parse(a).ok()),
             cells,
             targets,
             focus: 0,
@@ -370,6 +375,11 @@ impl Screen for BarScreen {
         if let Some(index) = self.targets.iter().position(|c| c.contains(gesture.start)) {
             self.focus = index;
             self.run(index, cx);
+        } else if let Some(action) = self.info_action.clone()
+            && self.info.contains(gesture.start)
+        {
+            cx.command(Command::Back);
+            cx.command(Command::RunAction(action));
         }
         Handled::Yes
     }

@@ -146,6 +146,7 @@ impl Plugin for Files {
             r.add_icon(action, Cow::Borrowed(icon))?;
         }
         r.bind_slot(slots::CHOOSE_FOLDER, CHOOSE_FOLDER, Priority::DEFAULT)?;
+        r.bind_slot(slots::BOOK_INFO, INFO_SCREEN, Priority::DEFAULT)?;
         r.bind_slot(slots::HOME, SCREEN, Priority::FALLBACK)?;
         r.bind_slot(slots::LIBRARY, SCREEN, Priority::DEFAULT)?;
         r.add_setting(

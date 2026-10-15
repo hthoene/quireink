@@ -2227,6 +2227,12 @@ impl Screen for ReaderScreen {
                 book.show(cx, start, false);
             }
             Handled::Yes
+        } else if *action == crate::actions::BOOK_INFO {
+            cx.command(Command::OpenSlot(
+                slots::BOOK_INFO,
+                Params::new().with(params::PATH, book.path.clone()),
+            ));
+            Handled::Yes
         } else if *action == crate::actions::TOC {
             cx.command(Command::OpenScreen(
                 crate::TOC_SCREEN,
@@ -2262,7 +2268,8 @@ impl Screen for ReaderScreen {
                     .with(params::MODE, "bar")
                     .with(params::TITLE, book.title.clone())
                     .with(params::TEXT, chapter)
-                    .with(params::PAGE, page),
+                    .with(params::PAGE, page)
+                    .with(params::ACTION, crate::actions::BOOK_INFO.as_str()),
             ));
             Handled::Yes
         } else {
