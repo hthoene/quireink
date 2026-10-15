@@ -165,7 +165,7 @@ cargo run -p quireink-emulator -- --headless --profile boox-go-7 --set core.lang
 | `shells/android` | Android app for e-readers such as Boox ([build and install](shells/android/README.md)) |
 | `shells/xteink` | Firmware for the Xteink X4 ([build, save the stock firmware, flash](shells/xteink/README.md)) |
 | `samples/` | Emulator library with public-domain books, sample plugins |
-| `docs/` | [Plan](docs/PLANNING.md), [writing plugins](docs/plugins.md), [releasing](docs/releasing.md) and [architecture decisions](docs/adr/) |
+| `docs/` | [Plan](docs/PLANNING.md), [writing plugins](docs/plugins.md) and [architecture decisions](docs/adr/) |
 
 ## Contributing
 

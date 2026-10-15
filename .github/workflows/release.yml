@@ -2,7 +2,7 @@ name: Release
 
 # A tag `v1.2.3` (the workspace's version) makes a GitHub release with the
 # Android app signed with the release key, and the release notes from
-# CHANGELOG.md. See docs/releasing.md.
+# CHANGELOG.md.
 on:
   push:
     tags: ["v*"]
@@ -38,7 +38,7 @@ jobs:
           QUIREINK_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           if [[ -z "$KEYSTORE_BASE64" ]]; then
-            echo "::error::the secret ANDROID_KEYSTORE_BASE64 is missing (docs/releasing.md)"
+            echo "::error::the secret ANDROID_KEYSTORE_BASE64 is missing"
             exit 1
           fi
           export QUIREINK_KEYSTORE="$RUNNER_TEMP/release.p12"

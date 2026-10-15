@@ -19,7 +19,7 @@
 #
 # Releases: with QUIREINK_REPRODUCIBLE=1 the tools must be the versions in
 # shells/android/versions.env, so the app comes out byte for byte the same
-# on every computer. See docs/releasing.md.
+# on every computer.
 
 set -euo pipefail
 

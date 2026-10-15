@@ -11,7 +11,7 @@ Requirements:
 
 - the Android SDK with build tools, a platform and the NDK (e.g. installed
   by Android Studio);
-- a JDK (Android Studio includes one);
+- a JDK (Android Studio includes one) and Python 3;
 - `rustup target add aarch64-linux-android` and `cargo install cargo-ndk`.
 
 Then build and install:
