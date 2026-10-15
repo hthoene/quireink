@@ -23,6 +23,7 @@ extern crate alloc;
 
 mod books;
 mod folders;
+mod info;
 mod listing;
 mod shelves;
 
@@ -62,6 +63,13 @@ pub const MENU: Id = Id::new_static("files.menu");
 pub const BY_AUTHOR: Id = Id::new_static("files.by-author");
 pub const BY_SERIES: Id = Id::new_static("files.by-series");
 pub const BY_TAG: Id = Id::new_static("files.by-tag");
+/// The favourite books.
+pub const FAVOURITES: Id = Id::new_static("files.favourites");
+/// What can be done with a book (held in the list).
+const CHOICE: Id = Id::new_static("files.choice");
+const CHOSEN: Id = Id::new_static("files.book-chosen");
+/// Book information; parameter `path`.
+pub const INFO_SCREEN: Id = Id::new_static("files.info");
 /// The submenu with the views above ("Shelves").
 pub const SHELVES_MENU: Id = Id::new_static("files.shelves");
 const SHELF_SCREEN: Id = Id::new_static("files.shelf");
@@ -93,6 +101,18 @@ impl Plugin for Files {
             factory: Box::new(|env, params| Box::new(folders::FolderChooser::new(env, params))),
         })?;
         r.add_screen(ScreenSpec {
+            id: CHOICE,
+            title: Cow::Borrowed("files.title"),
+            factory: Box::new(|env, params| {
+                Box::new(quireink_sdk::ui::choice::Choice::new(env, params))
+            }),
+        })?;
+        r.add_screen(ScreenSpec {
+            id: INFO_SCREEN,
+            title: Cow::Borrowed("files.info"),
+            factory: Box::new(|env, params| Box::new(info::InfoScreen::new(env, params))),
+        })?;
+        r.add_screen(ScreenSpec {
             id: SHELF_SCREEN,
             title: Cow::Borrowed("files.title"),
             factory: Box::new(|env, params| Box::new(shelves::ShelfScreen::new(env, params))),
@@ -106,6 +126,12 @@ impl Plugin for Files {
                 "list-details",
             ),
             (BY_TAG, shelves::MODE_TAGS, "files.by-tag", "tag"),
+            (
+                FAVOURITES,
+                shelves::MODE_FAVOURITES,
+                "files.favourites",
+                "star",
+            ),
         ] {
             r.add_action(quireink_sdk::ActionSpec {
                 id: action.clone(),
@@ -158,7 +184,12 @@ impl Plugin for Files {
             })),
         })?;
         r.add_icon(SHELVES_MENU, Cow::Borrowed("books"))?;
-        for (item, order) in [(BY_AUTHOR, 10), (BY_SERIES, 20), (BY_TAG, 30)] {
+        for (item, order) in [
+            (FAVOURITES, 5),
+            (BY_AUTHOR, 10),
+            (BY_SERIES, 20),
+            (BY_TAG, 30),
+        ] {
             r.add_menu_entry(MenuEntry {
                 menu: SHELVES_MENU,
                 item,
@@ -399,6 +430,70 @@ impl Browser {
         cx.request_redraw();
         cx.wake_at(env.now);
         true
+    }
+
+    /// Offers what can be done with book `index`; `false` for a folder.
+    fn offer(&mut self, index: usize, cx: &mut Cx<'_, '_>) -> bool {
+        let Some((entry, book)) = self.entry(index).cloned() else {
+            return false;
+        };
+        if entry.is_dir {
+            return false;
+        }
+        let env = *cx.env();
+        let path = self.path_of(&entry);
+        let favourite = books::favourites(env.storage).contains(&path);
+        let mut options = alloc::vec![
+            "open",
+            if favourite {
+                "unfavourite"
+            } else {
+                "favourite"
+            },
+            "info",
+        ];
+        if !env.device.input.touch {
+            options.push("menu");
+        }
+        let title = book
+            .and_then(|b| b.title)
+            .unwrap_or_else(|| entry.name.clone());
+        cx.command(quireink_sdk::ui::choice::open(
+            CHOICE,
+            CHOSEN,
+            &title,
+            &path,
+            "files.option.",
+            &options,
+        ));
+        true
+    }
+
+    /// Does what was chosen for the book at `path`.
+    fn chosen(&mut self, option: &str, path: &str, cx: &mut Cx<'_, '_>) {
+        let env = *cx.env();
+        match option {
+            "open" => cx.command(Command::OpenSlot(
+                slots::READER,
+                Params::new().with(params::PATH, path.to_string()),
+            )),
+            "favourite" | "unfavourite" => {
+                let favourite = option == "favourite";
+                books::set_favourite(env.storage, path, favourite);
+                let key = if favourite {
+                    "files.favourite-added"
+                } else {
+                    "files.favourite-removed"
+                };
+                cx.command(Command::Notify(env.i18n.tr(key).to_string()));
+            }
+            "info" => cx.command(Command::OpenScreen(
+                INFO_SCREEN,
+                Params::new().with(params::PATH, path.to_string()),
+            )),
+            "menu" => Self::open_menu(cx),
+            _ => {}
+        }
     }
 
     fn open_menu(cx: &mut Cx<'_, '_>) {
@@ -647,7 +742,11 @@ impl Screen for Browser {
         } else if *a == core_actions::CONFIRM {
             self.open(self.list.focus, cx);
         } else if *a == core_actions::MENU {
-            Self::open_menu(cx);
+            // Without touch, a book's options (holding it needs a finger);
+            // they lead on to the library's menu.
+            if cx.env().device.input.touch || !self.offer(self.list.focus, cx) {
+                Self::open_menu(cx);
+            }
         } else if *a == core_actions::BACK {
             return if self.up(cx) {
                 Handled::Yes
@@ -661,6 +760,16 @@ impl Screen for Browser {
     }
 
     fn on_gesture(&mut self, gesture: Gesture, cx: &mut Cx<'_, '_>) -> Handled {
+        if gesture.kind == GestureKind::LongPress
+            && let Some(index) = self.list.hit(gesture.start, self.len)
+        {
+            self.list.focus = index;
+            return if self.offer(index, cx) {
+                Handled::Yes
+            } else {
+                Handled::No
+            };
+        }
         if gesture.kind != GestureKind::Tap {
             return Handled::No;
         }
@@ -686,7 +795,15 @@ impl Screen for Browser {
         }
     }
 
-    fn on_event(&mut self, event: &Id, _: &Params, cx: &mut Cx<'_, '_>) {
+    fn on_event(&mut self, event: &Id, params: &Params, cx: &mut Cx<'_, '_>) {
+        if *event == CHOSEN {
+            let path = params.get(params::PATH).unwrap_or_default().to_string();
+            let option = params
+                .get(quireink_sdk::ui::choice::OPTION)
+                .unwrap_or_default();
+            self.chosen(option, &path, cx);
+            return;
+        }
         if *event == events::SETTING_CHANGED {
             // The UI size, the order or the library folder may have
             // changed; a new library folder is shown from its top.

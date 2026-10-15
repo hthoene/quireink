@@ -31,6 +31,8 @@ use crate::{PLUGIN, ROOT};
 pub(crate) const MODE_AUTHORS: &str = "authors";
 pub(crate) const MODE_SERIES: &str = "series";
 pub(crate) const MODE_TAGS: &str = "tags";
+/// The favourite books (`favourites`).
+pub(crate) const MODE_FAVOURITES: &str = "favourites";
 /// Between a book's tags in the catalog.
 const TAG_SEPARATOR: char = '\u{1f}';
 
@@ -40,6 +42,8 @@ pub(crate) enum Shelf {
     Authors,
     Series,
     Tags,
+    /// No names: the favourite books at once.
+    Favourites,
 }
 
 impl Shelf {
@@ -47,6 +51,7 @@ impl Shelf {
         match mode {
             Some(MODE_SERIES) => Shelf::Series,
             Some(MODE_TAGS) => Shelf::Tags,
+            Some(MODE_FAVOURITES) => Shelf::Favourites,
             _ => Shelf::Authors,
         }
     }
@@ -117,6 +122,7 @@ impl Line {
                 .split(TAG_SEPARATOR)
                 .filter(|t| !t.is_empty())
                 .collect(),
+            Shelf::Favourites => Vec::new(),
         }
     }
 }
@@ -254,6 +260,29 @@ fn names(storage: &dyn Storage, shelf: Shelf) -> Vec<(String, usize)> {
     names
 }
 
+/// The favourite books still there, as catalog lines from the details
+/// the library keeps.
+fn favourites(env: &Env<'_>) -> Vec<Line> {
+    books::favourites(env.storage)
+        .into_iter()
+        .filter(|path| env.storage.size(path).is_ok())
+        .map(|path| {
+            let book = books::load(env.storage, &path).unwrap_or_default();
+            let name = files::name(&path);
+            Line {
+                title: book
+                    .title
+                    .unwrap_or_else(|| name.rsplit_once('.').map_or(name, |(n, _)| n).to_string()),
+                author: book.author.unwrap_or_default(),
+                series: book.series.unwrap_or_default(),
+                number: book.series_index.unwrap_or_default(),
+                tags: String::new(),
+                path,
+            }
+        })
+        .collect()
+}
+
 /// The books of author, series or tag `name`: a series by its numbers,
 /// the others by title.
 fn books_of(storage: &dyn Storage, shelf: Shelf, name: &str) -> Vec<Line> {
@@ -299,10 +328,11 @@ impl ShelfScreen {
         let top = header.area.height + style.gap as u16;
         let area = Rect::new(0, top, display.width, display.height.saturating_sub(top));
         let shelf = Shelf::of(params.get(params::MODE));
+        let chosen = (shelf == Shelf::Favourites).then(|| (String::new(), favourites(env)));
         Self {
             list: ListView::new(area, style.noted_row()).focus_on_keys(env),
             names: names(env.storage, shelf),
-            chosen: None,
+            chosen,
             names_focus: 0,
             walk: None,
             walked: false,
@@ -349,6 +379,7 @@ impl ShelfScreen {
 
     fn title(&self, env: &Env<'_>) -> String {
         match &self.chosen {
+            _ if self.shelf == Shelf::Favourites => env.i18n.tr("files.favourites").to_string(),
             Some((name, _)) if name.is_empty() => env.i18n.tr("files.unknown-author").to_string(),
             Some((name, _)) => name.clone(),
             None => env
@@ -357,6 +388,7 @@ impl ShelfScreen {
                     Shelf::Authors => "files.by-author",
                     Shelf::Series => "files.by-series",
                     Shelf::Tags => "files.by-tag",
+                    Shelf::Favourites => "files.favourites",
                 })
                 .to_string(),
         }
@@ -375,13 +407,16 @@ impl Screen for ShelfScreen {
                 Some(walk) => env.i18n.plural("files.collecting", walk.found as i64, &[]),
                 None if self.shelf == Shelf::Series => env.i18n.tr("files.no-series").to_string(),
                 None if self.shelf == Shelf::Tags => env.i18n.tr("files.no-tags").to_string(),
+                _ if self.shelf == Shelf::Favourites => {
+                    env.i18n.tr("files.no-favourites").to_string()
+                }
                 None => env.i18n.tr("files.no-books").to_string(),
             };
             ui::draw_message(canvas, env, &style, self.list.area, &message);
             return;
         }
         let series = self.shelf == Shelf::Series;
-        let tags = self.shelf == Shelf::Tags;
+        let tags = matches!(self.shelf, Shelf::Tags | Shelf::Favourites);
         let (names, chosen) = (&self.names, &self.chosen);
         self.list.draw(
             canvas,
@@ -420,6 +455,14 @@ impl Screen for ShelfScreen {
     }
 
     fn on_show(&mut self, cx: &mut Cx<'_, '_>) {
+        if self.shelf == Shelf::Favourites {
+            // Back from a book or its options: maybe one less.
+            let env = *cx.env();
+            self.chosen = Some((String::new(), favourites(&env)));
+            self.list.focus = self.list.focus.min(self.len().saturating_sub(1));
+            cx.request_redraw();
+            return;
+        }
         if self.walk.is_none() && !self.walked {
             let env = *cx.env();
             self.walk = Some(Walk::start(&env));
@@ -467,7 +510,7 @@ impl Screen for ShelfScreen {
             self.activate(self.list.focus, cx);
             return Handled::Yes;
         } else if *a == actions::BACK {
-            if self.chosen.take().is_some() {
+            if self.shelf != Shelf::Favourites && self.chosen.take().is_some() {
                 self.list.focus = self.names_focus;
                 self.redraw(cx);
             } else {

@@ -30,7 +30,7 @@ use crate::css;
 use crate::obfuscation::Method;
 
 /// Bump when the cache format or the conversion changes.
-pub(crate) const CACHE_VERSION: u32 = 16;
+pub(crate) const CACHE_VERSION: u32 = 17;
 
 /// A chapter: where it is in the archive and its uncompressed size.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -153,6 +153,39 @@ fn percent_decode(text: &str) -> String {
 }
 
 /// Collapses whitespace in a title.
+/// The most of a description kept, in bytes.
+const MAX_DESCRIPTION: usize = 2000;
+
+/// A description as plain text: Calibre and others write HTML into it
+/// (escaped), so tags go and entities are decoded; cut at
+/// [`MAX_DESCRIPTION`].
+fn plain_text(html: &str) -> String {
+    let mut text = String::new();
+    let mut in_tag = false;
+    for c in html.chars() {
+        match c {
+            '<' => {
+                in_tag = true;
+                // Paragraphs and line breaks part words.
+                text.push(' ');
+            }
+            '>' if in_tag => in_tag = false,
+            c if !in_tag => text.push(c),
+            _ => {}
+        }
+    }
+    let mut plain = clean(&decode(&text));
+    if plain.len() > MAX_DESCRIPTION {
+        let mut end = MAX_DESCRIPTION;
+        while !plain.is_char_boundary(end) {
+            end -= 1;
+        }
+        plain.truncate(end);
+        plain.push('…');
+    }
+    plain
+}
+
 fn clean(text: &str) -> String {
     let mut out = String::new();
     for word in text.split_whitespace() {
@@ -199,6 +232,9 @@ pub(crate) fn load(storage: &dyn Storage, cache: &str, book_size: u64) -> Option
             }
             ("book", key) if key.starts_with("subject.") => {
                 metadata.subjects.push(entry.value.as_str().into_owned());
+            }
+            ("book", "description") => {
+                metadata.description = Some(entry.value.as_str().into_owned());
             }
             ("book", "sections") => sections = entry.value.as_u32(),
             ("book", "toc") => toc_len = entry.value.as_u32(),
@@ -519,11 +555,12 @@ pub(crate) fn build(
                 capture = Some("identifier");
                 text.clear();
             }
-            "title" | "creator" | "language" | "subject" if !self_closing => {
+            "title" | "creator" | "language" | "subject" | "description" if !self_closing => {
                 capture = match local_name(name) {
                     "title" => Some("title"),
                     "creator" => Some("creator"),
                     "subject" => Some("subject"),
+                    "description" => Some("description"),
                     _ => Some("language"),
                 };
                 text.clear();
@@ -589,6 +626,10 @@ pub(crate) fn build(
                     "creator" if !value.is_empty() => metadata.authors.push(value),
                     "subject" if !value.is_empty() && !metadata.subjects.contains(&value) => {
                         metadata.subjects.push(value);
+                    }
+                    "description" if metadata.description.is_none() => {
+                        let plain = plain_text(&value);
+                        metadata.description = (!plain.is_empty()).then_some(plain);
                     }
                     "language" if metadata.language.is_none() && !value.is_empty() => {
                         metadata.language = Some(value);
@@ -769,6 +810,9 @@ pub(crate) fn build(
     }
     for (i, subject) in metadata.subjects.iter().enumerate() {
         set("book", &alloc::format!("subject.{}", i + 1), subject);
+    }
+    if let Some(description) = &metadata.description {
+        set("book", "description", description);
     }
     let cover = cover.map(|(_, path)| path);
     if let Some(cover) = &cover {

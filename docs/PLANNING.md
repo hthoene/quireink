@@ -819,12 +819,12 @@ not yet. Each idea stays simple by default and replaceable by plugins.
 | I3 | "Back" after any jump (contents, search, go to page, skimming), not only after links | KOReader | ✅ |
 | I4 | Turning pages by itself every few seconds | KOReader (Autoturn), CrossPoint | ⬜ |
 | I5 | Notes on highlights; highlight styles (marker, underline, strikeout) | KOReader | ⬜ |
-| I6 | Book information: description, subjects, series, file, from the library and the reader | KOReader | ⬜ |
+| I6 | Book information: description, subjects, series, file, from the library and the reader | KOReader | 🔶 (from the library: hold a book; from the reader open) |
 | I7 | The printed edition's page numbers (EPUB `page-list`) | KOReader | ⬜ |
 | I8 | Contents made from the headings where a book has none or a poor one | KOReader | ⬜ |
 | I9 | Vocabulary: words looked up, with their sentence, to review later | KOReader (vocabulary builder) | ⬜ |
 | I10 | Translating selected text online, by a plugin | KOReader | ⬜ |
-| L1 | Favourites: a star on a book, a shelf of them | KOReader | ⬜ |
+| L1 | Favourites: a star on a book, a shelf of them | KOReader | ✅ (hold a book; "Shelves > Favourites") |
 | L2 | The library as a grid of covers | KOReader (cover browser), CrossPoint | ⬜ |
 | L3 | Searching the library by title and author | KOReader | ⬜ |
 | L4 | Marking a book finished, moving it to an archive folder | KOReader | ⬜ |

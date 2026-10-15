@@ -60,6 +60,8 @@ pub struct Metadata {
     /// Its subjects or tags, e.g. an EPUB's `dc:subject` (where Calibre
     /// puts its tags).
     pub subjects: Vec<String>,
+    /// What the book is about, as plain text (a blurb), if it says.
+    pub description: Option<String>,
 }
 
 /// The role of a block; layout engines style blocks by kind.

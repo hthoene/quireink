@@ -122,6 +122,7 @@ mod tests {
     <dc:language>de</dc:language>
     <dc:subject>Novella</dc:subject>
     <dc:subject>Classics</dc:subject>
+    <dc:description>&lt;p&gt;Gregor wakes up &amp;amp; finds&lt;/p&gt;&lt;p&gt;himself changed.&lt;/p&gt;</dc:description>
   </metadata>
   <manifest>
     <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
@@ -341,9 +342,14 @@ mod tests {
         assert_eq!(metadata.language.as_deref(), Some("de"));
         assert_eq!(metadata.subjects, ["Novella", "Classics"]);
         assert_eq!(doc.sections(), 2);
+        assert_eq!(
+            metadata.description.as_deref(),
+            Some("Gregor wakes up & finds himself changed.")
+        );
         // Also when read from the cache.
         let again = EpubDocument::open(&storage, "books/test.epub").unwrap();
         assert_eq!(again.metadata().subjects, ["Novella", "Classics"]);
+        assert_eq!(again.metadata().description, metadata.description);
 
         let ch1 = blocks(&storage, &doc, 0);
         let texts: Vec<&str> = ch1.iter().map(|(_, t)| t.as_str()).collect();

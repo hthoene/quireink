@@ -60,6 +60,38 @@ fn opened_file() -> String {
     format!("{}/opened.txt", Env::plugin_dir(PLUGIN.as_str()))
 }
 
+fn favourites_file() -> String {
+    format!("{}/favourites.txt", Env::plugin_dir(PLUGIN.as_str()))
+}
+
+/// Favourites kept at most.
+const MAX_FAVOURITES: usize = 500;
+
+/// The paths of the favourite books, the newest first.
+pub(crate) fn favourites(storage: &dyn Storage) -> Vec<String> {
+    let max = MAX_FAVOURITES * 512;
+    let Ok(data) = quireink_sdk::read_file(storage, &favourites_file(), max) else {
+        return Vec::new();
+    };
+    core::str::from_utf8(&data)
+        .unwrap_or_default()
+        .lines()
+        .filter(|line| !line.is_empty())
+        .map(ToString::to_string)
+        .collect()
+}
+
+/// Makes the book at `path` a favourite, or no longer one.
+pub(crate) fn set_favourite(storage: &dyn Storage, path: &str, favourite: bool) {
+    let mut list = favourites(storage);
+    list.retain(|p| p != path);
+    if favourite {
+        list.insert(0, path.to_string());
+        list.truncate(MAX_FAVOURITES);
+    }
+    let _ = storage.write(&favourites_file(), list.join("\n").as_bytes());
+}
+
 /// The cached details of the book at `path`, if they belong to this file.
 pub(crate) fn load(storage: &dyn Storage, path: &str) -> Option<Book> {
     let size = storage.size(path).ok()?;
@@ -227,5 +259,16 @@ mod tests {
         // Replaced by a file of another size: forgotten.
         let storage = storage.with("books/a.txt", "hello!");
         assert_eq!(load(&storage, "books/a.txt"), None);
+    }
+
+    #[test]
+    fn favourites_newest_first() {
+        let storage = MemoryStorage::new();
+        set_favourite(&storage, "a.epub", true);
+        set_favourite(&storage, "b.epub", true);
+        set_favourite(&storage, "a.epub", true);
+        assert_eq!(favourites(&storage), ["a.epub", "b.epub"]);
+        set_favourite(&storage, "a.epub", false);
+        assert_eq!(favourites(&storage), ["b.epub"]);
     }
 }
