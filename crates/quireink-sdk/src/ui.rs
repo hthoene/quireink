@@ -1128,16 +1128,10 @@ pub fn draw_number(
         return;
     };
     let margin = style.margin as f32;
-    let title = fit(&font, style.text, title, f32::from(minus.x) - margin * 2.0);
-    draw_label(
-        canvas,
-        &font,
-        style.text,
-        margin,
-        rect,
-        &title,
-        Color::BLACK,
-    );
+    // From the row's own start, e.g. right of an icon.
+    let left = f32::from(rect.x) + margin;
+    let title = fit(&font, style.text, title, f32::from(minus.x) - left - margin);
+    draw_label(canvas, &font, style.text, left, rect, &title, Color::BLACK);
     let value_x = centred(&font, style.text, value, minus, plus);
     draw_label(
         canvas,
@@ -1175,16 +1169,10 @@ pub fn draw_stepper(
         return;
     };
     let margin = style.margin as f32;
-    let title = fit(&font, style.text, title, f32::from(minus.x) - margin * 2.0);
-    draw_label(
-        canvas,
-        &font,
-        style.text,
-        margin,
-        rect,
-        &title,
-        Color::WHITE,
-    );
+    // From the row's own start, e.g. right of an icon.
+    let left = f32::from(rect.x) + margin;
+    let title = fit(&font, style.text, title, f32::from(minus.x) - left - margin);
+    draw_label(canvas, &font, style.text, left, rect, &title, Color::WHITE);
     let value_x = centred(&font, style.text, value, minus, plus);
     draw_label(
         canvas,
