@@ -163,7 +163,10 @@ elif [[ -n "${QUIREINK_KEYSTORE:-}" ]]; then
     export QUIREINK_KEY_PASSWORD="${QUIREINK_KEY_PASSWORD:-$QUIREINK_KEYSTORE_PASSWORD}"
     echo "Signing with the release key"
     # The passwords come from the environment, never on a command line.
-    "$java" -jar "$tools/lib/apksigner.jar" sign --ks "$QUIREINK_KEYSTORE" \
+    # The alignment stays as zipalign made it (apksigner 35 and later pad
+    # anew), so the signature fits F-Droid's unsigned build too.
+    "$java" -jar "$tools/lib/apksigner.jar" sign --alignment-preserved true \
+        --ks "$QUIREINK_KEYSTORE" \
         --ks-key-alias "$QUIREINK_KEY_ALIAS" \
         --ks-pass env:QUIREINK_KEYSTORE_PASSWORD --key-pass env:QUIREINK_KEY_PASSWORD \
         --out "$out/quireink.apk" "$out/aligned.apk"
@@ -176,7 +179,7 @@ else
             -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
     fi
     echo "Signing with the debug key (not for releases)"
-    "$java" -jar "$tools/lib/apksigner.jar" sign --ks "$keystore" \
+    "$java" -jar "$tools/lib/apksigner.jar" sign --alignment-preserved true --ks "$keystore" \
         --ks-pass pass:android --key-pass pass:android \
         --out "$out/quireink.apk" "$out/aligned.apk"
 fi

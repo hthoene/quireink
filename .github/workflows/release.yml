@@ -49,6 +49,17 @@ jobs:
           mkdir -p dist
           cp target/android/quireink.apk "dist/quireink-$VERSION.apk"
           (cd dist && sha256sum "quireink-$VERSION.apk" > "quireink-$VERSION.apk.sha256")
+      # As F-Droid checks it: its own build, unsigned, must verify with the
+      # signature of this one.
+      - name: The signature fits the unsigned build
+        env:
+          QUIREINK_REPRODUCIBLE: 1
+          QUIREINK_UNSIGNED: 1
+        run: |
+          shells/android/build-apk.sh
+          pipx install apksigcopier==1.1.1
+          PATH="$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION:$PATH" apksigcopier compare \
+            "dist/quireink-$VERSION.apk" --unsigned target/android/quireink-unsigned.apk
       - name: Release notes from CHANGELOG.md
         run: |
           # The section of this version, up to the next one.
