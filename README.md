@@ -1,14 +1,21 @@
 # QuireInk
 
-**A lean, fast and endlessly customizable e-reader for e-ink devices, from a
+**A lean, fast and endlessly customisable e-reader for e-ink devices, from a
 380 KB microcontroller to Linux and Android e-readers, from one codebase.**
 
-> **Status: early development.** EPUB and plain text books can be read in
-> the emulator and on Android e-readers (tested on a Boox Go 7), with a
-> table of contents, menus, a settings screen, page index, saved reading
-> position and reopening of the last book. See the
-> [project plan](docs/PLANNING.md)
-> and the [roadmap](docs/PLANNING.md#12-roadmap).
+> **Status: first release (0.1).** QuireInk runs on Android e-readers
+> (tested on a Boox Go 7) and in the desktop emulator: EPUB, FB2,
+> Markdown, text, comics and PDF, sync with KOReader, OPDS catalogs and
+> much more; see the [changelog](CHANGELOG.md). The firmware for the
+> Xteink X4 is built but has not run on a device yet. The
+> [project plan](docs/PLANNING.md) has the
+> [roadmap](docs/PLANNING.md#12-roadmap).
+
+## Get it
+
+The Android app (arm64, Android 8 or later) is attached to each
+[release](https://github.com/hthoene/quireink/releases); F-Droid is to
+follow. To build it yourself, see [shells/android](shells/android/README.md).
 
 ## Why QuireInk?
 
@@ -25,7 +32,7 @@
   PocketBook, reMarkable, Boox and other Android e-readers, desktop and web.
   Grayscale and colour e-ink.
 
-## Customization at a glance
+## Customisation at a glance
 
 A plain text file (`quireink.ini`) on the device changes behaviour without
 any programming:
@@ -150,7 +157,7 @@ cargo run -p quireink-emulator -- --headless --profile boox-go-7 --set core.lang
 | `shells/android` | Android app for e-readers such as Boox ([build and install](shells/android/README.md)) |
 | `shells/xteink` | Firmware for the Xteink X4 ([build, save the stock firmware, flash](shells/xteink/README.md)) |
 | `samples/` | Emulator library with public-domain books, sample plugins |
-| `docs/` | [Plan](docs/PLANNING.md), [writing plugins](docs/plugins.md) and [architecture decisions](docs/adr/) |
+| `docs/` | [Plan](docs/PLANNING.md), [writing plugins](docs/plugins.md), [releasing](docs/releasing.md) and [architecture decisions](docs/adr/) |
 
 ## Contributing
 

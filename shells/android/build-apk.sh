@@ -10,6 +10,11 @@
 # Usage: shells/android/build-apk.sh [--debug]
 # Output: target/android/quireink.apk
 #   adb install -r target/android/quireink.apk
+#
+# Signing: with the release key when QUIREINK_KEYSTORE (a .jks or .p12
+# file), QUIREINK_KEYSTORE_PASSWORD and QUIREINK_KEY_ALIAS are set
+# (QUIREINK_KEY_PASSWORD if the key has its own); otherwise with a debug
+# key made on this computer. See docs/releasing.md.
 
 set -euo pipefail
 
@@ -73,6 +78,13 @@ mkdir -p "$out/classes" "$out/dex"
 "$java" -cp "$tools/lib/d8.jar" com.android.tools.r8.D8 --release --min-api 26     --lib "$platform" --output "$out/dex" "$out"/classes/io/github/hthoene/quireink/*.class
 
 echo "Packaging"
+# The workspace's version, which the app shares.
+version="$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)"
+[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]] || fail "no version in Cargo.toml"
+# Android installs a version over another only if its code is higher:
+# 1.2.3 is 10203 (a pre-release counts as its release).
+IFS=. read -r major minor patch <<< "${version%%-*}"
+version_code=$((major * 10000 + minor * 100 + patch))
 cp samples/library/books/*.epub samples/library/books/*.txt "$out/assets/books/"
 # Resources: the launcher icon (drawn by tools/android-icon.py).
 rm -f "$out/res.zip"
@@ -82,8 +94,7 @@ rm -f "$out/res.zip"
     "$out/res.zip" \
     -I "$platform" \
     --min-sdk-version 26 --target-sdk-version 35 \
-    --version-code 1 --version-name "$(cargo metadata --no-deps --format-version 1 \
-        | grep -o '"name":"quireink-android","version":"[^"]*"' | grep -o '[0-9][^"]*$')"
+    --version-code "$version_code" --version-name "$version"
 # Native library and assets via `jar`: aapt2 writes asset paths with
 # backslashes on Windows.
 "$jar" --update --no-manifest --file "$out/unsigned.apk" -C "$out/apk" lib
@@ -91,15 +102,29 @@ rm -f "$out/res.zip"
 "$jar" --update --no-manifest --file "$out/unsigned.apk" -C "$out/dex" classes.dex
 "$zipalign" -f -p 4 "$out/unsigned.apk" "$out/aligned.apk"
 
-keystore="$HOME/.android/debug.keystore"
-if [[ ! -f "$keystore" ]]; then
-    mkdir -p "$(dirname "$keystore")"
-    "$keytool" -genkeypair -keystore "$keystore" -alias androiddebugkey \
-        -storepass android -keypass android -keyalg RSA -keysize 2048 \
-        -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+if [[ -n "${QUIREINK_KEYSTORE:-}" ]]; then
+    [[ -f "$QUIREINK_KEYSTORE" ]] || fail "no keystore at $QUIREINK_KEYSTORE"
+    [[ -n "${QUIREINK_KEYSTORE_PASSWORD:-}" && -n "${QUIREINK_KEY_ALIAS:-}" ]] \
+        || fail "QUIREINK_KEYSTORE needs QUIREINK_KEYSTORE_PASSWORD and QUIREINK_KEY_ALIAS"
+    export QUIREINK_KEY_PASSWORD="${QUIREINK_KEY_PASSWORD:-$QUIREINK_KEYSTORE_PASSWORD}"
+    echo "Signing with the release key"
+    # The passwords come from the environment, never on a command line.
+    "$java" -jar "$tools/lib/apksigner.jar" sign --ks "$QUIREINK_KEYSTORE" \
+        --ks-key-alias "$QUIREINK_KEY_ALIAS" \
+        --ks-pass env:QUIREINK_KEYSTORE_PASSWORD --key-pass env:QUIREINK_KEY_PASSWORD \
+        --out "$out/quireink.apk" "$out/aligned.apk"
+else
+    keystore="$HOME/.android/debug.keystore"
+    if [[ ! -f "$keystore" ]]; then
+        mkdir -p "$(dirname "$keystore")"
+        "$keytool" -genkeypair -keystore "$keystore" -alias androiddebugkey \
+            -storepass android -keypass android -keyalg RSA -keysize 2048 \
+            -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+    fi
+    echo "Signing with the debug key (not for releases)"
+    "$java" -jar "$tools/lib/apksigner.jar" sign --ks "$keystore" \
+        --ks-pass pass:android --key-pass pass:android \
+        --out "$out/quireink.apk" "$out/aligned.apk"
 fi
-"$java" -jar "$tools/lib/apksigner.jar" sign --ks "$keystore" \
-    --ks-pass pass:android --key-pass pass:android \
-    --out "$out/quireink.apk" "$out/aligned.apk"
 rm -f "$out/unsigned.apk" "$out/aligned.apk" "$out/quireink.apk.idsig"
 echo "Done: $out/quireink.apk"

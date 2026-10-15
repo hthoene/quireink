@@ -1,0 +1,76 @@
+name: Release
+
+# A tag `v1.2.3` (the workspace's version) makes a GitHub release with the
+# Android app signed with the release key, and the release notes from
+# CHANGELOG.md. See docs/releasing.md.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  android:
+    name: Android app
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: The tag is the workspace's version
+        run: |
+          version="$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)"
+          if [[ "v$version" != "$GITHUB_REF_NAME" ]]; then
+            echo "::error::tag $GITHUB_REF_NAME, but Cargo.toml says $version"
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo install cargo-ndk --locked
+      - name: Find the NDK
+        run: echo "ANDROID_NDK_HOME=${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_ROOT}" >> "$GITHUB_ENV"
+      - name: Build the app, signed with the release key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          QUIREINK_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          QUIREINK_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          QUIREINK_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [[ -z "$KEYSTORE_BASE64" ]]; then
+            echo "::error::the secret ANDROID_KEYSTORE_BASE64 is missing (docs/releasing.md)"
+            exit 1
+          fi
+          export QUIREINK_KEYSTORE="$RUNNER_TEMP/release.p12"
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$QUIREINK_KEYSTORE"
+          [[ -n "$QUIREINK_KEY_PASSWORD" ]] || unset QUIREINK_KEY_PASSWORD
+          shells/android/build-apk.sh
+          rm -f "$QUIREINK_KEYSTORE"
+          mkdir -p dist
+          cp target/android/quireink.apk "dist/quireink-$VERSION.apk"
+          (cd dist && sha256sum "quireink-$VERSION.apk" > "quireink-$VERSION.apk.sha256")
+      - name: Release notes from CHANGELOG.md
+        run: |
+          # The section of this version, up to the next one.
+          awk -v head="## [$VERSION]" '
+            index($0, head) == 1 { found = 1; next }
+            found && index($0, "## [") == 1 { exit }
+            found { print }
+          ' CHANGELOG.md > dist/notes.md
+          if [[ ! -s dist/notes.md ]]; then
+            echo "::error::CHANGELOG.md has no section for $VERSION"
+            exit 1
+          fi
+      - name: Make the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=()
+          [[ "$VERSION" == 0.* || "$VERSION" == *-* ]] && prerelease=(--prerelease)
+          gh release create "$GITHUB_REF_NAME" "${prerelease[@]}" \
+            --title "QuireInk $VERSION" --notes-file dist/notes.md \
+            "dist/quireink-$VERSION.apk" "dist/quireink-$VERSION.apk.sha256"

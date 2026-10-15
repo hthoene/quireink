@@ -373,7 +373,7 @@ mod tests {
         let books_in = [
             Book {
                 id: 1,
-                title: String::from("Darlah \"1\""),
+                title: String::from("Fjord \"1\""),
                 authors: String::from("A. Author\nB. Author"),
                 md5: String::from("abc"),
                 pages: 614,
