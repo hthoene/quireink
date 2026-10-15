@@ -22,6 +22,7 @@ mod browse;
 mod catalogs;
 mod edit;
 mod feed;
+mod json;
 mod list;
 mod sync;
 
@@ -117,6 +118,8 @@ fn read_list(
 ) -> feed::Feed {
     if catalog.webdav {
         feed::read_webdav(storage, path, base)
+    } else if json::is_json(storage, path) {
+        json::read(storage, path, base)
     } else {
         feed::read(storage, path, base)
     }

@@ -294,7 +294,7 @@ impl Reader {
 }
 
 /// Whitespace runs as single spaces, at most [`MAX_TEXT`] characters.
-fn clean(text: &str) -> String {
+pub(crate) fn clean(text: &str) -> String {
     let mut out = String::new();
     for word in text.split_whitespace() {
         if !out.is_empty() {

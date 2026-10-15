@@ -803,7 +803,7 @@ makes it replaceable. ✅ done, 🔶 partly, ⬜ open.
 | C16 | More sync: WebDAV folders (Nextcloud, ownCloud) browsed and synced like catalogs; Calibre wireless, Syncthing | `opds` plugin (catalogs of kind WebDAV, `PROPFIND`); Android sends any HTTP method | 🔶 (Calibre wireless needs sockets in the kernel) |
 | C17 | Buttons, held buttons, tap zones, held taps and swipes changed on the device, everywhere or while reading; a left-handed layout | `keys` plugin, `Command::Bind`, `Env::keys`, action `core.nothing`, preset `core.left-handed` | ✅ (custom zone shapes open) |
 | C18 | Home screen of pages of widgets: status line (time, battery), date, continue reading, recent covers, a grid of tools, a large clock, today's reading with a daily goal, the last 7 days, news headlines, a word of the day, any plugin's; swiped or paged through, edited on the device (pencil or long press; with buttons too) | `Registrar::add_widget` with targets (`WidgetTarget`), settings `home.page-1` to `home.page-4`, menu `core.tools` | ✅ |
-| C19 | OPDS: covers in lists (devices with the memory), a folder per catalog, automatic sync (rules), OPDS 2 (JSON) | `opds` plugin, C5, C20 | 🔶 (OPDS 2 open) |
+| C19 | OPDS: covers in lists (devices with the memory), a folder per catalog, automatic sync (rules), OPDS 2 (JSON) | `opds` plugin, C5, C20 | ✅ (OPDS 2: JSON catalogs read as they stream, navigation, publications, groups, covers, search templates, next pages) |
 | C20 | Large-memory devices may use more (covers in lists, caches) without separate code | `DeviceInfo::memory` (`MemoryClass::Small`/`Large`) | ✅ |
 
 ### 12.2 Ideas from KOReader and CrossPoint / CrossInk
