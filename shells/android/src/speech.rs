@@ -317,3 +317,24 @@ fn start(
         Started::Failed
     })
 }
+
+/// Opens the system's speech settings, where the voice, its language and
+/// the engine are chosen; `false` if the device has none.
+pub fn open_settings(app: &AndroidApp) -> bool {
+    with_activity(app, |env, activity| {
+        let action = env.new_string("com.android.settings.TTS_SETTINGS")?;
+        let intent = env.new_object(
+            "android/content/Intent",
+            "(Ljava/lang/String;)V",
+            &[JValue::Object(&action)],
+        )?;
+        env.call_method(
+            activity,
+            "startActivity",
+            "(Landroid/content/Intent;)V",
+            &[JValue::Object(&intent)],
+        )?;
+        Ok(())
+    })
+    .is_some()
+}

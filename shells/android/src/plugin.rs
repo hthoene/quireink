@@ -7,8 +7,9 @@ use android_activity::AndroidApp;
 use quireink_sdk::builtin::{events, groups, menus, params};
 use quireink_sdk::document::Document;
 use quireink_sdk::{
-    ActionSpec, Command, Env, FormatSpec, Id, Manifest, MenuEntry, Params, Plugin, RegisterError,
-    Registrar, SDK_VERSION, SettingKind, SettingSpec, SettingValue, Version,
+    ActionSpec, Canvas, Command, Cx, Env, FormatSpec, Handled, Id, Manifest, MenuEntry, MenuNeed,
+    Params, Plugin, Rect, RegisterError, Registrar, SDK_VERSION, Screen, ScreenSpec, SettingKind,
+    SettingSpec, SettingValue, Version,
 };
 
 use crate::lights::Lights;
@@ -18,6 +19,11 @@ pub const PLUGIN: Id = Id::new_static("android");
 pub const ALLOW_STORAGE: Id = Id::new_static("android.allow-storage");
 /// PDF books, rendered by the system (see `pdf`).
 pub const PDF: Id = Id::new_static("android.pdf");
+/// The voice that reads aloud: opens the system's speech settings.
+pub const VOICE: Id = Id::new_static("android.voice");
+const VOICE_SCREEN: Id = Id::new_static("android.voice-screen");
+/// The reader's settings for reading aloud (see the `reader` plugin).
+const ALOUD_SECTION: &str = "reader.section.aloud";
 /// Frontlight brightness (0 switches it off).
 pub const FRONTLIGHT: Id = Id::new_static("android.frontlight");
 /// Frontlight colour temperature (higher is warmer).
@@ -77,6 +83,7 @@ impl Plugin for AndroidPlugin {
         if let Some(frontlight) = self.frontlight {
             self.register_frontlight(r, frontlight)?;
         }
+        self.register_voice(r)?;
         let (app, screen) = (self.app.clone(), self.screen);
         r.add_format(FormatSpec {
             id: PDF,
@@ -93,7 +100,57 @@ impl Plugin for AndroidPlugin {
     }
 }
 
+/// Opens the system's speech settings and closes at once: the editor of
+/// [`VOICE`].
+struct VoiceSettings {
+    app: AndroidApp,
+}
+
+impl Screen for VoiceSettings {
+    fn draw(&mut self, _: &mut Canvas<'_>, _: &Env<'_>) {}
+
+    fn region(&self, _: &Env<'_>) -> Option<Rect> {
+        Some(Rect::new(0, 0, 0, 0))
+    }
+
+    fn on_show(&mut self, cx: &mut Cx<'_, '_>) {
+        if !crate::speech::open_settings(&self.app) {
+            let text = cx.env().i18n.tr("android.voice.unavailable").to_string();
+            cx.command(Command::Notify(text));
+        }
+        cx.command(Command::Back);
+    }
+
+    fn on_action(&mut self, _: &Id, _: &mut Cx<'_, '_>) -> Handled {
+        Handled::No
+    }
+}
+
 impl AndroidPlugin {
+    /// The voice for reading aloud, with its other settings; it is
+    /// chosen in the system's speech settings.
+    fn register_voice(&self, r: &mut dyn Registrar) -> Result<(), RegisterError> {
+        r.add_setting(
+            SettingSpec::new(
+                VOICE,
+                "android.voice",
+                SettingKind::Text,
+                SettingValue::Text(Cow::Borrowed("")),
+            )
+            .group(groups::READING)
+            .section(ALOUD_SECTION)
+            .editor(VOICE_SCREEN)
+            .description("android.voice.help"),
+        )?;
+        r.set_menu_need(VOICE, MenuNeed::Speech)?;
+        let app = self.app.clone();
+        r.add_screen(ScreenSpec {
+            id: VOICE_SCREEN,
+            title: Cow::Borrowed("android.voice"),
+            factory: Box::new(move |_, _| Box::new(VoiceSettings { app: app.clone() })),
+        })
+    }
+
     /// Brightness and warmth as settings, also in the reader's and the
     /// main menu. They follow the device: its levels at start, and every
     /// change goes to the device.
