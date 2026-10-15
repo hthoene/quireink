@@ -11,6 +11,14 @@
 > [project plan](docs/PLANNING.md) has the
 > [roadmap](docs/PLANNING.md#12-roadmap).
 
+<p align="center">
+  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/1.png" width="24%" alt="The home screen: the date, the book to continue and the one read before">
+  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/2.png" width="24%" alt="A page of Alice's Adventures in Wonderland">
+  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/4.png" width="24%" alt="The reading menu over the page: contents, search, listen, notes, font, night">
+  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/5.png" width="24%" alt="The settings, with a search at the top">
+</p>
+<p align="center"><sub>As on a Boox Go 7 (in the emulator): home screen, reading, the reading menu, the settings.</sub></p>
+
 ## Get it
 
 The Android app (arm64, Android 8 or later) is attached to each
