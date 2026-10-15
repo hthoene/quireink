@@ -1273,6 +1273,7 @@ dependencies = [
  "quireink-plugin-transfer",
  "quireink-plugin-translate",
  "quireink-plugin-vocabulary",
+ "quireink-plugin-wallabag",
  "quireink-plugin-wikipedia",
 ]
 
@@ -1608,6 +1609,16 @@ name = "quireink-plugin-vocabulary"
 version = "0.1.0"
 dependencies = [
  "quireink-i18n",
+ "quireink-sdk",
+]
+
+[[package]]
+name = "quireink-plugin-wallabag"
+version = "0.1.0"
+dependencies = [
+ "quireink-core",
+ "quireink-i18n",
+ "quireink-platform",
  "quireink-sdk",
 ]
 
