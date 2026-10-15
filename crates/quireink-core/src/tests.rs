@@ -820,6 +820,47 @@ fn scheduled_events_come_at_their_time() {
 }
 
 #[test]
+fn bindings_change_at_once_and_are_saved() {
+    let log = log();
+    let mut kernel = Kernel::builder(DEVICE)
+        .plugin(OverlayPlugin { log: log.clone() })
+        .storage(quireink_sdk::MemoryStorage::new())
+        .build()
+        .unwrap();
+    kernel.start(Instant(0));
+    kernel.apply(Command::Bind {
+        layer: String::from("global"),
+        input: String::from("button.menu"),
+        action: Some(actions::TOGGLE_NIGHT_MODE),
+    });
+    kernel.finish();
+    press(&mut kernel, 100, "menu");
+    assert_eq!(
+        kernel.active_screen().map(Id::as_str),
+        Some("ov.base"),
+        "no menu"
+    );
+    assert!(kernel.settings().bool("core.night-mode"));
+    let saved = quireink_sdk::read_file(
+        kernel.shared.storage.as_ref(),
+        quireink_sdk::builtin::CONFIG_FILE,
+        4096,
+    )
+    .unwrap();
+    assert!(String::from_utf8_lossy(&saved).contains("menu = core.toggle-night-mode"));
+
+    // Back to what the plugins bind: the menu again.
+    kernel.apply(Command::Bind {
+        layer: String::from("global"),
+        input: String::from("button.menu"),
+        action: None,
+    });
+    kernel.finish();
+    press(&mut kernel, 300, "menu");
+    assert_eq!(kernel.active_screen().map(Id::as_str), Some("ov.half"));
+}
+
+#[test]
 fn screens_below_overlays_redraw_themselves() {
     let log = log();
     let mut kernel = Kernel::builder(DEVICE)

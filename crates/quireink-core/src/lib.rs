@@ -328,12 +328,12 @@ impl KernelBuilder {
                 slots: Vec::new(),
                 font_dirs: Vec::new(),
                 storage: self.storage.unwrap_or_else(|| Box::new(NoStorage)),
+                keymap: Keymap::default(),
             },
             pending: None,
             unrendered: None,
             framebuffer,
             registry: Registry::default(),
-            keymap: Keymap::default(),
             keymap_sources: Vec::new(),
             keymap_presets: Vec::new(),
             subscriptions: Vec::new(),
@@ -412,7 +412,7 @@ impl KernelBuilder {
         kernel.find_required_plugins();
 
         if let Some(source) = self.device_keymap {
-            for problem in kernel.keymap.load(&source, Origin::Device, true) {
+            for problem in kernel.shared.keymap.load(&source, Origin::Device, true) {
                 kernel.warn(
                     WarningSource::DeviceKeymap,
                     Some(problem.line),
@@ -518,7 +518,6 @@ pub struct Kernel {
     shared: Shared,
     framebuffer: Framebuffer,
     registry: Registry,
-    keymap: Keymap,
     /// Every key map source, to rebuild the key map when the preset changes.
     keymap_sources: Vec<(Origin, Cow<'static, str>)>,
     keymap_presets: Vec<(Id, Cow<'static, str>)>,
@@ -1305,7 +1304,7 @@ impl Kernel {
         }
         for source in staging.keymaps.drain(..) {
             // Validated by the registrar.
-            self.keymap.load(&source, Origin::Plugin, true);
+            self.shared.keymap.load(&source, Origin::Plugin, true);
             self.keymap_sources.push((Origin::Plugin, source));
         }
         self.keymap_presets.append(&mut staging.keymap_presets);
@@ -1428,7 +1427,7 @@ impl Kernel {
         }
         self.keymap_sources
             .push((Origin::User, Cow::Owned(source.to_string())));
-        for problem in self.keymap.load(source, Origin::User, false) {
+        for problem in self.shared.keymap.load(source, Origin::User, false) {
             self.warn(
                 WarningSource::UserConfig,
                 Some(problem.line),
@@ -1449,6 +1448,7 @@ impl Kernel {
         }
         let preset_actions = self.preset_actions();
         let mut unknown: Vec<&Id> = self
+            .shared
             .keymap
             .actions()
             .chain(self.shared.menus.referenced_items())
@@ -1557,7 +1557,7 @@ impl Kernel {
                 }
             }
             layers.push(GLOBAL_KEYMAP_LAYER);
-            self.keymap.resolve(&layers, &key).cloned()
+            self.shared.keymap.resolve(&layers, &key).cloned()
         };
         if let Some(action) = action {
             self.dispatch(action);
@@ -1750,6 +1750,11 @@ impl Kernel {
             }
             Command::SetMenu(menu, entries) => self.set_menu(menu, entries),
             Command::Notify(text) => self.notify(text),
+            Command::Bind {
+                layer,
+                input,
+                action,
+            } => self.bind(&layer, &input, action),
             Command::Schedule(event, params, at) => {
                 self.scheduled.retain(|(_, e, _)| *e != event);
                 self.scheduled.push((at, event, params));
@@ -1801,6 +1806,34 @@ impl Kernel {
         self.notice = Some((screen, self.now.add_millis(u64::from(seconds) * 1000)));
         self.invalidate(region);
         self.output.request_refresh(RefreshMode::Fast);
+    }
+
+    /// Binds an input for the user (see [`Command::Bind`]).
+    fn bind(&mut self, layer: &str, input: &str, action: Option<Id>) {
+        let valid_layer = layer == GLOBAL_KEYMAP_LAYER || Id::parse(layer).is_ok();
+        if !valid_layer || !keymap::is_input(input) {
+            return self.warn(
+                WarningSource::Runtime,
+                None,
+                format!("cannot bind `{input}` in `{layer}`"),
+            );
+        }
+        let section = format!("keymap.{layer}");
+        match &action {
+            Some(action) => self.save_config(&section, input, action.as_str()),
+            None => {
+                let storage = self.shared.storage.as_ref();
+                let source = read_config(storage).unwrap_or_default();
+                let updated = quireink_config::remove(&source, &section, input);
+                let _ = storage.write(CONFIG_FILE, updated.as_bytes());
+            }
+        }
+        // The user's bindings as the file has them now.
+        let source = read_config(self.shared.storage.as_ref()).unwrap_or_default();
+        self.keymap_sources
+            .retain(|(origin, _)| *origin != Origin::User);
+        self.keymap_sources.push((Origin::User, Cow::Owned(source)));
+        self.rebuild_keymap();
     }
 
     /// Takes the notice away, if one shows.
@@ -1870,7 +1903,7 @@ impl Kernel {
             keymap.load(source, *origin, *origin != Origin::User);
         }
         keymap.shrink_to_fit();
-        self.keymap = keymap;
+        self.shared.keymap = keymap;
     }
 
     fn invalidate(&mut self, region: Rect) {
@@ -2313,6 +2346,7 @@ struct Shared {
     /// Folders fonts are read from.
     font_dirs: Vec<String>,
     storage: Box<dyn Storage>,
+    keymap: Keymap,
 }
 
 impl Shared {
@@ -2336,6 +2370,7 @@ impl Shared {
             slots: &self.slots,
             font_dirs: &self.font_dirs,
             storage: self.storage.as_ref(),
+            keys: &self.keymap,
         }
     }
 }

@@ -41,6 +41,7 @@ mod gesture;
 mod hyphenation;
 pub mod icons;
 mod id;
+pub mod keys;
 pub mod md5;
 pub mod qr;
 /// Reading and writing SQLite database files.

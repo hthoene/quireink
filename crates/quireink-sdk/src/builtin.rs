@@ -12,6 +12,10 @@ pub const CORE_PLUGIN: crate::Id = crate::Id::new_static("core");
 pub mod actions {
     use crate::Id;
 
+    /// Does nothing: bound to an input, it stops the input from doing
+    /// anything there.
+    pub const NOTHING: Id = Id::new_static("core.nothing");
+
     pub const NEXT_PAGE: Id = Id::new_static("core.next-page");
     /// "Forward" in the widest sense: next list entry, increase a value
     /// being edited; screens without such a meaning treat it as the next
@@ -243,6 +247,9 @@ pub mod keymap_presets {
     /// on forward confirms (opens the menu while reading), long press on
     /// back goes back.
     pub const TWO_BUTTONS: Id = Id::new_static("core.two-buttons");
+    /// Taps on the left turn forward, on the right back: for the left
+    /// hand.
+    pub const LEFT_HANDED: Id = Id::new_static("core.left-handed");
 }
 
 /// The user's configuration file on the device's storage. Settings changed

@@ -38,6 +38,7 @@ quireink-plugin-browser.workspace = true
 quireink-plugin-opds.workspace = true
 quireink-plugin-rules.workspace = true
 quireink-plugin-profiles.workspace = true
+quireink-plugin-keys.workspace = true
 quireink-plugin-plugin-manager.workspace = true
 quireink-plugin-reader.workspace = true
 quireink-plugin-settings.workspace = true

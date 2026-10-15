@@ -62,7 +62,7 @@ impl Plugin for CorePlugin {
                 out.push(Command::RunAction(target.clone()));
             })
         };
-        let handled: [(Id, &'static str, ActionHandler); 8] = [
+        let handled: [(Id, &'static str, ActionHandler); 9] = [
             // Screens without their own meaning of next/previous turn pages.
             (
                 actions::NEXT,
@@ -98,6 +98,11 @@ impl Plugin for CorePlugin {
                 actions::BACK,
                 "core.action.back",
                 Box::new(|_: &Env<'_>, out: &mut Vec<Command>| out.push(Command::Back)),
+            ),
+            (
+                actions::NOTHING,
+                "core.action.nothing",
+                Box::new(|_: &Env<'_>, _: &mut Vec<Command>| {}),
             ),
             (
                 actions::HOME,
@@ -443,6 +448,10 @@ impl Plugin for CorePlugin {
         r.add_keymap_preset(
             keymap_presets::TWO_BUTTONS,
             Cow::Borrowed(include_str!("../keymaps/two-buttons.ini")),
+        )?;
+        r.add_keymap_preset(
+            keymap_presets::LEFT_HANDED,
+            Cow::Borrowed(include_str!("../keymaps/left-handed.ini")),
         )?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/en.ini")))?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/de.ini")))?;

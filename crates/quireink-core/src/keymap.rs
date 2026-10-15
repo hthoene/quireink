@@ -113,6 +113,17 @@ impl InputKey {
     }
 }
 
+/// Whether `key` names an input, e.g. `button.menu` or `tap.center`.
+pub(crate) fn is_input(key: &str) -> bool {
+    InputKey::parse(key).is_some()
+}
+
+impl quireink_sdk::keys::KeyBindings for Keymap {
+    fn bound(&self, layers: &[&str], input: &str) -> Option<Id> {
+        self.resolve(layers, &InputKey::parse(input)?).cloned()
+    }
+}
+
 /// Where a binding comes from. Later sources override earlier ones.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Origin {

@@ -139,6 +139,17 @@ pub enum Command {
     /// submenus), saved in `[menus]` of `quireink.ini`; `None` returns to
     /// the entries plugins contribute.
     SetMenu(Id, Option<alloc::vec::Vec<Id>>),
+    /// Binds `input` (as in `quireink.ini`, e.g. `button.menu` or
+    /// `tap.center`) in key map `layer` (a screen or slot id, or
+    /// `global`) to `action`, saved in the user's `quireink.ini` and in
+    /// effect at once; `None` returns it to what plugins and presets bind.
+    /// Bind [`actions::NOTHING`](crate::builtin::actions::NOTHING) to make
+    /// an input do nothing.
+    Bind {
+        layer: alloc::string::String,
+        input: alloc::string::String,
+        action: Option<Id>,
+    },
     /// Emits event `.0` with parameters `.1` at time `.2`, whatever screen
     /// is open then: a timer for plugins, e.g. for something to do at a
     /// time of day. Scheduling the same event again moves it; it is
