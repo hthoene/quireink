@@ -22,7 +22,9 @@ runs:
         rustup toolchain install "$RUST_VERSION" --profile minimal --target aarch64-linux-android
         # Over rust-toolchain.toml, which follows stable.
         echo "RUSTUP_TOOLCHAIN=$RUST_VERSION" >> "$GITHUB_ENV"
-        yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+        # `yes` ends with SIGPIPE when sdkmanager is done, which pipefail
+        # would take for a failure.
+        (yes || true) | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
           "ndk;$NDK_VERSION" "build-tools;$BUILD_TOOLS_VERSION" "platforms;android-$PLATFORM_VERSION" > /dev/null
         echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
         cargo +"$RUST_VERSION" install cargo-ndk --version "$CARGO_NDK_VERSION" --locked

@@ -7,6 +7,11 @@ on:
   workflow_dispatch:
   push:
     tags: ["v*"]
+    branches: [main]
+    paths:
+      - "shells/android/**"
+      - ".github/actions/android-tools/**"
+      - ".github/workflows/reproducible.yml"
 
 permissions:
   contents: read
