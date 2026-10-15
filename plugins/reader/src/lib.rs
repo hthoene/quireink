@@ -69,6 +69,8 @@ pub const SEARCH_SCREEN: Id = Id::new_static("reader.search-results");
 /// The keyboard's replies: what to search for, which page to go to.
 const SEARCH_ENTERED: Id = Id::new_static("reader.search-entered");
 const PAGE_ENTERED: Id = Id::new_static("reader.page-entered");
+/// The keyboard's reply with a note on a highlight.
+const NOTE_ENTERED: Id = Id::new_static("reader.note-entered");
 /// Font and layout, shown as a panel ([`actions::QUICK_SETTINGS`]), and
 /// the submenu "More" of [`MENU`]: menus like any other, so plugins add
 /// entries and users redefine them in `[menus]` or the menu editor.
@@ -124,6 +126,11 @@ pub mod settings {
     pub const ALOUD_TURN: Id = Id::new_static("reader.aloud-turn-pages");
     /// Reading aloud stops by itself after a while (a sleep timer).
     pub const ALOUD_TIMER: Id = Id::new_static("reader.aloud-timer");
+    /// How highlights look: [`HIGHLIGHT_MARKER`] (gray) or
+    /// [`HIGHLIGHT_UNDERLINE`].
+    pub const HIGHLIGHT_STYLE: Id = Id::new_static("reader.highlight-style");
+    pub const HIGHLIGHT_MARKER: &str = "reader.highlight-style.marker";
+    pub const HIGHLIGHT_UNDERLINE: &str = "reader.highlight-style.underline";
     /// Seconds between pages turned by themselves ([`actions::AUTO_TURN`]).
     pub const AUTO_TURN_SECONDS: Id = Id::new_static("reader.auto-turn-seconds");
 }
@@ -173,6 +180,8 @@ pub mod actions {
     pub const AUTO_TURN: Id = Id::new_static("reader.auto-turn");
     /// Shows the book's information (slot `core.book-info`).
     pub const BOOK_INFO: Id = Id::new_static("reader.book-info");
+    /// A note on the selected text (highlighted with it).
+    pub const NOTE: Id = Id::new_static("reader.selection.note");
     /// Reads aloud from the selected text on.
     pub const READ_FROM: Id = Id::new_static("reader.selection.read-aloud");
     /// Copies the selected text to the clipboard.
@@ -251,6 +260,7 @@ impl Plugin for Reader {
             (actions::HIGHLIGHT, "reader.select.highlight"),
             (actions::COPY, "reader.select.copy"),
             (actions::READ_FROM, "reader.select.read-aloud"),
+            (actions::NOTE, "reader.select.note"),
             (actions::BOOK_INFO, "reader.book-info"),
             (actions::AUTO_TURN, "reader.auto-turn"),
             (actions::EXTEND, "reader.select.extend"),
@@ -267,6 +277,7 @@ impl Plugin for Reader {
         for (item, order) in [
             (actions::LOOK_UP, 10),
             (actions::HIGHLIGHT, 20),
+            (actions::NOTE, 22),
             (actions::READ_FROM, 25),
             (actions::COPY, 30),
             (actions::EXTEND, 80),
@@ -381,6 +392,18 @@ impl Plugin for Reader {
             )
             .group(groups::CONTROLS)
             .description("reader.setting.corner-bookmark.help"),
+            SettingSpec::new(
+                settings::HIGHLIGHT_STYLE,
+                "reader.setting.highlight-style",
+                SettingKind::Choice(alloc::vec![
+                    Cow::Borrowed(settings::HIGHLIGHT_MARKER),
+                    Cow::Borrowed(settings::HIGHLIGHT_UNDERLINE),
+                ]),
+                SettingValue::Text(Cow::Borrowed(settings::HIGHLIGHT_MARKER)),
+            )
+            .group(groups::READING)
+            .section(setting_sections::PAGE)
+            .description("reader.setting.highlight-style.help"),
             SettingSpec::new(
                 settings::AUTO_TURN_SECONDS,
                 "reader.setting.auto-turn-seconds",

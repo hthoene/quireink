@@ -698,18 +698,21 @@ impl ReaderScreen {
 
     /// The bar's items for the current selection.
     fn items(&self, env: &Env<'_>, words: &[WordBox]) -> Vec<Item> {
-        let highlighted = match (&self.book, self.selection) {
+        // The highlight under the selection, if any, and whether it has a
+        // note.
+        let highlight = match (&self.book, self.selection) {
             (Ok(book), Some(selection)) => {
                 let (lo, hi) = selection.range();
-                words.get(lo).zip(words.get(hi)).is_some_and(|(a, b)| {
+                words.get(lo).zip(words.get(hi)).and_then(|(a, b)| {
                     book.marks
                         .iter()
-                        .any(|m| m.kind == Kind::Highlight && m.overlaps(a.start, b.end))
+                        .find(|m| m.kind == Kind::Highlight && m.overlaps(a.start, b.end))
+                        .map(|m| m.noted)
                 })
             }
-            _ => false,
+            _ => None,
         };
-        selection::items(env, highlighted)
+        selection::items(env, highlight)
     }
 
     /// Changes the selection and redraws what it covered and covers.
@@ -801,13 +804,50 @@ impl ReaderScreen {
                         kind: Kind::Highlight,
                         start,
                         end,
+                        noted: false,
                     },
                     percent: (book.document.progress(start) * 100.0 + 0.5) as u8,
                     text: annotations::snippet(&text),
+                    note: String::new(),
                 };
                 annotations::add(env.storage, &book.dir, annotation);
             }
             book.marks = annotations::marks(env.storage, &book.dir);
+        } else if *item == crate::actions::NOTE {
+            // On the highlight there (made if there is none), typed on
+            // the keyboard.
+            let existing = book
+                .marks
+                .iter()
+                .find(|m| m.kind == Kind::Highlight && m.overlaps(start, end))
+                .map(|m| m.start);
+            let at = existing.unwrap_or_else(|| {
+                annotations::add(
+                    env.storage,
+                    &book.dir,
+                    Annotation {
+                        mark: Mark {
+                            kind: Kind::Highlight,
+                            start,
+                            end,
+                            noted: false,
+                        },
+                        percent: (book.document.progress(start) * 100.0 + 0.5) as u8,
+                        text: annotations::snippet(&text),
+                        note: String::new(),
+                    },
+                );
+                start
+            });
+            book.marks = annotations::marks(env.storage, &book.dir);
+            let note = annotations::note_of(env.storage, &book.dir, at);
+            cx.command(Command::OpenSlot(
+                slots::KEYBOARD,
+                crate::toc::locator_params(&book.path, at)
+                    .with(params::TITLE, env.i18n.tr("reader.note.prompt").to_string())
+                    .with(params::TEXT, note)
+                    .with(params::REPLY, crate::NOTE_ENTERED.as_str()),
+            ));
         } else if *item != crate::actions::CANCEL {
             cx.command(Command::Emit(
                 crate::TEXT_CHOSEN,
@@ -1157,9 +1197,11 @@ impl ReaderScreen {
                         kind: Kind::Bookmark,
                         start,
                         end: start,
+                        noted: false,
                     },
                     percent: (book.percent() + 0.5) as u8,
                     text: annotations::snippet(&text.join(" ")),
+                    note: String::new(),
                 },
             );
         }
@@ -1870,7 +1912,7 @@ impl Book {
     }
 
     /// Highlights behind the text: light gray, one shape per line.
-    fn draw_highlights(&self, canvas: &mut Canvas<'_>, words: &[WordBox]) {
+    fn draw_highlights(&self, canvas: &mut Canvas<'_>, env: &Env<'_>, words: &[WordBox]) {
         let highlights: Vec<&Mark> = self
             .marks
             .iter()
@@ -1884,14 +1926,36 @@ impl Book {
                 .iter()
                 .any(|m| m.overlaps(words[i].start, words[i].end))
         });
+        let underline = env.settings.text(crate::settings::HIGHLIGHT_STYLE.as_str())
+            == crate::settings::HIGHLIGHT_UNDERLINE;
+        let line = env.metrics.tenth_mm(4).max(2);
         for b in boxes {
-            canvas.fill_rect(
-                i32::from(b.x) - 2,
-                i32::from(b.y),
-                u32::from(b.width) + 4,
-                u32::from(b.height),
-                Color::gray(205),
-            );
+            if underline {
+                canvas.fill_rect(
+                    i32::from(b.x),
+                    b.bottom() as i32 - line as i32,
+                    u32::from(b.width),
+                    line,
+                    Color::BLACK,
+                );
+            } else {
+                canvas.fill_rect(
+                    i32::from(b.x) - 2,
+                    i32::from(b.y),
+                    u32::from(b.width) + 4,
+                    u32::from(b.height),
+                    Color::gray(205),
+                );
+            }
+        }
+        // A note's sign in the right margin, beside its first line.
+        let style = UiStyle::new(env);
+        let size = style.small;
+        let x = self.typography.x + self.typography.width + (style.gap as f32) / 2.0;
+        for mark in highlights.iter().filter(|m| m.noted) {
+            if let Some(first) = words.iter().find(|w| mark.overlaps(w.start, w.end)) {
+                ui::draw_icon(canvas, env, "note", size, x, first.area, Color::BLACK);
+            }
         }
     }
 
@@ -2122,7 +2186,7 @@ impl Screen for ReaderScreen {
         } else {
             Vec::new()
         };
-        book.draw_highlights(canvas, &words);
+        book.draw_highlights(canvas, env, &words);
         book.draw_page(canvas, env);
         book.draw_links(canvas, env, &words);
         book.draw_back(canvas, env);
@@ -2491,6 +2555,17 @@ impl Screen for ReaderScreen {
                 book.found = Some((at, end));
                 cx.request_redraw();
             }
+            return;
+        }
+        if *event == crate::NOTE_ENTERED
+            && this_book
+            && let Some(at) = crate::toc::locator_of(params)
+        {
+            let env = *cx.env();
+            let note = params.get(params::TEXT).unwrap_or_default();
+            annotations::set_note(env.storage, &book.dir, at, note);
+            book.marks = annotations::marks(env.storage, &book.dir);
+            cx.request_redraw();
             return;
         }
         if *event == crate::SEARCH_ENTERED && this_book {

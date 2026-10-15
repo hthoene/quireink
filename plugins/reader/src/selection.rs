@@ -13,7 +13,7 @@ use quireink_sdk::ui::{self, UiStyle};
 use quireink_sdk::{Canvas, Color, Env, Id, Point, Rect};
 
 use crate::SELECTION_MENU;
-use crate::actions::{CANCEL, EXTEND, HIGHLIGHT, MORE};
+use crate::actions::{CANCEL, EXTEND, HIGHLIGHT, MORE, NOTE};
 use crate::screen::WordBox;
 
 /// What the buttons do with the selection.
@@ -98,10 +98,12 @@ impl Selection {
 /// readable labels; if not all do, *More* before the last place opens the
 /// whole menu as a list. *Cancel* always stays visible, at the end, since
 /// tapping the page mostly hits words, which extends the selection.
-/// *Highlight* reads *Remove highlight* on highlighted text. With buttons,
+/// *Highlight* reads *Remove highlight* on highlighted text (`highlight`
+/// tells whether that has a note), *Note* reads *Edit note* on a noted
+/// one. With buttons,
 /// *Cancel* is left out (back cancels); on touch screens *Extend* is
 /// (tapping words extends the selection).
-pub(crate) fn items(env: &Env<'_>, highlighted: bool) -> Vec<Item> {
+pub(crate) fn items(env: &Env<'_>, highlight: Option<bool>) -> Vec<Item> {
     let mut all: Vec<Item> = env
         .menus
         .items(SELECTION_MENU.as_str())
@@ -112,8 +114,10 @@ pub(crate) fn items(env: &Env<'_>, highlighted: bool) -> Vec<Item> {
         })
         .map(|item| Item {
             id: item.id.clone(),
-            title: if *item.id == HIGHLIGHT && highlighted {
+            title: if *item.id == HIGHLIGHT && highlight.is_some() {
                 "reader.select.unhighlight".to_string()
+            } else if *item.id == NOTE && highlight == Some(true) {
+                "reader.select.edit-note".to_string()
             } else {
                 item.title.to_string()
             },

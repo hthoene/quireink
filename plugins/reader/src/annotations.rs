@@ -6,8 +6,8 @@
 //! They are kept in `annotations.txt` in the book's data folder, one per
 //! line, sorted by position: kind, start and end (section and offset in
 //! the source, so they outlast font sizes and layouts), the reading
-//! progress and a snippet of the text. While reading, only the positions
-//! are held in memory.
+//! progress, a snippet of the text and the reader's note on it. While
+//! reading, only the positions are held in memory.
 
 use alloc::format;
 use alloc::string::{String, ToString};
@@ -45,6 +45,8 @@ pub(crate) struct Mark {
     pub kind: Kind,
     pub start: Locator,
     pub end: Locator,
+    /// It has a note.
+    pub noted: bool,
 }
 
 impl Mark {
@@ -61,6 +63,8 @@ pub(crate) struct Annotation {
     /// Reading progress at the start, in percent.
     pub percent: u8,
     pub text: String,
+    /// What the reader noted on it, if anything.
+    pub note: String,
 }
 
 fn file(dir: &str) -> String {
@@ -84,7 +88,7 @@ pub(crate) fn marks(storage: &dyn Storage, dir: &str) -> Vec<Mark> {
 }
 
 fn parse(line: &str) -> Option<Annotation> {
-    let mut fields = line.splitn(7, '\t');
+    let mut fields = line.splitn(8, '\t');
     let kind = match fields.next()? {
         "b" => Kind::Bookmark,
         "h" => Kind::Highlight,
@@ -95,10 +99,17 @@ fn parse(line: &str) -> Option<Annotation> {
     let end = Locator::new(number()?, number()?);
     let percent = number()?.min(100) as u8;
     let text = fields.next().unwrap_or_default().to_string();
+    let note = fields.next().unwrap_or_default().to_string();
     Some(Annotation {
-        mark: Mark { kind, start, end },
+        mark: Mark {
+            kind,
+            start,
+            end,
+            noted: !note.is_empty(),
+        },
         percent,
         text,
+        note,
     })
 }
 
@@ -110,13 +121,14 @@ fn save(storage: &dyn Storage, dir: &str, annotations: &[Annotation]) {
             Kind::Highlight => 'h',
         };
         out.push_str(&format!(
-            "{kind}\t{}\t{}\t{}\t{}\t{}\t{}\n",
+            "{kind}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
             a.mark.start.section,
             a.mark.start.offset,
             a.mark.end.section,
             a.mark.end.offset,
             a.percent,
-            a.text
+            a.text,
+            one_line(&a.note)
         ));
     }
     let _ = storage.write(&file(dir), out.as_bytes());
@@ -137,6 +149,46 @@ pub(crate) fn snippet(text: &str) -> String {
         out.push('…');
     }
     out
+}
+
+/// `text` on one line.
+fn one_line(text: &str) -> String {
+    text.chars()
+        .map(|c| {
+            if c == '\t' || c == '\n' || c == '\r' {
+                ' '
+            } else {
+                c
+            }
+        })
+        .collect::<String>()
+        .trim()
+        .to_string()
+}
+
+/// Puts `note` on the highlight that starts at `start` (an empty one
+/// removes it); `false` if there is no such highlight.
+pub(crate) fn set_note(storage: &dyn Storage, dir: &str, start: Locator, note: &str) -> bool {
+    let mut all = load(storage, dir);
+    let Some(a) = all
+        .iter_mut()
+        .find(|a| a.mark.kind == Kind::Highlight && a.mark.start == start)
+    else {
+        return false;
+    };
+    a.note = one_line(note);
+    a.mark.noted = !a.note.is_empty();
+    save(storage, dir, &all);
+    true
+}
+
+/// The note on the highlight that starts at `start`.
+pub(crate) fn note_of(storage: &dyn Storage, dir: &str, start: Locator) -> String {
+    load(storage, dir)
+        .into_iter()
+        .find(|a| a.mark.kind == Kind::Highlight && a.mark.start == start)
+        .map(|a| a.note)
+        .unwrap_or_default()
 }
 
 /// Adds an annotation.
@@ -175,6 +227,9 @@ pub(crate) fn markdown(env: &Env<'_>, title: &str, author: &str, all: &[Annotati
         text.push_str(&format!("## {}\n\n", env.i18n.tr("reader.highlights")));
         for a in highlights {
             text.push_str(&format!("> {}\n>\n> {} %\n\n", a.text, a.percent));
+            if !a.note.is_empty() {
+                text.push_str(&format!("{}\n\n", a.note));
+            }
         }
     }
     let bookmarks: Vec<&Annotation> = all
@@ -337,7 +392,12 @@ impl Screen for AnnotationsScreen {
                         ),
                     ),
                 };
-                let note = format!("{} · {} %", env.i18n.tr(kind), a.percent);
+                let what = if a.note.is_empty() {
+                    env.i18n.tr(kind)
+                } else {
+                    a.note.as_str()
+                };
+                let note = format!("{what} · {} %", a.percent);
                 ui::draw_noted_row(canvas, env, &style, rect, focused, &title, "", &note);
             });
     }
@@ -404,9 +464,11 @@ mod tests {
                 kind,
                 start: Locator::new(1, start),
                 end: Locator::new(1, end),
+                noted: false,
             },
             percent: 5,
             text: snippet(text),
+            note: String::new(),
         }
     }
 
@@ -433,6 +495,16 @@ mod tests {
                 .mark
                 .overlaps(Locator::new(1, 60), Locator::new(1, 70))
         );
+        // Notes on highlights.
+        assert!(set_note(&storage, "b", Locator::new(1, 50), "Why?\tReally"));
+        assert_eq!(note_of(&storage, "b", Locator::new(1, 50)), "Why? Really");
+        assert!(marks(&storage, "b")[1].noted);
+        assert!(!set_note(
+            &storage,
+            "b",
+            Locator::new(1, 10),
+            "not a highlight"
+        ));
         assert!(remove(&storage, "b", |m| m.kind == Kind::Bookmark));
         assert_eq!(marks(&storage, "b").len(), 1);
         assert!(!remove(&storage, "b", |m| m.kind == Kind::Bookmark));

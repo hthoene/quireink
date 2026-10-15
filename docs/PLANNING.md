@@ -818,7 +818,7 @@ not yet. Each idea stays simple by default and replaceable by plugins.
 | I2 | A slider to skim through the book (chapter marks on it), back to where one was with one tap | KOReader (skim widget) | ⬜ |
 | I3 | "Back" after any jump (contents, search, go to page, skimming), not only after links | KOReader | ✅ |
 | I4 | Turning pages by itself every few seconds | KOReader (Autoturn), CrossPoint | ✅ (More > "Turn pages automatically", a clock in the status line) |
-| I5 | Notes on highlights; highlight styles (marker, underline, strikeout) | KOReader | ⬜ |
+| I5 | Notes on highlights; highlight styles (marker, underline, strikeout) | KOReader | ✅ (Note in the selection bar, a sign in the margin, in the list and the export; setting "Highlights": marker or underlined) |
 | I6 | Book information: description, subjects, series, file, from the library and the reader | KOReader | ✅ (hold a book in the library; tap the title in the reader's menu; slot `core.book-info`) |
 | I7 | The printed edition's page numbers (EPUB `page-list`) | KOReader | ⬜ |
 | I8 | Contents made from the headings where a book has none or a poor one | KOReader | ⬜ |
