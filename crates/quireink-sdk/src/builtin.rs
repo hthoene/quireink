@@ -254,6 +254,22 @@ pub mod groups {
     pub const OTHER: Id = Id::new_static("core.group.other");
 }
 
+/// Parts of setting groups shared by plugins, in the order shown: a
+/// setting names one with
+/// [`SettingSpec::section`](crate::SettingSpec::section). Other parts
+/// (any translation key) follow these.
+pub mod setting_sections {
+    /// The reading font, its size and weight.
+    pub const FONT: &str = "core.setting-section.font";
+    /// How a page is set: spacing, margins, justification, hyphenation.
+    pub const PAGE: &str = "core.setting-section.page";
+    /// What happens when reading: books opened again, bookmarks.
+    pub const BEHAVIOUR: &str = "core.setting-section.behaviour";
+
+    /// The standard parts in their order.
+    pub const ORDER: [&str; 3] = [FONT, PAGE, BEHAVIOUR];
+}
+
 /// Sections of the main menu ([`menus::MAIN`]): plugins put their
 /// entries in one by their order (reading 1 to 29, tools 31 to 79,
 /// system 81 to 99).

@@ -132,10 +132,10 @@ impl StatusLine<'_> {
             .all(|list| item_ids(list).next().is_none())
     }
 
-    /// Draws the items' current values. Long texts (a chapter's title) are
-    /// shortened with "…": the right part takes at most half of the line
-    /// while others show, the centre what is left beside it, the left part
-    /// the rest.
+    /// Draws the items' current values. The short ones (the page, the
+    /// time, the battery) stay whole: the right and centre parts take what
+    /// they need, and long texts such as a chapter's title on the left are
+    /// shortened with "…" to the rest (keeping a few letters at least).
     pub fn draw(
         &self,
         canvas: &mut Canvas<'_>,
@@ -161,11 +161,21 @@ impl StatusLine<'_> {
         let x0 = f32::from(area.x);
         let x1 = x0 + f32::from(area.width);
         let line = f32::from(area.width);
-        let others = !left.is_empty() || !center.is_empty();
-        let right_x = x1 - width(&right).min(if others { line / 2.0 } else { line });
-        // Room for the centre: beside the right part, leaving the left a
-        // quarter of the line if it shows anything.
-        let left_room = if left.is_empty() { 0.0 } else { line / 4.0 };
+        // The left keeps a few letters, the centre all it needs; the
+        // right gets the rest.
+        let left_room = if left.is_empty() {
+            0.0
+        } else {
+            width(&left).min(size * 3.0)
+        };
+        let center_need = if center.is_empty() {
+            0.0
+        } else {
+            width(&center) + gap
+        };
+        let beside = left_room + if left.is_empty() { 0.0 } else { gap } + center_need;
+        let right_room = (line - beside).max(line / 2.0);
+        let right_x = x1 - width(&right).min(right_room);
         let center_room = (right_x - gap - x0 - left_room).max(0.0);
         let center_w = width(&center).min(center_room);
         // Centred, unless that runs into the right part.

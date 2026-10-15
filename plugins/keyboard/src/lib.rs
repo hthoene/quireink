@@ -276,17 +276,24 @@ impl KeyboardScreen {
         screen
     }
 
-    /// The box of the text field.
+    /// The box of the text field: on the margins, like its title above
+    /// and the keys below.
     fn text_box(&self) -> Rect {
         let f = self.field;
         let title_height = (self.style.small * 1.5) as u16;
-        let m = self.style.margin as u16 / 2;
+        let m = self.style.margin as u16;
         Rect::new(
             f.x + m,
             f.y + title_height,
-            f.width - self.style.margin as u16,
+            f.width.saturating_sub(2 * m),
             f.height - title_height,
         )
+    }
+
+    /// Keys are drawn inset by this inside their area (room for the
+    /// focus frame), so their areas reach this far over the margins.
+    fn key_inset(&self) -> u32 {
+        ui::button_border(&self.style) * 3
     }
 
     /// *Paste* at the right end of the text field, when there is text on
@@ -319,8 +326,10 @@ impl KeyboardScreen {
         }
         let keys = &self.rows[row];
         let total: u32 = keys.iter().map(|(_, w)| u32::from(*w)).sum::<u32>().max(1);
-        let width = u32::from(self.keys.width) - self.style.margin;
-        let x0 = u32::from(self.keys.x) + self.style.margin / 2;
+        // The keys' visible edges on the margins.
+        let outside = self.style.margin.saturating_sub(self.key_inset());
+        let width = u32::from(self.keys.width) - 2 * outside;
+        let x0 = u32::from(self.keys.x) + outside;
         let before: u32 = keys[..index].iter().map(|(_, w)| u32::from(*w)).sum();
         let left = x0 + width * before / total;
         let right = x0 + width * (before + u32::from(keys[index].1)) / total;
@@ -657,7 +666,7 @@ impl KeyboardScreen {
         let area = self.key_area(row, index);
         // Buttons as everywhere, with room for the focus frame.
         let h = ui::button_height(area);
-        let pad = ui::button_border(&style) as u16 * 3;
+        let pad = self.key_inset() as u16;
         let r = Rect::new(
             area.x + pad,
             area.y + (area.height - h) / 2,

@@ -1,4 +1,4 @@
-//! Rows of different heights on pages: entries and the headings of
+//! Rows of different heights on pages (see [`Rows`]): entries and the headings of
 //! sections, which take less room and are never focused. A section that
 //! goes on over a page break has its heading again at the top of the next
 //! page.
@@ -6,11 +6,11 @@
 use alloc::vec::Vec;
 use core::ops::Range;
 
-use quireink_sdk::ui::ListChange;
-use quireink_sdk::{Point, Rect};
+use crate::ui::ListChange;
+use crate::{Point, Rect};
 
 #[derive(Debug)]
-pub(crate) struct Rows {
+pub struct Rows {
     pub area: Rect,
     heights: Vec<u16>,
     headings: Vec<bool>,
@@ -58,6 +58,10 @@ impl Rows {
 
     pub fn len(&self) -> usize {
         self.heights.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.heights.is_empty()
     }
 
     /// The page holding row `index`.

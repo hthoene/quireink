@@ -106,6 +106,10 @@ pub struct SettingSpec {
     /// A number better set by eye than by its value, such as a light's
     /// brightness: panels show a slider.
     pub slider: bool,
+    /// Translation key of the part of its group it belongs to (e.g.
+    /// [`setting_sections::FONT`](crate::builtin::setting_sections::FONT)),
+    /// shown as a heading above it in large groups.
+    pub section: Option<Cow<'static, str>>,
 }
 
 impl SettingSpec {
@@ -130,7 +134,15 @@ impl SettingSpec {
             scoped: false,
             step: 1,
             slider: false,
+            section: None,
         }
+    }
+
+    /// Puts the setting into a part of its group (see
+    /// [`SettingSpec::section`]).
+    pub fn section(mut self, key: impl Into<Cow<'static, str>>) -> Self {
+        self.section = Some(key.into());
+        self
     }
 
     /// A number set with a slider in panels (see [`SettingSpec::slider`]).

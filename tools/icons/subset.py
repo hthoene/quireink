@@ -73,6 +73,24 @@ def main():
     font = TTFont(sys.argv[1])
     subsetter.populate(unicodes=codes.values())
     subsetter.subset(font)
+    # Tabler's metrics put every left side bearing at 0 although the
+    # drawings start further right; renderers that follow the metrics
+    # (as QuireInk's does) would draw icons off centre. The bearings are
+    # set from the drawings, and the ascent and descent to the drawings'
+    # extent, so an icon centred by its line box is centred by its ink.
+    glyf, hmtx = font["glyf"], font["hmtx"]
+    top, bottom = 0, 0
+    for name in font.getGlyphOrder():
+        glyph = glyf[name]
+        if glyph.numberOfContours == 0:
+            continue
+        glyph.recalcBounds(glyf)
+        advance, _ = hmtx[name]
+        hmtx[name] = (advance, glyph.xMin)
+        top, bottom = max(top, glyph.yMax), min(bottom, glyph.yMin)
+    font["hhea"].ascent, font["hhea"].descent = top, bottom
+    font["OS/2"].sTypoAscender, font["OS/2"].sTypoDescender = top, bottom
+    font["OS/2"].usWinAscent, font["OS/2"].usWinDescent = top, -bottom
     # Named for what it is now.
     for record in font["name"].names:
         if record.nameID in (1, 4, 6):

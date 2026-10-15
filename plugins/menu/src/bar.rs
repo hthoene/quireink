@@ -48,8 +48,10 @@ pub(crate) struct BarScreen {
     page: String,
     /// Where the title and text are.
     info: Rect,
-    /// Where each entry is.
+    /// Where each entry is drawn (as wide as its icon or label).
     cells: Vec<Rect>,
+    /// Where each entry is tapped.
+    targets: Vec<Rect>,
     focus: usize,
     /// The focus is shown (buttons used, or no touch screen).
     keys: bool,
@@ -91,28 +93,78 @@ impl BarScreen {
             (line + small) as u16 + gap
         };
         let info = Rect::new(0, gap, display.width, info_height);
-        // As many to a row as fit comfortably; rows are filled evenly.
+        // Columns as wide as their entries, justified between the margins:
+        // the first starts under the title, the last ends with the page.
+        // As many to a row as fit with a gap between them.
+        let margin = style.margin as u16;
+        let room = f32::from(display.width.saturating_sub(2 * margin));
+        let size = style.text * ICON_SCALE;
+        let widths: Vec<f32> = entries
+            .iter()
+            .map(|e| {
+                let label = style
+                    .font(env)
+                    .map_or(0.0, |f| f.measure(style.small, &e.label));
+                let icon = e
+                    .icon
+                    .as_deref()
+                    .map_or(0.0, |i| ui::icon_width(env, i, size));
+                (label.max(icon) + 0.99) as u32 as f32
+            })
+            .collect();
+        let least_gap = f32::from(gap) * 2.0;
         let count = entries.len().max(1);
-        let narrowest = (style.row * 13 / 10).max(1) as usize;
-        let per_row = (usize::from(display.width) / narrowest).clamp(1, count);
-        let rows = count.div_ceil(per_row);
+        let column_widths = |columns: usize| -> Vec<f32> {
+            (0..columns)
+                .map(|c| {
+                    widths
+                        .iter()
+                        .skip(c)
+                        .step_by(columns)
+                        .fold(0.0f32, |a, &w| a.max(w))
+                })
+                .collect()
+        };
+        let columns = (1..=count)
+            .rev()
+            .find(|&n| column_widths(n).iter().sum::<f32>() + least_gap * (n - 1) as f32 <= room)
+            .unwrap_or(1);
+        // Rows filled evenly (four and three rather than five and two).
+        let rows = count.div_ceil(columns);
         let columns = count.div_ceil(rows);
-        let cell_width = display.width / columns as u16;
-        let cell_height = (style.text * ICON_SCALE + small) as u16 + 2 * gap;
+        let column_width = column_widths(columns);
+        let spare = (room - column_width.iter().sum::<f32>()).max(0.0);
+        let between = if columns > 1 {
+            spare / (columns - 1) as f32
+        } else {
+            0.0
+        };
+        let lefts: Vec<f32> = column_width
+            .iter()
+            .scan(f32::from(margin), |x, &w| {
+                let left = *x;
+                *x += w + between;
+                Some(left)
+            })
+            .collect();
+        let cell_height = (size + small) as u16 + 2 * gap;
         let top = info.y + info.height + gap;
-        let cells = (0..entries.len())
+        let cells: Vec<Rect> = (0..entries.len())
             .map(|i| {
                 let (row, column) = (i / columns, i % columns);
-                // A shorter last row is centred.
-                let in_row = (entries.len() - row * columns).min(columns);
-                let offset = (columns - in_row) as u16 * cell_width / 2;
                 Rect::new(
-                    offset + column as u16 * cell_width,
+                    lefts[column] as u16,
                     top + row as u16 * cell_height,
-                    cell_width,
+                    column_width[column] as u16,
                     cell_height,
                 )
             })
+            .collect();
+        // Taps count up to halfway to the next entry.
+        let half = (between / 2.0) as u16;
+        let targets = cells
+            .iter()
+            .map(|c| Rect::new(c.x.saturating_sub(half), c.y, c.width + 2 * half, c.height))
             .collect();
         let border = (style.line * 2) as u16;
         let height = top + rows as u16 * cell_height + gap + border;
@@ -124,6 +176,7 @@ impl BarScreen {
             page,
             info,
             cells,
+            targets,
             focus: 0,
             keys: !env.device.input.touch,
             style,
@@ -232,21 +285,24 @@ impl Screen for BarScreen {
         let small_line = font.line_metrics(style.small).line_height as u16;
         for (i, (entry, cell)) in self.entries.iter().zip(&self.cells).enumerate() {
             let on = Self::on(env, &entry.id);
-            let inner = Rect::new(
-                cell.x + style.gap as u16 / 2,
-                cell.y,
-                cell.width.saturating_sub(style.gap as u16),
-                cell.height,
+            let inner = *cell;
+            // Switched on or focused: a frame a little around the entry.
+            let pad = style.gap as u16 / 2;
+            let frame = Rect::new(
+                inner.x.saturating_sub(pad),
+                inner.y,
+                inner.width + 2 * pad,
+                inner.height,
             );
             if on {
-                ui::fill(canvas, inner, Color::BLACK);
+                ui::fill(canvas, frame, Color::BLACK);
             }
             if self.keys && i == self.focus {
                 canvas.stroke_rect(
-                    i32::from(inner.x),
-                    i32::from(inner.y),
-                    u32::from(inner.width),
-                    u32::from(inner.height),
+                    i32::from(frame.x),
+                    i32::from(frame.y),
+                    u32::from(frame.width),
+                    u32::from(frame.height),
                     ui::button_border(&style),
                     Color::BLACK,
                 );
@@ -269,7 +325,7 @@ impl Screen for BarScreen {
                 inner.width,
                 small_line,
             );
-            let room = f32::from(inner.width) - 4.0;
+            let room = f32::from(inner.width) + 1.0;
             let label = ui::fit(&font, style.small, &entry.label, room);
             let x = f32::from(inner.x)
                 + (f32::from(inner.width) - font.measure(style.small, &label)) / 2.0;
@@ -311,7 +367,7 @@ impl Screen for BarScreen {
         if gesture.kind != GestureKind::Tap {
             return Handled::No;
         }
-        if let Some(index) = self.cells.iter().position(|c| c.contains(gesture.start)) {
+        if let Some(index) = self.targets.iter().position(|c| c.contains(gesture.start)) {
             self.focus = index;
             self.run(index, cx);
         }

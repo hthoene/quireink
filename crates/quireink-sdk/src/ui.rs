@@ -6,6 +6,10 @@
 
 #[path = "choice.rs"]
 pub mod choice;
+#[path = "rows.rs"]
+mod rows;
+
+pub use rows::Rows;
 
 use alloc::borrow::Cow;
 use alloc::format;
@@ -120,6 +124,88 @@ pub fn icon_width(env: &Env<'_>, name: &str, size: f32) -> f32 {
         (Some(font), Some(ch)) => font.advance(size, ch),
         _ => 0.0,
     }
+}
+
+/// The height of a section's heading in a list (see [`Rows`]): small
+/// text with a little room above it.
+pub fn heading_height(env: &Env<'_>, style: &UiStyle) -> u16 {
+    let line = style.font(env).map_or(style.small * 1.3, |f| {
+        f.line_metrics(style.small).line_height
+    });
+    (line * 1.25) as u16 + style.gap as u16
+}
+
+/// Draws a section's heading in `rect`: small and gray, low in its room,
+/// so it reads as belonging to the entries below.
+pub fn draw_heading(
+    canvas: &mut Canvas<'_>,
+    env: &Env<'_>,
+    style: &UiStyle,
+    rect: Rect,
+    text: &str,
+) {
+    let Some(font) = style.font(env) else {
+        return;
+    };
+    let line = font.line_metrics(style.small).line_height as u16;
+    let area = Rect::new(
+        rect.x,
+        rect.y + rect.height.saturating_sub(line + style.gap as u16 / 2),
+        rect.width,
+        line,
+    );
+    let x = f32::from(rect.x) + style.margin as f32;
+    draw_label(canvas, &font, style.small, x, area, text, Color::gray(90));
+}
+
+/// The switch of an on/off setting at the right end of `row`.
+pub fn switch_rect(style: &UiStyle, row: Rect) -> Rect {
+    let height = (button_height(row) * 3 / 4).max(8);
+    let width = height * 2;
+    Rect::new(
+        (row.x + row.width).saturating_sub(width + style.margin as u16),
+        row.y + (row.height - height) / 2,
+        width,
+        height,
+    )
+}
+
+/// Draws a switch at the right end of `row`: filled with the knob on the
+/// right when `on`, outlined with the knob on the left when off. `inverted`
+/// for a focused (black) row.
+pub fn draw_switch(canvas: &mut Canvas<'_>, style: &UiStyle, row: Rect, on: bool, inverted: bool) {
+    let r = switch_rect(style, row);
+    let (ink, paper) = if inverted {
+        (Color::WHITE, Color::BLACK)
+    } else {
+        (Color::BLACK, Color::WHITE)
+    };
+    let border = button_border(style);
+    if on {
+        fill(canvas, r, ink);
+    } else {
+        fill(canvas, r, paper);
+        canvas.stroke_rect(
+            i32::from(r.x),
+            i32::from(r.y),
+            u32::from(r.width),
+            u32::from(r.height),
+            border,
+            ink,
+        );
+    }
+    let pad = (border as u16 * 2).max(3);
+    let knob = r.height.saturating_sub(2 * pad);
+    let x = if on {
+        r.x + r.width - pad - knob
+    } else {
+        r.x + pad
+    };
+    fill(
+        canvas,
+        Rect::new(x, r.y + pad, knob, knob),
+        if on { paper } else { ink },
+    );
 }
 
 /// Whether icons can be drawn (an icon font is there).

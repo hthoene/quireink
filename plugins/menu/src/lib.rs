@@ -37,7 +37,6 @@ pub const PANEL: Id = Id::new_static("menu.panel");
 
 mod bar;
 mod panel;
-mod rows;
 
 /// The menu plugin.
 #[derive(Debug, Default)]
@@ -97,7 +96,7 @@ struct MenuScreen {
     items: Vec<Item>,
     style: UiStyle,
     region: Rect,
-    rows: rows::Rows,
+    rows: ui::Rows,
     /// Shown when the items need more than one page.
     pager: Option<ui::Pager>,
     /// The focused number is being changed with buttons.
@@ -141,7 +140,7 @@ impl MenuScreen {
         let style = UiStyle::new(env);
         let display = env.device.display;
         let border = style.line * 2;
-        let heading = Self::heading_height(env, &style);
+        let heading = ui::heading_height(env, &style);
         let heights: Vec<u16> = items
             .iter()
             .map(|item| {
@@ -187,7 +186,7 @@ impl MenuScreen {
         Self {
             items,
             region,
-            rows: rows::Rows::new(list_area, heights, headings),
+            rows: ui::Rows::new(list_area, heights, headings),
             pager,
             editing: false,
             keys: !env.device.input.touch,
@@ -195,14 +194,6 @@ impl MenuScreen {
             depth: params.get(DEPTH).and_then(|d| d.parse().ok()).unwrap_or(0),
             style,
         }
-    }
-
-    /// Headings: small text with a little room above.
-    fn heading_height(env: &Env<'_>, style: &UiStyle) -> u16 {
-        let line = style.font(env).map_or(style.small * 1.3, |f| {
-            f.line_metrics(style.small).line_height
-        });
-        (line * 1.25) as u16 + style.gap as u16
     }
 
     /// The setting behind item `index`, if it is one.
@@ -353,9 +344,9 @@ impl Screen for MenuScreen {
             (style.line * 2) as u16,
         );
         ui::fill(canvas, border, Color::BLACK);
-        let Some(font) = style.font(env) else {
+        if style.font(env).is_none() {
             return;
-        };
+        }
         if self.items.is_empty() {
             ui::draw_message(
                 canvas,
@@ -370,18 +361,7 @@ impl Screen for MenuScreen {
         for (n, &(index, rect)) in visible.iter().enumerate() {
             let item = &self.items[index];
             if item.heading {
-                // Small and gray, low in its room: it reads as belonging
-                // to the entries below.
-                let text = env.i18n.tr(&item.title);
-                let line = font.line_metrics(style.small).line_height as u16;
-                let area = Rect::new(
-                    rect.x,
-                    rect.y + rect.height.saturating_sub(line + style.gap as u16 / 2),
-                    rect.width,
-                    line,
-                );
-                let x = style.margin as f32;
-                ui::draw_label(canvas, &font, style.small, x, area, text, Color::gray(90));
+                ui::draw_heading(canvas, env, &style, rect, env.i18n.tr(&item.title));
                 continue;
             }
             let focused = self.keys && index == self.rows.focus;
