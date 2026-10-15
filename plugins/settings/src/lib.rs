@@ -26,6 +26,7 @@
 
 extern crate alloc;
 
+mod search;
 mod secrets;
 
 use alloc::borrow::Cow;
@@ -56,6 +57,8 @@ pub const ADVANCED: Id = Id::new_static("settings.advanced");
 const TEXT_ENTERED: Id = Id::new_static("settings.text-entered");
 
 const ID: &str = "id";
+/// A setting to focus on its group's page (parameter of [`GROUP_SCREEN`]).
+const FOCUS: &str = "focus";
 
 /// The settings plugin.
 #[derive(Debug, Default)]
@@ -85,7 +88,11 @@ impl Plugin for SettingsPlugin {
             title: Cow::Borrowed("settings.title"),
             factory: Box::new(|env, params| {
                 let group = params.get(ID).and_then(|id| Id::parse(id).ok());
-                Box::new(GroupPage::new(env, group.unwrap_or(groups::OTHER)))
+                let mut page = GroupPage::new(env, group.unwrap_or(groups::OTHER));
+                if let Some(focus) = params.get(FOCUS) {
+                    page.focus_on(env, focus);
+                }
+                Box::new(page)
             }),
         })?;
         r.add_screen(ScreenSpec {
@@ -95,6 +102,11 @@ impl Plugin for SettingsPlugin {
                 let id = params.get(ID).unwrap_or_default();
                 Box::new(Chooser::new(env, id))
             }),
+        })?;
+        r.add_screen(ScreenSpec {
+            id: search::SCREEN,
+            title: Cow::Borrowed("settings.search"),
+            factory: Box::new(|env, params| Box::new(search::SearchScreen::new(env, params))),
         })?;
         r.add_screen(ScreenSpec {
             id: secrets::SCREEN,
@@ -261,6 +273,8 @@ enum Link {
     Page(Id),
     /// The switch for advanced settings.
     Advanced,
+    /// Searching the settings.
+    Search,
 }
 
 #[derive(Debug)]
@@ -331,6 +345,15 @@ impl GroupList {
                 }),
         );
         placed.push((
+            i32::MIN,
+            true,
+            Entry {
+                link: Some(Link::Search),
+                title: env.i18n.tr("settings.search").to_string(),
+                icon: Some(String::from("search")),
+            },
+        ));
+        placed.push((
             i32::MAX,
             true,
             Entry {
@@ -391,6 +414,7 @@ impl GroupList {
                 let advanced = cx.env().settings.bool(ADVANCED.as_str());
                 cx.command(Command::SetSetting(ADVANCED, SettingValue::Bool(!advanced)));
             }
+            Some(Link::Search) => cx.command(search::ask(cx.env())),
             None => {}
         }
     }
@@ -421,6 +445,8 @@ impl Screen for GroupList {
                 if *link == Link::Advanced {
                     let on = env.settings.bool(ADVANCED.as_str());
                     ui::draw_switch_row(canvas, env, &style, rect, focused, &entry.title, "", on);
+                } else if *link == Link::Search {
+                    ui::draw_value_row(canvas, env, &style, rect, focused, &entry.title, "");
                 } else {
                     ui::draw_value_row(canvas, env, &style, rect, focused, &entry.title, "›");
                 }
@@ -460,7 +486,17 @@ impl Screen for GroupList {
         }
     }
 
-    fn on_event(&mut self, event: &Id, _: &Params, cx: &mut Cx<'_, '_>) {
+    fn on_event(&mut self, event: &Id, params: &Params, cx: &mut Cx<'_, '_>) {
+        if *event == search::ENTERED {
+            let text = params.get(params::TEXT).unwrap_or_default().trim();
+            if !text.is_empty() {
+                cx.command(Command::OpenScreen(
+                    search::SCREEN,
+                    Params::new().with(params::TEXT, text.to_string()),
+                ));
+            }
+            return;
+        }
         if *event == events::SETTING_CHANGED {
             // Language, UI size or the advanced switch may have changed.
             let env = *cx.env();
@@ -591,6 +627,18 @@ impl GroupPage {
             editing: false,
             noted,
             number_room,
+        }
+    }
+
+    /// Focuses setting `id`, shown so (e.g. found by a search).
+    fn focus_on(&mut self, _: &Env<'_>, id: &str) {
+        let at = self
+            .entries
+            .iter()
+            .position(|e| matches!(e, Row::Setting(spec) if spec.id.as_str() == id));
+        if let Some(at) = at {
+            self.rows.focus = at;
+            self.keys = true;
         }
     }
 
