@@ -398,7 +398,7 @@ impl Plugin for Stats {
                 out.push(Command::OpenScreen(OVERVIEW, params));
             })),
         })?;
-        for (menu, order) in [(menus::MAIN, 35), (Id::new_static("reader.more"), 30)] {
+        for (menu, order) in [(menus::TOOLS, 35), (Id::new_static("reader.more"), 30)] {
             r.add_menu_entry(MenuEntry {
                 menu,
                 item: OPEN,

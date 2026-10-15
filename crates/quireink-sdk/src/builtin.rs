@@ -37,6 +37,8 @@ pub mod actions {
     pub const LIBRARY: Id = Id::new_static("core.library");
     /// Opens the settings slot.
     pub const SETTINGS: Id = Id::new_static("core.settings");
+    /// Opens the tools menu ([`menus::TOOLS`](super::menus::TOOLS)).
+    pub const TOOLS: Id = Id::new_static("core.tools");
     /// Puts the device to sleep: shows the sleep screen (slot
     /// [`SLEEP`](super::slots::SLEEP)), then the shell sleeps until it is
     /// woken (see [`Env::sleep`](crate::Env)). Where the system sleeps on
@@ -131,8 +133,14 @@ pub mod slots {
 pub mod menus {
     use crate::Id;
 
-    /// The menu shown when a screen has no menu of its own.
+    /// The menu shown when a screen has no menu of its own: short and
+    /// always the same (home, library, tools, night mode, settings).
     pub const MAIN: Id = Id::new_static("core.main");
+    /// The tools plugins bring (statistics, catalogs, files, transfers,
+    /// …): plugins add their entries here rather than to [`MAIN`], so the
+    /// main menu stays short however many there are. Also the home
+    /// screen's grid of tools.
+    pub const TOOLS: Id = Id::new_static("core.tools");
     /// Extra pages on the main settings page, below the setting groups
     /// (e.g. the plugin manager). Entries are actions.
     pub const SETTINGS: Id = Id::new_static("core.settings-pages");

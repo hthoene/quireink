@@ -62,7 +62,7 @@ impl Plugin for CorePlugin {
                 out.push(Command::RunAction(target.clone()));
             })
         };
-        let handled: [(Id, &'static str, ActionHandler); 10] = [
+        let handled: [(Id, &'static str, ActionHandler); 11] = [
             // Screens without their own meaning of next/previous turn pages.
             (
                 actions::NEXT,
@@ -109,6 +109,16 @@ impl Plugin for CorePlugin {
                 "core.action.home",
                 Box::new(|_: &Env<'_>, out: &mut Vec<Command>| {
                     out.push(Command::open_slot(slots::HOME));
+                }),
+            ),
+            (
+                actions::TOOLS,
+                "core.action.tools",
+                Box::new(|_: &Env<'_>, out: &mut Vec<Command>| {
+                    out.push(Command::OpenSlot(
+                        slots::MENU,
+                        Params::new().with(params::MENU, menus::TOOLS.as_str()),
+                    ));
                 }),
             ),
             (
@@ -162,35 +172,12 @@ impl Plugin for CorePlugin {
             factory: Box::new(|_, _| Box::new(PlaceholderScreen)),
         })?;
 
-        // The main menu in three sections: reading, tools (plugins add
-        // theirs between 30 and 79) and the device.
-        for (id, title, order) in [
-            (
-                quireink_sdk::builtin::sections::READING,
-                "core.section.reading",
-                0,
-            ),
-            (
-                quireink_sdk::builtin::sections::TOOLS,
-                "core.section.tools",
-                30,
-            ),
-            (
-                quireink_sdk::builtin::sections::SYSTEM,
-                "core.section.system",
-                80,
-            ),
-        ] {
-            r.add_menu_section(quireink_sdk::MenuSection {
-                id,
-                title: Cow::Borrowed(title),
-                menu: menus::MAIN,
-                order,
-            })?;
-        }
+        // A short main menu; the tools plugins bring are one entry, so it
+        // stays the same however many there are.
         for (action, order, icon) in [
             (actions::HOME, 10, "home"),
             (actions::LIBRARY, 20, "books"),
+            (actions::TOOLS, 30, "apps"),
             (settings::NIGHT_MODE, 85, "moon"),
             (actions::SETTINGS, 90, "settings"),
         ] {

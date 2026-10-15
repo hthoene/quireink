@@ -939,15 +939,16 @@ fn menus_follow_order_and_user_definitions() {
             .collect()
     };
     let items = env_items(&kernel);
-    // Entries of the core plugin and this plugin, sorted by order, under
-    // the core's section headings.
+    // Entries of the core plugin and this plugin, sorted by order: a
+    // short list, the tools in a menu of their own.
     assert_eq!(
-        items.iter().take(2).map(String::as_str).collect::<Vec<_>>(),
-        ["core.section.reading", "core.home"]
+        items.iter().take(3).map(String::as_str).collect::<Vec<_>>(),
+        ["core.home", "core.home", "core.library"]
     );
-    let section = kernel.shared.menus.items("core.main")[0];
-    assert!(section.section && section.icon.is_none());
+    assert!(items.iter().any(|i| i == "core.tools"));
+    assert!(!kernel.shared.menus.items("core.main")[0].section);
     assert_eq!(kernel.shared.menus.icon("core.library"), Some("books"));
+    assert_eq!(kernel.shared.menus.icon("core.tools"), Some("apps"));
     assert!(items.iter().filter(|a| *a == "core.home").count() == 2);
 
     let kernel = Kernel::builder(DEVICE)

@@ -102,7 +102,7 @@ impl Plugin for Vocabulary {
             })),
         })?;
         r.add_menu_entry(MenuEntry {
-            menu: menus::MAIN,
+            menu: menus::TOOLS,
             item: OPEN,
             order: 36,
         })?;

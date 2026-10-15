@@ -279,7 +279,7 @@ impl Plugin for News {
         })?;
         r.subscribe(FETCHED, Box::new(fetched))?;
         r.add_menu_entry(MenuEntry {
-            menu: menus::MAIN,
+            menu: menus::TOOLS,
             item: OPEN,
             order: 44,
         })?;

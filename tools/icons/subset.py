@@ -41,13 +41,14 @@ ICONS = sorted({
     # Tools
     "chart-bar", "calendar", "clock", "wifi", "world", "cloud",
     "cloud-download", "download", "upload", "rss", "qrcode", "keyboard",
-    "plug", "puzzle", "vocabulary", "transfer",
+    "plug", "puzzle", "vocabulary", "transfer", "apps",
     # System
     "settings", "menu-2", "dots", "dots-vertical", "info-circle", "power",
     "battery", "device-tablet", "user", "lock", "palette", "bug",
     # Controls
     "chevron-left", "chevron-right", "chevron-up", "chevron-down",
-    "arrow-left", "arrow-right", "x", "check", "plus", "minus", "trash",
+    "arrow-left", "arrow-right", "arrow-up", "arrow-down", "x", "check", "plus",
+    "minus", "trash",
     "edit", "star", "eye", "sort-ascending", "filter", "circle",
     "circle-check", "toggle-left", "toggle-right",
 })
