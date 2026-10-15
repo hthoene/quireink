@@ -11,7 +11,7 @@
 use std::path::PathBuf;
 
 use android_activity::AndroidApp;
-use jni::objects::{JObject, JValue};
+use jni::objects::{JObject, JObjectArray, JString, JValue};
 use jni::{JNIEnv, JavaVM};
 
 /// Android 11, from which "All files access" replaces the storage
@@ -90,6 +90,41 @@ pub fn storage_dir(app: &AndroidApp) -> Option<PathBuf> {
         let path: String = env.get_string(&path.into())?.into();
         Ok(PathBuf::from(path))
     })
+}
+
+/// The roots of removable volumes such as SD cards, e.g.
+/// `/storage/1A2B-3C4D`. Android names a folder of the app's on every
+/// mounted volume, the shared storage first; the root is above its
+/// `Android` folder. Readable with the same access as the shared storage.
+pub fn removable_dirs(app: &AndroidApp) -> Vec<PathBuf> {
+    with_activity(app, |env, activity| {
+        let dirs = env
+            .call_method(
+                activity,
+                "getExternalFilesDirs",
+                "(Ljava/lang/String;)[Ljava/io/File;",
+                &[JValue::Object(&JObject::null())],
+            )?
+            .l()?;
+        let dirs = JObjectArray::from(dirs);
+        let mut roots = Vec::new();
+        for i in 1..env.get_array_length(&dirs)? {
+            let dir = env.get_object_array_element(&dirs, i)?;
+            // A volume that is not mounted right now.
+            if dir.is_null() {
+                continue;
+            }
+            let path = env
+                .call_method(&dir, "getAbsolutePath", "()Ljava/lang/String;", &[])?
+                .l()?;
+            let path: String = env.get_string(&JString::from(path))?.into();
+            if let Some(end) = path.find("/Android/") {
+                roots.push(PathBuf::from(&path[..end]));
+            }
+        }
+        Ok(roots)
+    })
+    .unwrap_or_default()
 }
 
 /// Asks the user for access: opens the "All files access" page for

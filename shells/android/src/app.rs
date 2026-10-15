@@ -13,8 +13,9 @@ use quireink_core::{Effects, Kernel};
 use quireink_fs::DirStorage;
 use quireink_graphics::Framebuffer;
 use quireink_platform::{
-    ButtonState, DeviceInfo, DisplayInfo, InputCaps, InputEvent, Instant, Mounted, PixelFormat,
-    Point, PointerEvent, PointerPhase, PointerTool, RefreshMode, Rotation,
+    ButtonState, DeviceInfo, DirEntry, DisplayInfo, InputCaps, InputEvent, Instant, Mounted,
+    PixelFormat, Point, PointerEvent, PointerPhase, PointerTool, RefreshMode, Rotation, Storage,
+    StorageError,
 };
 
 use crate::epd::Epd;
@@ -24,6 +25,8 @@ use crate::{access, keys, pixels, status};
 
 /// Where the device's shared storage appears in QuireInk's storage.
 const SHARED: &str = "storage";
+/// Where SD cards appear: the first as `SD card`, more numbered.
+const REMOVABLE: &str = "SD card";
 /// Data plugins on the shared storage, where users can copy them.
 const PLUGINS: &str = "QuireInk/plugins";
 /// Dictionaries on the shared storage.
@@ -286,13 +289,40 @@ fn start_kernel(
         .filter(|dir| shared.is_some() && dir.join(KOREADER_DICTIONARIES).is_dir())
         .map_or(DICTIONARIES, |_| KOREADER_DICTIONARIES);
     let shared_storage = shared.is_some();
+    // SD cards next to the shared storage, with the same access.
+    let removable: Vec<(&'static str, DirStorage)> = if shared_storage {
+        access::removable_dirs(app)
+            .into_iter()
+            .filter_map(|dir| match DirStorage::new(&dir) {
+                Ok(volume) => Some(volume),
+                Err(e) => {
+                    log::warn!("{}: {e}", dir.display());
+                    None
+                }
+            })
+            .enumerate()
+            .map(|(n, volume)| {
+                let name = match n {
+                    0 => REMOVABLE.to_string(),
+                    n => format!("{REMOVABLE} {}", n + 1),
+                };
+                // Once per start: the mount points live as long as the app.
+                (&*Box::leak(name.into_boxed_str()), volume)
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     let mut builder = Kernel::builder(device)
         .plugin_dir("plugins")
         .network(true)
         .system_clipboard(true);
     builder = match shared {
         Some(shared) => builder
-            .storage(Mounted::new(storage, SHARED, shared))
+            .storage(removable.into_iter().fold(
+                Volumes(Box::new(Mounted::new(storage, SHARED, shared))),
+                |all, (name, volume)| Volumes(Box::new(Mounted::new(all, name, volume))),
+            ))
             .plugin_dir(format!("{SHARED}/{PLUGINS}"))
             .font_dir(format!("{SHARED}/{FONTS}"))
             .font_dir(format!("{SHARED}/{KOREADER_FONTS}"))
@@ -483,5 +513,50 @@ fn input(event: &AndroidInput<'_>) -> Option<Vec<InputEvent>> {
             )
         }
         _ => None,
+    }
+}
+
+/// Storage with any number of mount points (one per SD card).
+struct Volumes(Box<dyn Storage>);
+
+impl Storage for Volumes {
+    fn read_at(&self, path: &str, offset: u64, buf: &mut [u8]) -> Result<usize, StorageError> {
+        self.0.read_at(path, offset, buf)
+    }
+
+    fn size(&self, path: &str) -> Result<u64, StorageError> {
+        self.0.size(path)
+    }
+
+    fn write(&self, path: &str, data: &[u8]) -> Result<(), StorageError> {
+        self.0.write(path, data)
+    }
+
+    fn append(&self, path: &str, data: &[u8]) -> Result<(), StorageError> {
+        self.0.append(path, data)
+    }
+
+    fn list(&self, dir: &str, visit: &mut dyn FnMut(DirEntry<'_>)) -> Result<(), StorageError> {
+        self.0.list(dir, visit)
+    }
+
+    fn remove(&self, path: &str) -> Result<(), StorageError> {
+        self.0.remove(path)
+    }
+
+    fn exists(&self, path: &str) -> bool {
+        self.0.exists(path)
+    }
+
+    fn rename(&self, from: &str, to: &str) -> Result<(), StorageError> {
+        self.0.rename(from, to)
+    }
+
+    fn create_dir(&self, path: &str) -> Result<(), StorageError> {
+        self.0.create_dir(path)
+    }
+
+    fn remove_dir_all(&self, path: &str) -> Result<(), StorageError> {
+        self.0.remove_dir_all(path)
     }
 }
