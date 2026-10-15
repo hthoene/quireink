@@ -110,7 +110,7 @@ impl Plugin for Profiles {
                 order,
             })?;
         }
-        r.add_icon(OPEN, Cow::Borrowed("palette"))?;
+        r.add_icon(OPEN, Cow::Borrowed("user"))?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/en.ini")))?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/de.ini")))?;
         Ok(())

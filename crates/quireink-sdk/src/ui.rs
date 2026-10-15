@@ -45,6 +45,8 @@ pub struct UiStyle {
     pub gap: u32,
     /// Width of lines and borders.
     pub line: u32,
+    /// Headers on a dark bar, else on a light one with a line below.
+    pub dark_header: bool,
 }
 
 impl UiStyle {
@@ -56,15 +58,50 @@ impl UiStyle {
             .fonts
             .role(fonts::UI.as_str())
             .map_or(text * 1.25, |f| f.line_metrics(text).line_height);
+        let s = env.settings;
+        let rows = s.int(settings::UI_ROW.as_str()).clamp(120, 300) as f32 / 100.0;
         Self {
             text,
             small: m.pt(base * 0.75),
             title: m.pt(base * 1.15),
-            row: (line_height * 1.8) as u32,
-            header: (line_height * 1.9) as u32,
-            margin: m.mm(3),
+            row: (line_height * rows) as u32,
+            header: (line_height * (rows + 0.1)) as u32,
+            margin: m.mm(s.int(settings::UI_MARGIN.as_str()).clamp(0, 15) as u32),
             gap: m.mm(2),
-            line: m.tenth_mm(3),
+            line: m
+                .tenth_mm(s.int(settings::UI_LINES.as_str()).clamp(1, 10) as u32)
+                .max(1),
+            dark_header: s.text(settings::UI_HEADER.as_str()) != settings::HEADER_LIGHT,
+        }
+    }
+
+    /// A header's background and text: black and white, or the other way
+    /// round for light headers.
+    pub fn header_colors(&self) -> (Color, Color) {
+        if self.dark_header {
+            (Color::BLACK, Color::WHITE)
+        } else {
+            (Color::WHITE, Color::BLACK)
+        }
+    }
+
+    /// Draws a header's background in `area`: dark, or light with a line
+    /// below.
+    fn header_background(&self, canvas: &mut Canvas<'_>, area: Rect) {
+        let (paper, ink) = self.header_colors();
+        fill(canvas, area, paper);
+        if !self.dark_header {
+            let line = (self.line * 2) as u16;
+            fill(
+                canvas,
+                Rect::new(
+                    area.x,
+                    (area.y + area.height).saturating_sub(line),
+                    area.width,
+                    line,
+                ),
+                ink,
+            );
         }
     }
 
@@ -337,7 +374,8 @@ pub fn draw_header(
     title: &str,
     note: Option<&str>,
 ) {
-    fill(canvas, area, Color::BLACK);
+    style.header_background(canvas, area);
+    let ink = style.header_colors().1;
     let Some(font) = style.font(env) else {
         return;
     };
@@ -347,15 +385,7 @@ pub fn draw_header(
     let note = note.map(|n| fit(&font, style.small, n, f32::from(area.width) / 2.0));
     if let Some(note) = note.as_deref() {
         right -= font.measure(style.small, note);
-        draw_label(
-            &mut canvas,
-            &font,
-            style.small,
-            right,
-            area,
-            note,
-            Color::WHITE,
-        );
+        draw_label(&mut canvas, &font, style.small, right, area, note, ink);
         right -= margin;
     }
     let title = fit(
@@ -371,7 +401,7 @@ pub fn draw_header(
         f32::from(area.x) + margin,
         area,
         &title,
-        Color::WHITE,
+        ink,
     );
 }
 
@@ -463,7 +493,8 @@ impl Header {
         page: Option<(usize, usize)>,
     ) {
         let parts = self.layout(env, style, page);
-        fill(canvas, self.area, Color::BLACK);
+        style.header_background(canvas, self.area);
+        let ink = style.header_colors().1;
         let Some(font) = style.font(env) else {
             return;
         };
@@ -472,12 +503,12 @@ impl Header {
             draw_chevron(canvas, style, x, y, left, color);
         };
         if let Some(back) = parts.back {
-            arrow(canvas, back, true, Color::WHITE);
+            arrow(canvas, back, true, ink);
         }
         if let (Some((prev, label, next)), Some(page)) = (parts.pager, page) {
             if self.arrows {
                 // At the first or last page, the arrow is gray.
-                let color = |end: bool| if end { Color::gray(110) } else { Color::WHITE };
+                let color = |end: bool| if end { Color::gray(110) } else { ink };
                 arrow(canvas, prev, true, color(page.0 == 0));
                 arrow(canvas, next, false, color(page.0 + 1 >= page.1));
             }
@@ -489,7 +520,7 @@ impl Header {
                 f32::from(label.x),
                 label,
                 &text,
-                Color::WHITE,
+                ink,
             );
         }
         let t = parts.title;
@@ -499,15 +530,7 @@ impl Header {
         let note = note.map(|n| fit(&font, style.small, n, f32::from(t.width) / 2.0));
         if let Some(note) = note.as_deref() {
             right -= font.measure(style.small, note);
-            draw_label(
-                &mut canvas,
-                &font,
-                style.small,
-                right,
-                t,
-                note,
-                Color::WHITE,
-            );
+            draw_label(&mut canvas, &font, style.small, right, t, note, ink);
             right -= margin;
         }
         let title = fit(&font, style.title, title, right - f32::from(t.x));
@@ -518,7 +541,7 @@ impl Header {
             f32::from(t.x),
             t,
             &title,
-            Color::WHITE,
+            ink,
         );
     }
 

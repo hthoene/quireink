@@ -193,6 +193,16 @@ pub mod settings {
     /// Partial refreshes between two full refreshes; `0` disables full
     /// refreshes for ghosting removal.
     pub const FULL_REFRESH_INTERVAL: Id = Id::new_static("core.full-refresh-interval");
+    /// Margin of menus and lists, in millimetres.
+    pub const UI_MARGIN: Id = Id::new_static("core.ui-margin");
+    /// Height of list rows, in percent of a line of text.
+    pub const UI_ROW: Id = Id::new_static("core.ui-row");
+    /// Width of lines and borders, in tenths of a millimetre.
+    pub const UI_LINES: Id = Id::new_static("core.ui-lines");
+    /// Headers dark ([`HEADER_DARK`]) or light ([`HEADER_LIGHT`]).
+    pub const UI_HEADER: Id = Id::new_static("core.ui-header");
+    pub const HEADER_DARK: &str = "core.header.dark";
+    pub const HEADER_LIGHT: &str = "core.header.light";
     /// How long short messages show, in seconds.
     pub const NOTICE_SECONDS: Id = Id::new_static("core.notice-seconds");
     /// Milliseconds a button or finger must be held for a long press.
@@ -258,6 +268,9 @@ pub mod groups {
     pub const LIBRARY: Id = Id::new_static("core.group.library");
     /// Language and everything about the device.
     pub const SYSTEM: Id = Id::new_static("core.group.system");
+    /// How menus and lists look: text size, margins, rows, lines, headers.
+    /// Themes (data plugins) set its defaults.
+    pub const LOOK: Id = Id::new_static("core.group.look");
     /// Settings whose plugin names no registered group.
     pub const OTHER: Id = Id::new_static("core.group.other");
 }

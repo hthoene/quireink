@@ -217,6 +217,7 @@ impl Plugin for CorePlugin {
             (groups::DISPLAY, "core.group.display", 60, "contrast"),
             (groups::CONTROLS, "core.group.controls", 70, "adjustments"),
             (groups::SYSTEM, "core.group.system", 90, "device-tablet"),
+            (groups::LOOK, "core.group.look", 210, "palette"),
             (groups::OTHER, "core.group.other", 100, "dots"),
         ] {
             r.add_setting_group(SettingGroupSpec {
@@ -254,10 +255,63 @@ impl Plugin for CorePlugin {
                 SettingKind::Int { min: 7, max: 24 },
                 SettingValue::Int(11),
             )
-            .group(groups::DISPLAY)
+            .group(groups::LOOK)
             .unit("core.unit.pt")
             .description("core.setting.ui-size.help"),
         )?;
+        r.add_setting(
+            SettingSpec::new(
+                settings::UI_HEADER,
+                "core.setting.ui-header",
+                SettingKind::Choice(alloc::vec![
+                    Cow::Borrowed(settings::HEADER_DARK),
+                    Cow::Borrowed(settings::HEADER_LIGHT),
+                ]),
+                SettingValue::Text(Cow::Borrowed(settings::HEADER_DARK)),
+            )
+            .group(groups::LOOK)
+            .description("core.setting.ui-header.help"),
+        )?;
+        for (id, title, (min, max, default), unit, step) in [
+            (
+                settings::UI_MARGIN,
+                "core.setting.ui-margin",
+                (0, 15, 3),
+                "core.unit.mm",
+                1,
+            ),
+            (
+                settings::UI_ROW,
+                "core.setting.ui-row",
+                (120, 300, 180),
+                "core.unit.percent",
+                10,
+            ),
+            (
+                settings::UI_LINES,
+                "core.setting.ui-lines",
+                (1, 10, 3),
+                "core.unit.tenth-mm",
+                1,
+            ),
+        ] {
+            r.add_setting(
+                SettingSpec::new(
+                    id,
+                    title,
+                    SettingKind::Int { min, max },
+                    SettingValue::Int(default),
+                )
+                .group(groups::LOOK)
+                .unit(unit)
+                .step(step)
+                .description(match title {
+                    "core.setting.ui-margin" => "core.setting.ui-margin.help",
+                    "core.setting.ui-row" => "core.setting.ui-row.help",
+                    _ => "core.setting.ui-lines.help",
+                }),
+            )?;
+        }
         r.add_setting(
             SettingSpec::new(
                 settings::KEYMAP_PRESET,
