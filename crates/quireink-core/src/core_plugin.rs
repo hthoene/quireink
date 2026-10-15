@@ -62,7 +62,7 @@ impl Plugin for CorePlugin {
                 out.push(Command::RunAction(target.clone()));
             })
         };
-        let handled: [(Id, &'static str, ActionHandler); 11] = [
+        let handled: [(Id, &'static str, ActionHandler); 12] = [
             // Screens without their own meaning of next/previous turn pages.
             (
                 actions::NEXT,
@@ -109,6 +109,13 @@ impl Plugin for CorePlugin {
                 "core.action.home",
                 Box::new(|_: &Env<'_>, out: &mut Vec<Command>| {
                     out.push(Command::open_slot(slots::HOME));
+                }),
+            ),
+            (
+                actions::SCREENSHOT,
+                "core.action.screenshot",
+                Box::new(|env: &Env<'_>, out: &mut Vec<Command>| {
+                    out.push(Command::Screenshot(screenshot_path(env)));
                 }),
             ),
             (
@@ -174,6 +181,12 @@ impl Plugin for CorePlugin {
 
         // A short main menu; the tools plugins bring are one entry, so it
         // stays the same however many there are.
+        r.add_menu_entry(MenuEntry {
+            menu: menus::TOOLS,
+            item: actions::SCREENSHOT,
+            order: 95,
+        })?;
+        r.add_icon(actions::SCREENSHOT, Cow::Borrowed("camera"))?;
         for (action, order, icon) in [
             (actions::HOME, 10, "home"),
             (actions::LIBRARY, 20, "books"),
@@ -516,4 +529,36 @@ mod tests {
         let issues = check::compare(&en, &de);
         assert!(issues.is_empty(), "{issues:?}");
     }
+}
+
+/// Where a screenshot goes: `Screenshots` beside the library folder,
+/// named by the time ("QuireInk 2026-10-15 17-30-05.png").
+fn screenshot_path(env: &Env<'_>) -> alloc::string::String {
+    let library = env.settings.text("files.root").trim_matches('/');
+    let parent = quireink_sdk::files::parent(library);
+    let dir = if parent.is_empty() {
+        alloc::string::String::from("Screenshots")
+    } else {
+        alloc::format!("{parent}/Screenshots")
+    };
+    let _ = env.storage.create_dir(&dir);
+    let name = match quireink_sdk::time::local_time(env) {
+        Some(t) => alloc::format!(
+            "QuireInk {}-{:02}-{:02} {:02}-{:02}-{:02}",
+            t.year,
+            t.month,
+            t.day,
+            t.hour,
+            t.minute,
+            t.second
+        ),
+        None => alloc::format!("QuireInk {}", env.now.0),
+    };
+    let mut path = alloc::format!("{dir}/{name}.png");
+    let mut n = 2;
+    while env.storage.exists(&path) {
+        path = alloc::format!("{dir}/{name} ({n}).png");
+        n += 1;
+    }
+    path
 }

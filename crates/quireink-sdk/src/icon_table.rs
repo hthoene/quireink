@@ -20,6 +20,7 @@ pub(crate) const ICONS: &[(&str, char)] = &[
     ("brightness", '\u{eb7f}'),
     ("bug", '\u{ea48}'),
     ("calendar", '\u{ea53}'),
+    ("camera", '\u{ea54}'),
     ("chart-bar", '\u{ea59}'),
     ("check", '\u{ea5e}'),
     ("chevron-down", '\u{ea5f}'),

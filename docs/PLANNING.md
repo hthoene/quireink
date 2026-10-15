@@ -834,7 +834,7 @@ replaceable by plugins.
 | D2 | Sleeping and switching off by themselves after a while | KOReader, X4 firmware | 🔶 (setting "Sleep after" (`core.sleep-after`, 10 min), not while reading aloud, downloading or serving; switching off open) |
 | D3 | Turning the screen, also to landscape | CrossPoint | ⬜ |
 | D4 | Firmware updates over Wi-Fi (X4) | CrossPoint | ⬜ |
-| D5 | Screenshots | CrossPoint, KOReader | ⬜ |
+| D5 | Screenshots | CrossPoint, KOReader | ✅ (action `core.screenshot` in the tools, bindable to any button or gesture: a gray PNG in `Screenshots` beside the library, written band by band as the frame is drawn) |
 | S1 | Read-later articles (Wallabag), news feeds as books, highlights to Readwise and Joplin (C15), Calibre wireless (C16) | KOReader | 🔶 (news feeds: `news` plugin, RSS and Atom as books in `News`; the rest open) |
 | U1 | Typing on a phone: passwords and keys sent from a phone's browser (QR code) into any text field; a store of credentials, replaceable by plugins | own idea | 🔶 (keyboard "Phone", slot `core.remote-keyboard` bound by `transfer`; the credentials store open) |
 | U2 | Pasting with a long press in a text field | phones | ✅ |

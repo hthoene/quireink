@@ -201,3 +201,59 @@ fn damaged_images_fail_cleanly() {
         }
     }
 }
+
+/// A file in memory, for writing PNGs.
+#[derive(Default)]
+struct OneFile(std::cell::RefCell<Vec<u8>>);
+
+impl quireink_platform::Storage for OneFile {
+    fn read_at(
+        &self,
+        _: &str,
+        offset: u64,
+        buf: &mut [u8],
+    ) -> Result<usize, quireink_platform::StorageError> {
+        let data = self.0.borrow();
+        let start = (offset as usize).min(data.len());
+        let n = buf.len().min(data.len() - start);
+        buf[..n].copy_from_slice(&data[start..start + n]);
+        Ok(n)
+    }
+    fn size(&self, _: &str) -> Result<u64, quireink_platform::StorageError> {
+        Ok(self.0.borrow().len() as u64)
+    }
+    fn write(&self, _: &str, data: &[u8]) -> Result<(), quireink_platform::StorageError> {
+        *self.0.borrow_mut() = data.to_vec();
+        Ok(())
+    }
+    fn append(&self, _: &str, data: &[u8]) -> Result<(), quireink_platform::StorageError> {
+        self.0.borrow_mut().extend_from_slice(data);
+        Ok(())
+    }
+    fn list(
+        &self,
+        _: &str,
+        _: &mut dyn FnMut(quireink_platform::DirEntry<'_>),
+    ) -> Result<(), quireink_platform::StorageError> {
+        Ok(())
+    }
+    fn remove(&self, _: &str) -> Result<(), quireink_platform::StorageError> {
+        Ok(())
+    }
+}
+
+#[test]
+fn written_png_reads_back() {
+    let file = OneFile::default();
+    let (w, h) = (37u32, 5u32);
+    let mut writer = quireink_image::PngWriter::new(&file, "shot.png", w, h).unwrap();
+    for y in 0..h {
+        let row: Vec<u8> = (0..w).map(|x| ((x * 7 + y * 40) % 256) as u8).collect();
+        writer.row(&file, "shot.png", &row).unwrap();
+    }
+    assert!(writer.is_complete());
+    let data = file.0.borrow().clone();
+    let image = decoded(&data, 1000);
+    assert_eq!((image.width, image.height), (w, h));
+    assert_eq!(image.pixels[w as usize + 3], ((3 * 7 + 40) % 256) as u8);
+}

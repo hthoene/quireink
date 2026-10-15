@@ -37,6 +37,9 @@ pub mod actions {
     pub const LIBRARY: Id = Id::new_static("core.library");
     /// Opens the settings slot.
     pub const SETTINGS: Id = Id::new_static("core.settings");
+    /// Saves what the screen shows as a picture, in `Screenshots` beside
+    /// the library ([`Command::Screenshot`](crate::Command::Screenshot)).
+    pub const SCREENSHOT: Id = Id::new_static("core.screenshot");
     /// Opens the tools menu ([`menus::TOOLS`](super::menus::TOOLS)).
     pub const TOOLS: Id = Id::new_static("core.tools");
     /// Puts the device to sleep: shows the sleep screen (slot

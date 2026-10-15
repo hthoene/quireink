@@ -379,6 +379,7 @@ impl KernelBuilder {
             warnings: Vec::new(),
             restart: false,
             sleep: false,
+            screenshot: None,
             last_activity: Instant(0),
             scope: None,
             requests: Vec::new(),
@@ -582,6 +583,8 @@ pub struct Kernel {
     restart: bool,
     /// Sleep was requested (see [`Command::Sleep`]).
     sleep: bool,
+    /// A screenshot to save with the next frame drawn: its path.
+    screenshot: Option<String>,
     /// When the device was last used (input, a page turned), for sleeping
     /// by itself ([`settings::SLEEP_AFTER`](core_settings::SLEEP_AFTER)).
     last_activity: Instant,
@@ -784,18 +787,60 @@ impl Kernel {
         let Some(region) = self.unrendered.take() else {
             return;
         };
+        // A screenshot is written as the frame is drawn, a band at a time.
+        let bounds = self.framebuffer.bounds();
+        let shot = self.screenshot.take().filter(|_| region == bounds);
+        let mut writer = shot.as_deref().and_then(|path| {
+            quireink_sdk::image::PngWriter::new(
+                self.shared.storage.as_ref(),
+                path,
+                u32::from(bounds.width),
+                u32::from(bounds.height),
+            )
+            .ok()
+        });
+        let mut gray = Vec::new();
         let rows = self.framebuffer.rows();
         let mut top = region.y - region.y % rows;
         while u32::from(top) < region.bottom() {
             self.framebuffer.set_top(top);
             if let Some(part) = region.intersection(&self.framebuffer.band()) {
                 self.redraw(part);
-                out(part.y, self.framebuffer.view_rows(part));
+                let view = self.framebuffer.view_rows(part);
+                if let (Some(writer), Some(path)) = (writer.as_mut(), shot.as_deref()) {
+                    for y in 0..view.height {
+                        gray.clear();
+                        gray.extend((0..view.width).map(|x| {
+                            let c = view.pixel(x, y);
+                            ((u32::from(c.r) * 77 + u32::from(c.g) * 150 + u32::from(c.b) * 29)
+                                >> 8) as u8
+                        }));
+                        if writer
+                            .row(self.shared.storage.as_ref(), path, &gray)
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                }
+                out(part.y, view);
             }
             top = top.saturating_add(rows);
             if top == u16::MAX {
                 break;
             }
+        }
+        if let Some(path) = shot {
+            let key = if writer.is_some_and(|w| w.is_complete()) {
+                "core.screenshot-saved"
+            } else {
+                "core.screenshot-failed"
+            };
+            let text = self
+                .shared
+                .translator
+                .format(key, &[("path", quireink_sdk::Arg::Str(&path))]);
+            self.output.commands.push(Command::Notify(text));
         }
     }
 
@@ -1785,12 +1830,15 @@ impl Kernel {
         let input = self.recognizer.next_deadline(&self.thresholds());
         let notice = self.notice.as_ref().map(|(_, until)| *until);
         let scheduled = self.scheduled.iter().map(|(at, ..)| *at).min();
+        // After a screenshot is drawn, a message says where it went.
+        let shot = self.screenshot.is_some().then(|| self.now.add_millis(300));
         effects.wake_at = [
             input,
             self.screen_timer,
             notice,
             scheduled,
             self.sleep_due(),
+            shot,
         ]
         .into_iter()
         .flatten()
@@ -1866,6 +1914,12 @@ impl Kernel {
             Command::SetPluginEnabled(id, enabled) => self.set_plugin_enabled(&id, enabled),
             Command::Restart => self.restart = true,
             Command::Sleep => self.sleep = self.shared.sleep,
+            Command::Screenshot(path) => {
+                // The whole screen is drawn anew, and saved as it is.
+                self.screenshot = Some(path);
+                let bounds = self.framebuffer.bounds();
+                self.invalidate(bounds);
+            }
             Command::SetClipboard(text) => {
                 self.shared.clipboard = clipped(&text);
                 self.copied = Some(self.shared.clipboard.clone());

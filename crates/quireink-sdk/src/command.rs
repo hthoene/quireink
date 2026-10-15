@@ -203,6 +203,10 @@ pub enum Command {
     /// Restarts QuireInk, e.g. to apply switched plugins. The shell builds
     /// a new kernel; the reading position is already saved.
     Restart,
+    /// Saves what the screen shows as a gray PNG at this storage path,
+    /// once the frame is drawn (so a menu that ran this is closed by
+    /// then); a message tells where.
+    Screenshot(alloc::string::String),
     /// Asks the shell to sleep once the frame is shown, where it can
     /// ([`Env::sleep`](crate::Env)); the kernel is told when it wakes.
     Sleep,

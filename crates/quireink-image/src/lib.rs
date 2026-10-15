@@ -23,11 +23,13 @@ extern crate alloc;
 mod gray;
 mod jpeg;
 mod png;
+mod png_write;
 mod progressive;
 
 use core::fmt;
 
 pub use gray::{GrayFile, GrayWriter};
+pub use png_write::PngWriter;
 
 /// Why an image could not be decoded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
