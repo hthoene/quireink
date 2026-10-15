@@ -25,9 +25,10 @@
 //! reading ever holds more than a block in memory.
 //!
 //! HTML files (e.g. web pages) are converted the same way, read as
-//! browsers do (see [`Source::Html`]).
+//! browsers do (see [`Source::Html`]), and FictionBooks, their elements
+//! read as the HTML ones they look like (see [`Source::Fb2`]).
 
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use quireink_sdk::Storage;
@@ -73,6 +74,26 @@ pub(crate) enum Source<'a> {
         focus: Option<&'a str>,
         base: Option<&'a str>,
     },
+    /// A FictionBook in storage: one XML file. Section titles get the
+    /// anchors `fb2-toc-<n>` for the table of contents; pictures come
+    /// from its `<binary>` elements.
+    Fb2 {
+        path: &'a str,
+        encoding: crate::fb2::Encoding,
+    },
+}
+
+/// Where a FictionBook's converter is.
+#[derive(Debug, Default)]
+struct Fb2State {
+    /// Depth of nested sections.
+    depth: u32,
+    /// Inside a `<title>`.
+    in_title: bool,
+    /// Inside the notes (`<body name="notes">`).
+    notes: bool,
+    /// Section titles met so far, for their anchors.
+    titles: u32,
 }
 
 /// Paths of a chapter's cache files.
@@ -227,6 +248,8 @@ struct Converter<'a> {
     /// Reading HTML: the page's address, if known (else `None` for
     /// EPUB chapters and HTML without one).
     html: Option<Html>,
+    /// Reading a FictionBook.
+    fb2: Option<Fb2State>,
     /// Pending `<n>.pos` lines.
     positions: String,
     /// The element path of the block being collected.
@@ -316,9 +339,14 @@ impl Converter<'_> {
             .all(|f| f.tag == "svg")
     }
 
-    /// An image block for `href` (relative to the chapter).
+    /// An image block for `href` (relative to the chapter; in a
+    /// FictionBook, `#` and a binary's id).
     fn image(&mut self, href: &str, alt: &str) {
-        let (path, _) = crate::package::resolve(&self.base, href);
+        let path = if self.fb2.is_some() {
+            href.trim_start_matches('#').to_string()
+        } else {
+            crate::package::resolve(&self.base, href).0
+        };
         let cache = image_path(&self.paths.dir, &path);
         self.flush();
         self.kind = BlockKind::Image;
@@ -385,9 +413,76 @@ impl Converter<'_> {
         })
     }
 
+    /// A FictionBook element entered: the HTML element it is read as.
+    fn fb2_enter(&mut self, tag: &str, attrs: &quireink_sdk::xml::Attrs<'_>) -> String {
+        let Some(fb2) = &mut self.fb2 else {
+            return tag.to_string();
+        };
+        match tag {
+            "body" => fb2.notes = attrs.get("name").as_deref() == Some("notes"),
+            "section" => fb2.depth += 1,
+            "title" => {
+                fb2.in_title = true;
+                if !fb2.notes && fb2.depth > 0 {
+                    // Where the contents entry leads.
+                    let id = alloc::format!("{}{}", crate::fb2::TOC_ANCHOR, fb2.titles);
+                    fb2.titles += 1;
+                    self.flush();
+                    let at = self.here();
+                    self.anchors.push_str(&alloc::format!("{id}\t{at}\n"));
+                }
+            }
+            // The lines of a title.
+            "p" if fb2.in_title && !self.text.is_empty() => self.push('\n'),
+            _ => {}
+        }
+        self.fb2_name(tag)
+    }
+
+    /// A FictionBook element left: the HTML element it was read as.
+    fn fb2_leave(&mut self, tag: &str) -> String {
+        let name = self.fb2_name(tag);
+        if let Some(fb2) = &mut self.fb2 {
+            match tag {
+                "section" => fb2.depth = fb2.depth.saturating_sub(1),
+                "title" => fb2.in_title = false,
+                _ => {}
+            }
+        }
+        name
+    }
+
+    /// The HTML element a FictionBook element is read as.
+    fn fb2_name(&self, tag: &str) -> String {
+        let Some(fb2) = &self.fb2 else {
+            return tag.to_string();
+        };
+        let name = match tag {
+            "description" | "binary" | "stylesheet" => "head",
+            "title" => {
+                return alloc::format!("h{}", (fb2.depth + 1).min(6));
+            }
+            "p" if fb2.in_title => "span",
+            "subtitle" => "h5",
+            "epigraph" | "cite" => "blockquote",
+            "poem" | "stanza" => "div",
+            "v" | "text-author" | "empty-line" => "p",
+            "emphasis" => "i",
+            "strong" => "b",
+            "strikethrough" => "s",
+            tag => tag,
+        };
+        name.to_string()
+    }
+
     fn start(&mut self, name: &str, attrs: quireink_sdk::xml::Attrs<'_>, self_closing: bool) {
         let _ = self_closing;
         let tag = local_name(name).to_ascii_lowercase();
+        let tag = if self.fb2.is_some() {
+            self.fb2_enter(&tag, &attrs)
+        } else {
+            tag
+        };
         let props = if self.hidden == 0 {
             element_props(&tag, &attrs, &mut self.rules, self.styles)
         } else {
@@ -460,7 +555,12 @@ impl Converter<'_> {
             },
             None => 1,
         };
-        let link = match attrs.get("href") {
+        // `href`, also as FictionBook writes it (`l:href`).
+        let href = attrs
+            .iter()
+            .find(|(name, _)| local_name(name) == "href")
+            .map(|(_, value)| decode(value));
+        let link = match href {
             Some(href) if tag == "a" && !hides && self.hidden == 0 => {
                 self.target(&href).map(|target| (self.here(), target))
             }
@@ -537,6 +637,11 @@ impl Converter<'_> {
 
     fn end(&mut self, name: &str) {
         let tag = local_name(name).to_ascii_lowercase();
+        let tag = if self.fb2.is_some() {
+            self.fb2_leave(&tag)
+        } else {
+            tag
+        };
         let Some(open) = self.stack.iter().rposition(|f| f.tag == tag) else {
             return;
         };
@@ -908,16 +1013,17 @@ pub(crate) fn convert(
 ) -> Result<u32, DocumentError> {
     let name = match source {
         Source::Zip { entry, .. } => entry.name.as_str(),
-        Source::Html { path, .. } => path,
+        Source::Html { path, .. } | Source::Fb2 { path, .. } => path,
     };
     let base = String::from(name.rfind('/').map_or("", |i| &name[..=i]));
     let html = match source {
-        Source::Zip { .. } => None,
+        Source::Zip { .. } | Source::Fb2 { .. } => None,
         Source::Html { focus, base, .. } => Some(Html {
             focus: focus.map(String::from),
             base: base.map(String::from),
         }),
     };
+    let fb2 = matches!(source, Source::Fb2 { .. }).then(Fb2State::default);
     let _ = storage.remove(&paths.end);
     for path in [
         &paths.text,
@@ -958,13 +1064,14 @@ pub(crate) fn convert(
         // A page with reading matter shows nothing outside it.
         hidden: u32::from(html.as_ref().is_some_and(|h| h.focus.is_some())),
         html,
+        fb2,
         pre: 0,
         space: false,
         space_style: TextStyle::REGULAR,
         failed: None,
     };
     let mut tokenizer = match source {
-        Source::Zip { .. } => Tokenizer::new(),
+        Source::Zip { .. } | Source::Fb2 { .. } => Tokenizer::new(),
         Source::Html { .. } => Tokenizer::html(),
     };
     let mut handle = |token: Token<'_>| match token {
@@ -1002,6 +1109,9 @@ pub(crate) fn convert(
                 at += n as u64;
             }
         }
+        Source::Fb2 { path, encoding } => {
+            crate::fb2::feed(storage, path, *encoding, &mut tokenizer, &mut handle)?;
+        }
     }
     tokenizer.finish(&mut handle);
     converter.flush();
@@ -1024,6 +1134,15 @@ pub(crate) fn convert(
                 let _ = decode_image(storage, archive, path, cache, &paths.dir, IMAGE_SIDE);
             }
         }
+    }
+    if let Source::Fb2 { path, encoding } = source
+        && !images.is_empty()
+    {
+        let wanted: Vec<(String, String, u32)> = images
+            .into_iter()
+            .map(|(id, cache)| (id, cache, IMAGE_SIDE))
+            .collect();
+        let _ = crate::fb2::decode_binaries(storage, path, *encoding, &wanted, &paths.dir);
     }
     // Last: its presence marks a complete conversion.
     storage.write(&paths.end, &length.to_le_bytes())?;
@@ -1076,8 +1195,6 @@ pub(crate) fn decode_image(
     dir: &str,
     side: u32,
 ) -> Result<(), DocumentError> {
-    use quireink_sdk::image::{Format, GrayWriter, decode};
-
     let entry = archive
         .entry(storage, path)
         .map_err(error)?
@@ -1102,6 +1219,35 @@ pub(crate) fn decode_image(
             (temp.as_str(), 0, u64::from(entry.size))
         }
     };
+    let result = decode_range(storage, file, offset, end, cache, side);
+    if file == temp {
+        let _ = storage.remove(&temp);
+    }
+    result
+}
+
+/// Decodes the image file `file` into the cache file `cache`.
+pub(crate) fn decode_file(
+    storage: &dyn Storage,
+    file: &str,
+    cache: &str,
+    side: u32,
+) -> Result<(), DocumentError> {
+    let end = storage.size(file)?;
+    decode_range(storage, file, 0, end, cache, side)
+}
+
+/// Decodes the image in `offset..end` of `file` into `cache`.
+fn decode_range(
+    storage: &dyn Storage,
+    file: &str,
+    offset: u64,
+    end: u64,
+    cache: &str,
+    side: u32,
+) -> Result<(), DocumentError> {
+    use quireink_sdk::image::{Format, GrayWriter, decode};
+
     let mut head = [0u8; 8];
     let n = storage.read_at(file, offset, &mut head)?;
     let result = match Format::detect(&head[..n]) {
@@ -1117,9 +1263,6 @@ pub(crate) fn decode_image(
         }
         None => Err(quireink_sdk::image::ImageError::Unsupported("image format")),
     };
-    if file == temp {
-        let _ = storage.remove(&temp);
-    }
     if result.is_err() {
         let _ = storage.remove(cache);
     }

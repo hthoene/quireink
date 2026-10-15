@@ -13,7 +13,7 @@
 //!
 //! HTML files (`.html`, `.htm`, `.xhtml`), e.g. saved web pages, open
 //! the same way, showing only a page's reading matter (see
-//! [`HtmlDocument`]).
+//! [`HtmlDocument`]), and FictionBooks (`.fb2`, see [`Fb2Document`]).
 
 #![no_std]
 
@@ -23,6 +23,7 @@ mod cached;
 mod convert;
 mod css;
 mod document;
+mod fb2;
 mod html;
 mod obfuscation;
 mod package;
@@ -37,12 +38,15 @@ use quireink_sdk::{
 };
 
 pub use document::EpubDocument;
+pub use fb2::Fb2Document;
 pub use html::HtmlDocument;
 
 pub const PLUGIN: Id = Id::new_static("format-epub");
 pub const FORMAT: Id = Id::new_static("format-epub.epub");
 /// HTML files, e.g. web pages.
 pub const HTML: Id = Id::new_static("format-epub.html");
+/// FictionBook 2.
+pub const FB2: Id = Id::new_static("format-epub.fb2");
 
 /// The EPUB format plugin.
 #[derive(Debug, Default)]
@@ -82,6 +86,15 @@ impl Plugin for EpubFormat {
             ],
             open: Box::new(|storage, path, options| {
                 HtmlDocument::open(storage, path, options.publisher_styles)
+                    .map(|d| Box::new(d) as Box<dyn Document>)
+            }),
+        })?;
+        r.add_format(FormatSpec {
+            id: FB2,
+            title: Cow::Borrowed("format-epub.fb2"),
+            extensions: vec![Cow::Borrowed("fb2")],
+            open: Box::new(|storage, path, options| {
+                Fb2Document::open(storage, path, options.publisher_styles)
                     .map(|d| Box::new(d) as Box<dyn Document>)
             }),
         })?;
