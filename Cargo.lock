@@ -1311,6 +1311,7 @@ dependencies = [
  "quireink-fs",
  "quireink-graphics",
  "quireink-platform",
+ "quireink-sample-hello",
  "quireink-serve",
  "softbuffer",
  "winit",
@@ -1627,6 +1628,16 @@ name = "quireink-plugin-wikipedia"
 version = "0.1.0"
 dependencies = [
  "quireink-i18n",
+ "quireink-sdk",
+]
+
+[[package]]
+name = "quireink-sample-hello"
+version = "0.1.0"
+dependencies = [
+ "quireink-core",
+ "quireink-i18n",
+ "quireink-platform",
  "quireink-sdk",
 ]
 

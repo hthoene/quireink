@@ -47,6 +47,7 @@ members = [
     "plugins/translate",
     "plugins/readwise",
     "plugins/wallabag",
+    "samples/hello-plugin",
     "plugins/news",
     "plugins/plugin-manager",
     "plugins/settings",

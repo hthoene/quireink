@@ -372,6 +372,10 @@ fn build_kernel(
             builder = builder.font_dir("fonts");
         }
         let mut builder = quireink_app::install(builder, fonts);
+        #[cfg(feature = "hello")]
+        {
+            builder = builder.plugin(quireink_sample_hello::Hello);
+        }
         if let Some(rows) = profile.frame_rows {
             builder = builder.frame_rows(rows);
         }

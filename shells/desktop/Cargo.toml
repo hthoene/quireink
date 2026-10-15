@@ -28,6 +28,11 @@ softbuffer = "0.4"
 # Without client-side decorations on Wayland: they pull in the unmaintained
 # `ttf-parser` (RUSTSEC-2026-0192).
 winit = { version = "0.30", default-features = false, features = ["rwh_06", "x11", "wayland", "wayland-dlopen"] }
+# The sample plugin of `docs/plugins.md`, with `--features hello`.
+quireink-sample-hello = { path = "../../samples/hello-plugin", optional = true }
+
+[features]
+hello = ["dep:quireink-sample-hello"]
 
 [lints]
 workspace = true

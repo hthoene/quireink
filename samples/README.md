@@ -20,3 +20,11 @@ Both books are in the public domain and come unchanged from
 `plugins/large-print` is a data plugin: larger text in books and menus,
 with its name translated to German. To try it, copy it into
 `library/plugins/` (or the `plugins` folder of a device) and restart.
+
+`plugins/airy-theme` is a theme as a data plugin: new defaults for the
+appearance settings.
+
+`hello-plugin` is a plugin with code to start from: an action in the
+tools, a screen for touch and buttons, a setting, an event and
+translations. [Writing plugins](../docs/plugins.md) walks through it; try
+it with `cargo run -p quireink-emulator --features hello`.

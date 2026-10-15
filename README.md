@@ -72,12 +72,15 @@ plugins/large-print/
   i18n/*.ini     translations, also whole new languages
   keymap.ini     key bindings, as in quireink.ini
   settings.ini   new defaults for any setting, e.g. [reader] font-size = 14
+  fonts/*.ttf    fonts to read with (also .otf, .ttc)
 ```
 
 [`samples/plugins/large-print`](samples/plugins/large-print) is a complete
 example. Plugins with code are Rust crates using the SDK; they are built
 into the app (a web firmware builder for the X4 is planned) or, on larger
-devices, will be loadable as WebAssembly.
+devices, will be loadable as WebAssembly. [Writing plugins](docs/plugins.md)
+walks through [`samples/hello-plugin`](samples/hello-plugin/src/lib.rs), a
+small one to start from.
 
 ## Try it in the emulator
 
@@ -145,8 +148,8 @@ cargo run -p quireink-emulator -- --headless --profile boox-go-7 --set core.lang
 | `tools/fontgen` | Converts fonts into bitmap font packs for small devices |
 | `shells/desktop` | Desktop emulator with device profiles |
 | `shells/android` | Android app for e-readers such as Boox ([build and install](shells/android/README.md)) |
-| `samples/` | Emulator library with public-domain books |
-| `docs/` | [Plan](docs/PLANNING.md) and [architecture decisions](docs/adr/) |
+| `samples/` | Emulator library with public-domain books, sample plugins |
+| `docs/` | [Plan](docs/PLANNING.md), [writing plugins](docs/plugins.md) and [architecture decisions](docs/adr/) |
 
 ## Contributing
 
