@@ -190,6 +190,92 @@ fn line_runs(
     runs
 }
 
+/// The heading level of a block (0: none) and the face of its text.
+fn block_face(block: &Block) -> (u8, Face) {
+    let heading = match block.kind {
+        BlockKind::Heading(level) => level.clamp(1, 6),
+        _ => 0,
+    };
+    let face = Face {
+        style: if heading > 0 {
+            TextStyle::BOLD
+        } else {
+            TextStyle::REGULAR
+        },
+        heading,
+        size: block.size.unwrap_or(0),
+    };
+    (heading, face)
+}
+
+/// How a block's lines are aligned.
+fn block_align(block: &Block, style: &Style, heading: u8) -> Align {
+    match block.align {
+        Align::Auto if heading > 0 => Align::Start,
+        Align::Auto | Align::Justify if style.justify => Align::Justify,
+        Align::Auto | Align::Justify => Align::Start,
+        align => align,
+    }
+}
+
+/// The indent of a block's first line, where it starts (not where a page
+/// continues it).
+fn first_indent(block: &Block, style: &Style, align: Align) -> f32 {
+    // The book's ems are those of the block's text.
+    let em = style.em * f32::from(block.size.unwrap_or(100)) / 100.0;
+    if !block.continues
+        && block.kind == BlockKind::Paragraph
+        && matches!(align, Align::Start | Align::Justify)
+    {
+        block
+            .indent
+            .map_or(style.indent, |i| f32::from(i) / 100.0 * em)
+    } else {
+        0.0
+    }
+}
+
+/// The start of the line `at` falls in, the block laid out from its
+/// start as [`layout_page`] does: a page shown from a position kept with
+/// another layout (other fonts, a turned screen) or found by a search
+/// starts with that whole line, not inside it.
+#[allow(clippy::too_many_arguments)]
+pub fn line_start(
+    document: &dyn Document,
+    storage: &dyn Storage,
+    at: Locator,
+    width: f32,
+    style: &Style,
+    typesetter: &dyn Typesetter,
+    hyphenate: Option<Hyphenate<'_>>,
+) -> Result<Locator, DocumentError> {
+    let Some(block) = document.block_at(storage, at)? else {
+        return Ok(at);
+    };
+    if block.kind == BlockKind::Image || at.offset <= block.start {
+        return Ok(at);
+    }
+    let from = block.text_index(at.offset);
+    if from == 0 {
+        return Ok(at);
+    }
+    let (heading, base) = block_face(&block);
+    let indent = first_indent(&block, style, block_align(&block, style, heading));
+    let lines = wrap_lines_hyphenated(
+        &block.text,
+        |n| if n == 0 { width - indent } else { width },
+        |i, c| typesetter.advance(face_at(&block, base, i), c),
+        hyphenate.filter(|_| heading == 0),
+    );
+    let start = lines
+        .iter()
+        .rev()
+        .map(|line| line.range.start)
+        .find(|start| *start <= from)
+        .unwrap_or(0);
+    Ok(Locator::new(at.section, block.source_offset(start)))
+}
+
 /// Lays out the page starting at `start` into a `width`×`height` content
 /// box, measuring text with `typesetter`; with `hyphenate`, words that do
 /// not fit at the end of a line are hyphenated.
@@ -268,19 +354,7 @@ pub fn layout_page(
             at = Locator::new(at.section, block.end);
             continue;
         }
-        let heading = match block.kind {
-            BlockKind::Heading(level) => level.clamp(1, 6),
-            _ => 0,
-        };
-        let base = Face {
-            style: if heading > 0 {
-                TextStyle::BOLD
-            } else {
-                TextStyle::REGULAR
-            },
-            heading,
-            size: block.size.unwrap_or(0),
-        };
+        let (heading, base) = block_face(&block);
         let (ascent, line_height) = typesetter.line(base);
         // The book's ems are those of the block's text.
         let em = style.em * f32::from(block.size.unwrap_or(100)) / 100.0;
@@ -302,19 +376,9 @@ pub fn layout_page(
                 y += body_line * HEADING_SPACE;
             }
         }
-        let align = match block.align {
-            Align::Auto if heading > 0 => Align::Start,
-            Align::Auto | Align::Justify if style.justify => Align::Justify,
-            Align::Auto | Align::Justify => Align::Start,
-            align => align,
-        };
-        let indent = if at_block_start
-            && block.kind == BlockKind::Paragraph
-            && matches!(align, Align::Start | Align::Justify)
-        {
-            block
-                .indent
-                .map_or(style.indent, |i| f32::from(i) / 100.0 * em)
+        let align = block_align(&block, style, heading);
+        let indent = if at_block_start {
+            first_indent(&block, style, align)
         } else {
             0.0
         };
@@ -526,6 +590,38 @@ mod tests {
         let next = layout(&doc, small.end.offset, 10.0, &STYLE);
         assert_eq!(texts(&next), vec!["cccc dddd"]);
         assert_eq!(next.lines[0].baseline, 8.0);
+    }
+
+    #[test]
+    fn positions_inside_a_line_go_to_its_start() {
+        let doc = Text::new(
+            "aaaa bbbb cccc dddd
+ee ff
+",
+        );
+        let storage = quireink_document::NoStorage;
+        let start = |offset, width| {
+            line_start(
+                &doc,
+                &storage,
+                Locator::new(0, offset),
+                width,
+                &STYLE,
+                &Units,
+                None,
+            )
+            .unwrap()
+            .offset
+        };
+        // Lines of 10 units: "aaaa bbbb", "cccc dddd".
+        assert_eq!(start(12, 10.0), 10, "inside \"cccc\"");
+        assert_eq!(start(10, 10.0), 10, "a line's start stays");
+        assert_eq!(start(3, 10.0), 0);
+        // Wider lines (e.g. turned): "aaaa bbbb cccc", "dddd".
+        assert_eq!(start(12, 15.0), 0);
+        assert_eq!(start(16, 15.0), 15);
+        assert_eq!(start(20, 15.0), 20, "another paragraph's start");
+        assert_eq!(start(22, 15.0), 20);
     }
 
     #[test]

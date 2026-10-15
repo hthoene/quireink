@@ -5,7 +5,9 @@ use alloc::vec::Vec;
 
 use quireink_sdk::builtin::{actions, events, fonts, params, slots};
 use quireink_sdk::document::{Document, DocumentError, Link, Locator};
-use quireink_sdk::layout::{Face, Hyphenate, Page, PageImage, Style, Typesetter, layout_page};
+use quireink_sdk::layout::{
+    Face, Hyphenate, Page, PageImage, Style, Typesetter, layout_page, line_start,
+};
 use quireink_sdk::ui::{self, UiStyle};
 use quireink_sdk::{
     Arg, Canvas, Color, Command, Cx, Env, FontHandle, FontSet, Gesture, GestureKind, Handled, Id,
@@ -1386,7 +1388,10 @@ impl Book {
         };
         book.chapter_marks = book.chapter_marks(env);
         book.embedded = Embedded::load(env, book.document.as_ref());
-        let start = book.saved_position(env).unwrap_or(Locator::START);
+        // Kept with another layout maybe: from the start of its line.
+        let start = book
+            .saved_position(env)
+            .map_or(Locator::START, |at| book.line_start(env, at));
         book.page = match book.layout(env, start).map_err(error)? {
             page if page.is_past_end() && start != Locator::START => {
                 book.layout(env, Locator::START).map_err(error)?
@@ -1435,7 +1440,8 @@ impl Book {
             return;
         };
         self.typography = Typography::new(env, &font, &self.language, self.document.whole_pages());
-        if let Ok(page) = self.layout(env, self.page.start) {
+        let start = self.line_start(env, self.page.start);
+        if let Ok(page) = self.layout(env, start) {
             self.page = page;
         }
         self.update_links(env);
@@ -1446,6 +1452,38 @@ impl Book {
 
     fn font<'a>(&self, env: &Env<'a>) -> Option<FontHandle<'a>> {
         env.fonts.role(fonts::READING.as_str())
+    }
+
+    /// The start of the line `at` is in, as this book is laid out now
+    /// (see `layout::line_start`).
+    fn line_start(&self, env: &Env<'_>, at: Locator) -> Locator {
+        let t = &self.typography;
+        let Some(faces) = Faces::new(env, t, self.embedded.as_ref()) else {
+            return at;
+        };
+        let patterns = t
+            .hyphenation
+            .as_deref()
+            .and_then(|language| env.hyphenation.get(language));
+        let hyphenate = |word: &str, out: &mut dyn FnMut(usize)| {
+            if let Some(patterns) = patterns {
+                patterns.hyphenate(word, out);
+            }
+        };
+        let filtered = Filtered {
+            document: self.document.as_ref(),
+            env,
+        };
+        line_start(
+            &filtered,
+            env.storage,
+            at,
+            t.width,
+            &t.style,
+            &faces,
+            patterns.is_some().then_some(&hyphenate as Hyphenate<'_>),
+        )
+        .unwrap_or(at)
     }
 
     fn layout(&self, env: &Env<'_>, at: Locator) -> Result<Page, DocumentError> {
@@ -1869,6 +1907,8 @@ impl Book {
     /// contents, a search hit, a page number): *Back* returns here.
     fn jump(&mut self, cx: &mut Cx<'_, '_>, start: Locator) -> bool {
         let from = self.page.start;
+        // A search hit or a position from elsewhere: its whole line.
+        let start = self.line_start(cx.env(), start);
         if !self.show(cx, start, true) {
             return false;
         }
