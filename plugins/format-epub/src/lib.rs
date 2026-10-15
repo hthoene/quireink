@@ -13,8 +13,9 @@
 //!
 //! HTML files (`.html`, `.htm`, `.xhtml`), e.g. saved web pages, open
 //! the same way, showing only a page's reading matter (see
-//! [`HtmlDocument`]), FictionBooks (`.fb2`, see [`Fb2Document`]) and
-//! comic book archives (`.cbz`, see [`CbzDocument`]).
+//! [`HtmlDocument`]), Markdown (`.md`, see [`MarkdownDocument`]),
+//! FictionBooks (`.fb2`, see [`Fb2Document`]) and comic book archives
+//! (`.cbz`, see [`CbzDocument`]).
 
 #![no_std]
 
@@ -27,6 +28,7 @@ mod css;
 mod document;
 mod fb2;
 mod html;
+mod markdown;
 mod obfuscation;
 mod package;
 
@@ -43,6 +45,7 @@ pub use cbz::CbzDocument;
 pub use document::EpubDocument;
 pub use fb2::Fb2Document;
 pub use html::HtmlDocument;
+pub use markdown::MarkdownDocument;
 
 pub const PLUGIN: Id = Id::new_static("format-epub");
 pub const FORMAT: Id = Id::new_static("format-epub.epub");
@@ -52,6 +55,8 @@ pub const HTML: Id = Id::new_static("format-epub.html");
 pub const FB2: Id = Id::new_static("format-epub.fb2");
 /// Comic book archives.
 pub const CBZ: Id = Id::new_static("format-epub.cbz");
+/// Markdown.
+pub const MARKDOWN: Id = Id::new_static("format-epub.markdown");
 
 /// The EPUB format plugin.
 #[derive(Debug, Default)]
@@ -100,6 +105,15 @@ impl Plugin for EpubFormat {
             extensions: vec![Cow::Borrowed("fb2"), Cow::Borrowed("fb2.zip")],
             open: Box::new(|storage, path, options| {
                 Fb2Document::open(storage, path, options.publisher_styles)
+                    .map(|d| Box::new(d) as Box<dyn Document>)
+            }),
+        })?;
+        r.add_format(FormatSpec {
+            id: MARKDOWN,
+            title: Cow::Borrowed("format-epub.markdown"),
+            extensions: vec![Cow::Borrowed("md"), Cow::Borrowed("markdown")],
+            open: Box::new(|storage, path, options| {
+                MarkdownDocument::open(storage, path, options.publisher_styles)
                     .map(|d| Box::new(d) as Box<dyn Document>)
             }),
         })?;
