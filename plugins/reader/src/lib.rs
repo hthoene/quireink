@@ -20,6 +20,7 @@
 extern crate alloc;
 
 mod annotations;
+mod footnote;
 mod index;
 mod screen;
 mod search;
@@ -77,6 +78,10 @@ pub const MORE_MENU: Id = Id::new_static("reader.more");
 /// to there is marked (e.g. a search hit). Emitted by the table of contents; bookmark or
 /// search plugins can use it too.
 pub const GOTO: Id = Id::new_static("reader.goto");
+/// Follows a link of the open book: parameters `path` and `href`.
+pub const FOLLOW: Id = Id::new_static("reader.follow");
+/// A footnote over the page (see `footnote`).
+pub const FOOTNOTE_SCREEN: Id = Id::new_static("reader.footnote");
 
 /// Settings of the reader.
 pub mod settings {
@@ -97,6 +102,11 @@ pub mod settings {
     pub const INDENT: Id = Id::new_static("reader.indent");
     /// Reopen the last book at start-up.
     pub const OPEN_LAST: Id = Id::new_static("reader.open-last");
+    /// Notes shown over the page ([`FOOTNOTES_POPUP`]) or jumped to
+    /// ([`FOOTNOTES_JUMP`]).
+    pub const FOOTNOTES: Id = Id::new_static("reader.footnotes");
+    pub const FOOTNOTES_POPUP: &str = "reader.footnotes.popup";
+    pub const FOOTNOTES_JUMP: &str = "reader.footnotes.jump";
     /// Hyphenate words at line ends, in the book's language.
     pub const HYPHENATE: Id = Id::new_static("reader.hyphenate");
     /// Apply the book's own styles (an EPUB's CSS).
@@ -195,6 +205,11 @@ impl Plugin for Reader {
             }),
         })?;
         status::register(r)?;
+        r.add_screen(ScreenSpec {
+            id: FOOTNOTE_SCREEN,
+            title: Cow::Borrowed("reader.title"),
+            factory: Box::new(|env, params| Box::new(footnote::FootnoteScreen::new(env, params))),
+        })?;
         r.add_screen(ScreenSpec {
             id: SEARCH_SCREEN,
             title: Cow::Borrowed("reader.search"),
@@ -320,6 +335,18 @@ impl Plugin for Reader {
             flag(settings::OPEN_LAST, "reader.setting.open-last", true)
                 .section(setting_sections::BEHAVIOUR)
                 .description("reader.setting.open-last.help"),
+            SettingSpec::new(
+                settings::FOOTNOTES,
+                "reader.setting.footnotes",
+                SettingKind::Choice(alloc::vec![
+                    Cow::Borrowed(settings::FOOTNOTES_POPUP),
+                    Cow::Borrowed(settings::FOOTNOTES_JUMP),
+                ]),
+                SettingValue::Text(Cow::Borrowed(settings::FOOTNOTES_POPUP)),
+            )
+            .group(groups::READING)
+            .section(setting_sections::BEHAVIOUR)
+            .description("reader.setting.footnotes.help"),
             flag(
                 settings::CORNER_BOOKMARK,
                 "reader.setting.corner-bookmark",

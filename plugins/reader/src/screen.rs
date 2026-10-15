@@ -607,13 +607,17 @@ impl ReaderScreen {
                 }
             }
         } else if *a == actions::CONFIRM {
-            let href = linking
+            let link = linking
                 .focus
                 .and_then(|i| book.followable(&env).get(i).copied())
-                .map(|i| book.links[i].href.clone());
+                .map(|i| book.links[i].clone());
+            let link = link.map(|l| {
+                let words = book.words(&env);
+                (l.href.clone(), link_label(book, &words, &l))
+            });
             self.set_linking(None, cx);
-            if let Some(href) = href {
-                return self.follow(&href, cx);
+            if let Some((href, label)) = link {
+                return self.open_link(&href, &label, cx);
             }
         } else if *a == actions::BACK || *a == actions::MENU {
             self.set_linking(None, cx);
@@ -772,6 +776,30 @@ impl ReaderScreen {
                 .with(params::REPLY, crate::PAGE_ENTERED.as_str())
         };
         cx.command(Command::OpenSlot(slots::KEYBOARD, request));
+    }
+
+    /// Opens a link: a note over the page if it looks like one and the
+    /// reader shows notes that way, else follows it.
+    fn open_link(&mut self, href: &str, label: &str, cx: &mut Cx<'_, '_>) -> Handled {
+        let env = *cx.env();
+        let popup = env.settings.text(crate::settings::FOOTNOTES.as_str())
+            == crate::settings::FOOTNOTES_POPUP;
+        if popup
+            && !quireink_sdk::document::is_external(href)
+            && crate::footnote::note_like(label)
+            && let Ok(book) = &self.book
+            && let Some(text) = book.note_text(&env, href)
+        {
+            cx.command(Command::OpenScreen(
+                crate::FOOTNOTE_SCREEN,
+                Params::new()
+                    .with(params::TEXT, text)
+                    .with(params::PATH, book.path.clone())
+                    .with(crate::footnote::HREF, href.to_string()),
+            ));
+            return Handled::Yes;
+        }
+        self.follow(href, cx)
     }
 
     /// Follows link `href`: to its place in the book, remembering where
@@ -1244,6 +1272,38 @@ impl Book {
         order
     }
 
+    /// The text at the target of link `href`, as a note shows it: the
+    /// block there and the ones after it, up to a heading or a few hundred
+    /// characters.
+    fn note_text(&self, env: &Env<'_>, href: &str) -> Option<String> {
+        let mut at = self.document.link_target(env.storage, href)?;
+        let mut text = String::new();
+        for _ in 0..4 {
+            let Ok(Some(block)) = self.document.block_at(env.storage, at) else {
+                break;
+            };
+            if matches!(block.kind, quireink_sdk::document::BlockKind::Heading(_))
+                && !text.is_empty()
+            {
+                break;
+            }
+            let part = block.text.trim();
+            if !part.is_empty() {
+                if !text.is_empty() {
+                    text.push(' ');
+                }
+                text.push_str(part);
+            }
+            // A note that is only its number goes on in the next block.
+            if text.chars().count() > 300 || text.chars().count() > 12 && block.end > block.start {
+                break;
+            }
+            at = Locator::new(at.section, block.end);
+        }
+        let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        (!text.is_empty()).then_some(text)
+    }
+
     /// The link `word` is part of, if any.
     fn link_of(&self, word: &WordBox) -> Option<&Link> {
         if word.start.section != self.page.start.section {
@@ -1537,6 +1597,26 @@ impl Book {
         }
         self.chapter = Some(chapter);
     }
+}
+
+/// The text of `link` on the page: the parts of its words inside it (a
+/// note mark is often part of a word, as in `source¹`).
+fn link_label(book: &Book, words: &[WordBox], link: &Link) -> String {
+    let mut label = String::new();
+    for word in words.iter().filter(|w| {
+        w.start.section == book.page.start.section
+            && w.end.offset > link.start
+            && w.start.offset < link.end
+    }) {
+        let from = link.start.saturating_sub(word.start.offset) as usize;
+        let to = (link.end.min(word.end.offset) - word.start.offset) as usize;
+        let part = word.text.get(from..to).unwrap_or(&word.text);
+        if !label.is_empty() {
+            label.push(' ');
+        }
+        label.push_str(part);
+    }
+    label
 }
 
 /// The link being chosen, framed like selected text, and a bar at the
@@ -1850,7 +1930,7 @@ impl Screen for ReaderScreen {
         };
         let link = at(gesture.start)
             .and_then(|i| book.link_of(&words[i]))
-            .map(|link| link.href.clone());
+            .map(|link| (link.href.clone(), link_label(book, &words, link)));
         match (gesture.kind, self.selection) {
             (GestureKind::Tap, None)
                 if env.settings.bool(crate::settings::CORNER_BOOKMARK.as_str())
@@ -1875,7 +1955,8 @@ impl Screen for ReaderScreen {
                 Handled::Yes
             }
             (GestureKind::Tap, None) if link.is_some() => {
-                self.follow(link.as_deref().unwrap_or_default(), cx)
+                let (href, label) = link.unwrap_or_default();
+                self.open_link(&href, &label, cx)
             }
             (GestureKind::LongPress, _) => match at(gesture.start) {
                 Some(word) => {
@@ -1909,6 +1990,14 @@ impl Screen for ReaderScreen {
             return;
         };
         let this_book = params.get(params::PATH) == Some(book.path.as_str());
+        if *event == crate::FOLLOW && this_book {
+            let href = params
+                .get(crate::footnote::HREF)
+                .unwrap_or_default()
+                .to_string();
+            self.follow(&href, cx);
+            return;
+        }
         if *event == crate::GOTO
             && this_book
             && let Some(at) = crate::toc::locator_of(params)

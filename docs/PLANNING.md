@@ -786,7 +786,7 @@ makes it replaceable. ✅ done, 🔶 partly, ⬜ open.
 | C8 | Menus as a grid of tiles besides lists | Menu presentation setting or plugin | ⬜ |
 | C9 | Sleep screen: cover, own picture, calendar, statistics | Slot `core.sleep` | ⬜ |
 | C10 | Text filters between format and layout: a style sheet per book, replaced words, reading aids, fonts for dyslexia | Document filter stage (§7.5) | ⬜ |
-| C11 | Footnotes as a popup or as a jump | Reader setting, replaceable behaviour | ⬜ |
+| C11 | Footnotes over the page or jumped to; note marks recognised by their text (1, [2], *) | Setting `reader.footnotes`, screen `reader.footnote`, event `reader.follow` | ✅ |
 | C12 | Dictionary sources beside StarDict: online dictionaries, translators, Wikipedia | Dictionary providers | ⬜ |
 | C13 | Reading aloud | Speech engines as providers | ⬜ |
 | C14 | Library order: sort, group by author, series or tag, collections | Library views and sorters | 🔶 (recent/name, folders) |
