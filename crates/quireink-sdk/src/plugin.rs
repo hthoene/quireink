@@ -10,7 +10,7 @@ use crate::id::Id;
 use crate::menus::{MenuEntry, MenuSection};
 use crate::screen::ScreenSpec;
 use crate::settings::{SettingGroupSpec, SettingSpec};
-use crate::status::StatusItemSpec;
+use crate::status::{StatusItemSpec, StatusLineSpec};
 use crate::version::Version;
 
 /// Static information about a plugin.
@@ -141,6 +141,10 @@ pub trait Registrar {
     /// Adds an item that status lines can show, e.g. a clock or the
     /// reading time left.
     fn add_status_item(&mut self, item: StatusItemSpec) -> Result<(), RegisterError>;
+
+    /// Adds a whole status line, drawn by the plugin (see
+    /// [`status`](crate::status)).
+    fn add_status_line(&mut self, line: StatusLineSpec) -> Result<(), RegisterError>;
 
     /// Adds a translation catalog (see `quireink-i18n`).
     fn add_translations(&mut self, source: Cow<'static, str>) -> Result<(), RegisterError>;

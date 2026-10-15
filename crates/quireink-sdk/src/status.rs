@@ -8,6 +8,12 @@
 //! An item computes its value from the environment and from the context the
 //! screen passes, e.g. the reader's `title`, `chapter`, `page` and
 //! `progress` (see [`context`]).
+//!
+//! Plugins can also add whole status lines
+//! ([`Registrar::add_status_line`](crate::Registrar::add_status_line)),
+//! which draw the line themselves: a progress bar, a large clock, anything.
+//! The reader offers the lines the user chose, above and below the text,
+//! and switches between them when the line is tapped.
 
 use alloc::borrow::Cow;
 use alloc::boxed::Box;
@@ -34,6 +40,49 @@ pub mod context {
     /// The page as shown, e.g. `12 / 340` (or a percentage while pages are
     /// being counted).
     pub const PAGE: &str = "page";
+    /// Where the chapters begin, as thousandths of the book separated by
+    /// commas, e.g. `0,112,260`.
+    pub const CHAPTERS: &str = "chapters";
+}
+
+/// Where and how a status line is drawn (see [`StatusLineSpec`]).
+#[derive(Debug, Clone, Copy)]
+pub struct StatusFrame<'a> {
+    pub area: Rect,
+    /// The line above the text, else below it.
+    pub top: bool,
+    /// Text size in pixels, as the user set it for status lines.
+    pub size: f32,
+    pub color: Color,
+    /// What the screen tells about its content (see [`context`]).
+    pub context: &'a Params,
+}
+
+/// Draws a status line into its frame's area (cleared before).
+pub type StatusLineFn = Box<dyn Fn(&mut Canvas<'_>, &Env<'_>, &StatusFrame<'_>)>;
+
+/// What a status line shows now, as text: the screen redraws the line
+/// when it changes (e.g. each minute for a clock).
+pub type StatusSignatureFn = Box<dyn Fn(&Env<'_>, &Params) -> String>;
+
+/// A whole status line contributed by a plugin.
+pub struct StatusLineSpec {
+    pub id: Id,
+    /// Translation key of its name in settings, e.g. "Progress bar".
+    pub title: Cow<'static, str>,
+    pub draw: StatusLineFn,
+    /// What it shows; without one it is redrawn when the context
+    /// changes (the page, the chapter, …).
+    pub signature: Option<StatusSignatureFn>,
+}
+
+impl fmt::Debug for StatusLineSpec {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("StatusLineSpec")
+            .field("id", &self.id)
+            .field("title", &self.title)
+            .finish_non_exhaustive()
+    }
 }
 
 /// What a status item shows.
@@ -71,6 +120,7 @@ impl fmt::Debug for StatusItemSpec {
 #[derive(Debug, Default)]
 pub struct StatusItems {
     items: Vec<StatusItemSpec>,
+    lines: Vec<StatusLineSpec>,
 }
 
 impl StatusItems {
@@ -84,6 +134,42 @@ impl StatusItems {
 
     pub fn shrink_to_fit(&mut self) {
         self.items.shrink_to_fit();
+        self.lines.shrink_to_fit();
+    }
+
+    pub fn add_line(&mut self, line: StatusLineSpec) {
+        self.lines.push(line);
+    }
+
+    /// Every status line: its id and the translation key of its name.
+    pub fn lines(&self) -> impl Iterator<Item = (&Id, &str)> {
+        self.lines.iter().map(|l| (&l.id, l.title.as_ref()))
+    }
+
+    /// Draws status line `id`; `false` if there is none.
+    pub fn draw_line(
+        &self,
+        id: &str,
+        canvas: &mut Canvas<'_>,
+        env: &Env<'_>,
+        frame: &StatusFrame<'_>,
+    ) -> bool {
+        match self.lines.iter().find(|l| l.id.as_str() == id) {
+            Some(line) => {
+                (line.draw)(canvas, env, frame);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// What status line `id` shows now (see [`StatusSignatureFn`]).
+    pub fn line_signature(&self, id: &str, env: &Env<'_>, context: &Params) -> String {
+        let line = self.lines.iter().find(|l| l.id.as_str() == id);
+        match line.and_then(|l| l.signature.as_ref()) {
+            Some(signature) => signature(env, context),
+            None => alloc::format!("{context:?}"),
+        }
     }
 
     /// Every item: its id and the translation key of its name.
@@ -91,12 +177,18 @@ impl StatusItems {
         self.items.iter().map(|i| (&i.id, i.title.as_ref()))
     }
 
-    /// The translation key of the name of item `id`.
+    /// The translation key of the name of item or status line `id`.
     pub fn title(&self, id: &str) -> Option<&str> {
         self.items
             .iter()
             .find(|i| i.id.as_str() == id)
             .map(|i| i.title.as_ref())
+            .or_else(|| {
+                self.lines
+                    .iter()
+                    .find(|l| l.id.as_str() == id)
+                    .map(|l| l.title.as_ref())
+            })
     }
 
     /// The value of item `id` now.

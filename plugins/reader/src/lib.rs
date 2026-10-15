@@ -124,6 +124,11 @@ pub mod actions {
     /// Chooses a link on the page with the buttons and follows it
     /// (touch: tap the link).
     pub const LINKS: Id = Id::new_static("reader.links");
+    /// Shows the next of the status lines below the text (above, if there
+    /// is none below), as a tap on it does.
+    pub const NEXT_STATUS_LINE: Id = Id::new_static("reader.next-status-line");
+    /// Shows the next of the status lines above the text.
+    pub const NEXT_TOP_STATUS_LINE: Id = Id::new_static("reader.next-top-status-line");
     /// Sets or removes the bookmark of the page.
     pub const TOGGLE_BOOKMARK: Id = Id::new_static("reader.toggle-bookmark");
     /// Lists the book's bookmarks and highlights.
@@ -200,6 +205,8 @@ impl Plugin for Reader {
             (actions::GO_TO_PAGE, "reader.go-to-page"),
             (actions::SELECT, "reader.select"),
             (actions::LINKS, "reader.links"),
+            (actions::NEXT_STATUS_LINE, "reader.next-status-line"),
+            (actions::NEXT_TOP_STATUS_LINE, "reader.next-top-status-line"),
             (actions::TOGGLE_BOOKMARK, "reader.toggle-bookmark"),
             (actions::ANNOTATIONS, "reader.annotations"),
             (actions::LOOK_UP, "reader.select.look-up"),

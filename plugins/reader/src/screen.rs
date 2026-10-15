@@ -256,7 +256,7 @@ impl Typography {
 
         let display = env.device.display;
         let margin = m.mm(settings.int(MARGIN.as_str()).max(0) as u32) as f32;
-        let status_height = m.mm(6) as f32;
+        let status_height = status::height(env);
         let (top, bottom) = (status::shown(env, true), status::shown(env, false));
         let lines = f32::from(u8::from(top) + u8::from(bottom));
         let width = (f32::from(display.width) - 2.0 * margin).max(1.0);
@@ -335,6 +335,11 @@ struct Book {
     links: Vec<Link>,
     /// Where links were followed from, the last last.
     returns: Vec<Locator>,
+    /// The status lines chosen last, top then bottom.
+    status_lines: [String; 2],
+    /// Where the top-level chapters begin, as thousandths of the book
+    /// (see `status_context::CHAPTERS`).
+    chapter_marks: String,
     /// The page the last link led to: it offers the way back.
     landed: Option<Locator>,
 }
@@ -518,6 +523,29 @@ impl ReaderScreen {
     }
 
     /// Buttons while text is selected.
+    /// Shows the next status line at the top (or bottom) and keeps the
+    /// choice.
+    fn next_status_line(&mut self, top: bool, cx: &mut Cx<'_, '_>) {
+        let env = *cx.env();
+        let Ok(book) = &mut self.book else {
+            return;
+        };
+        let slot = usize::from(!top);
+        let next = status::next(&env, top, &book.status_lines[slot]).to_string();
+        if next == status::current(&env, top, &book.status_lines[slot]) {
+            return;
+        }
+        book.status_lines[slot] = next;
+        status::save_choice(env.storage, &book.status_lines);
+        for (area, at_top) in book.status_areas() {
+            if at_top == top {
+                cx.request_redraw_area(area);
+            }
+        }
+        cx.request_refresh(RefreshMode::Fast);
+        self.status_shown.clear();
+    }
+
     fn set_linking(&mut self, to: Option<Linking>, cx: &mut Cx<'_, '_>) {
         if self.linking != to {
             self.linking = to;
@@ -698,7 +726,7 @@ impl ReaderScreen {
         if book.status_areas().next().is_none() {
             return;
         }
-        let signature = status::signature(&env, &book.status_context(&env));
+        let signature = status::signature(&env, &book.status_context(&env), &book.status_lines);
         if signature != self.status_shown {
             self.status_shown = signature;
             for (area, _) in book.status_areas() {
@@ -864,8 +892,11 @@ impl Book {
             embedded: None,
             links: Vec::new(),
             returns: Vec::new(),
+            status_lines: status::load_choice(env.storage),
+            chapter_marks: String::new(),
             landed: None,
         };
+        book.chapter_marks = book.chapter_marks(env);
         book.embedded = Embedded::load(env, book.document.as_ref());
         let start = book.saved_position(env).unwrap_or(Locator::START);
         book.page = match book.layout(env, start).map_err(error)? {
@@ -1406,7 +1437,38 @@ impl Book {
         {
             context.set(status_context::CHAPTER, chapter.clone());
         }
+        if !self.chapter_marks.is_empty() {
+            context.set(status_context::CHAPTERS, self.chapter_marks.clone());
+        }
         context
+    }
+
+    /// Where the top-level chapters begin, as thousandths of the book.
+    fn chapter_marks(&self, env: &Env<'_>) -> String {
+        let (document, storage) = (&self.document, env.storage);
+        let mut marks: Vec<u32> = Vec::new();
+        for index in 0..document.toc_len(storage).min(500) {
+            if let Some(entry) = document.toc_entry(storage, index).filter(|e| e.level == 0) {
+                marks.push((document.progress(entry.at) * 1000.0) as u32);
+            }
+        }
+        marks.dedup();
+        let marks: Vec<String> = marks.iter().map(ToString::to_string).collect();
+        marks.join(",")
+    }
+
+    /// The status line at the top (or bottom) that `point` is on: its
+    /// place reaches to the edge of the screen.
+    fn status_hit(&self, env: &Env<'_>, point: Point) -> Option<bool> {
+        let height = env.device.display.height;
+        self.status_areas().find_map(|(area, top)| {
+            let zone = if top {
+                Rect::new(0, 0, env.device.display.width, area.y + area.height)
+            } else {
+                Rect::new(0, area.y, env.device.display.width, height - area.y)
+            };
+            zone.contains(point).then_some(top)
+        })
     }
 
     /// The status lines' areas.
@@ -1419,9 +1481,6 @@ impl Book {
     }
 
     fn draw_status(&self, canvas: &mut Canvas<'_>, env: &Env<'_>) {
-        let Some(font) = env.fonts.role(fonts::UI.as_str()) else {
-            return;
-        };
         let context = self.status_context(env);
         for (area, top) in self.status_areas() {
             canvas.fill_rect(
@@ -1431,7 +1490,15 @@ impl Book {
                 u32::from(area.height),
                 Color::WHITE,
             );
-            status::line(env, area, top).draw(canvas, env, &font, &context);
+            let id = status::current(env, top, &self.status_lines[usize::from(!top)]);
+            let frame = quireink_sdk::StatusFrame {
+                area,
+                top,
+                size: status::size(env),
+                color: status::COLOR,
+                context: &context,
+            };
+            env.status_items.draw_line(id, canvas, env, &frame);
         }
     }
 
@@ -1673,6 +1740,15 @@ impl Screen for ReaderScreen {
             self.toggle_bookmark(cx);
             return Handled::Yes;
         }
+        if *action == crate::actions::NEXT_STATUS_LINE
+            || *action == crate::actions::NEXT_TOP_STATUS_LINE
+        {
+            let env = *cx.env();
+            let top =
+                *action == crate::actions::NEXT_TOP_STATUS_LINE || !status::shown(&env, false);
+            self.next_status_line(top, cx);
+            return Handled::Yes;
+        }
         if *action == crate::actions::SEARCH || *action == crate::actions::GO_TO_PAGE {
             self.ask(action, cx);
             return Handled::Yes;
@@ -1742,6 +1818,21 @@ impl Screen for ReaderScreen {
             return Handled::Yes;
         }
         let env = *cx.env();
+        // A tap on a status line shows the next one (not where the
+        // bookmark corner or the way back are).
+        if let (GestureKind::Tap, None, Ok(book)) = (gesture.kind, self.selection, &self.book) {
+            let p = gesture.start;
+            let corner = env.settings.bool(crate::settings::CORNER_BOOKMARK.as_str())
+                && book.corner_area(&env).contains(p);
+            let back = book.back_area(&env).is_some_and(|a| a.contains(p));
+            if !corner
+                && !back
+                && let Some(top) = book.status_hit(&env, p)
+            {
+                self.next_status_line(top, cx);
+                return Handled::Yes;
+            }
+        }
         let Ok(book) = &self.book else {
             return Handled::No;
         };

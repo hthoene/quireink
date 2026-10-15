@@ -1341,6 +1341,9 @@ impl Kernel {
         for item in staging.status_items.drain(..) {
             self.shared.status_items.add(item);
         }
+        for line in staging.status_lines.drain(..) {
+            self.shared.status_items.add_line(line);
+        }
         Ok(())
     }
 

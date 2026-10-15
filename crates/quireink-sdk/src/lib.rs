@@ -90,7 +90,10 @@ pub use quireink_platform::{
     PointerPhase, PointerTool, Rect, RefreshMode,
 };
 pub use quireink_platform::{DirEntry, NoStorage, Storage, StorageError};
-pub use status::{StatusFn, StatusItemSpec, StatusItems, StatusValue};
+pub use status::{
+    StatusFn, StatusFrame, StatusItemSpec, StatusItems, StatusLineFn, StatusLineSpec,
+    StatusSignatureFn, StatusValue,
+};
 
 /// The human-editable config format (see `quireink-config`), for plugins
 /// that store their own data as text files.
