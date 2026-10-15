@@ -206,7 +206,7 @@ impl ListScreen {
 }
 
 /// How a sync goes or went.
-fn report_text(env: &Env<'_>, report: &Report) -> String {
+pub(crate) fn report_text(env: &Env<'_>, report: &Report) -> String {
     let catalog = Arg::Str(&report.catalog);
     let mut text = if report.running {
         env.i18n.plural(

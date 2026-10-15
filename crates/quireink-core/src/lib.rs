@@ -338,6 +338,7 @@ impl KernelBuilder {
             keymap_presets: Vec::new(),
             subscriptions: Vec::new(),
             screen_timer: None,
+            notice: None,
             recognizer: Recognizer::default(),
             captured: Vec::new(),
             stack: Vec::new(),
@@ -523,6 +524,8 @@ pub struct Kernel {
     subscriptions: Vec<(Id, EventHandler)>,
     /// When the active screen wants `on_timer`.
     screen_timer: Option<Instant>,
+    /// The short message showing ([`Command::Notify`]) and until when.
+    notice: Option<(Box<dyn Screen>, Instant)>,
     /// The part of the screen to redraw at the end of the current call.
     pending: Option<Rect>,
     /// What changed but has not been passed to [`Kernel::render`] yet.
@@ -662,6 +665,9 @@ impl Kernel {
                 screen.on_timer(cx);
                 Handled::Yes
             });
+        }
+        if self.notice.as_ref().is_some_and(|(_, until)| *until <= now) {
+            self.end_notice();
         }
         self.finish()
     }
@@ -1617,10 +1623,11 @@ impl Kernel {
             self.screen_timer = Some(self.screen_timer.map_or(at, |t| t.min(at)));
         }
         let input = self.recognizer.next_deadline(&self.thresholds());
-        effects.wake_at = match (input, self.screen_timer) {
-            (Some(a), Some(b)) => Some(a.min(b)),
-            (a, b) => a.or(b),
-        };
+        let notice = self.notice.as_ref().map(|(_, until)| *until);
+        effects.wake_at = [input, self.screen_timer, notice]
+            .into_iter()
+            .flatten()
+            .min();
         effects
     }
 
@@ -1734,6 +1741,7 @@ impl Kernel {
                 self.output.request_refresh(mode);
             }
             Command::SetMenu(menu, entries) => self.set_menu(menu, entries),
+            Command::Notify(text) => self.notify(text),
             _ => {}
         }
     }
@@ -1757,6 +1765,41 @@ impl Kernel {
         let top = self.stack.len() - 1;
         let overlay = self.overlay(top);
         self.screen_changed(self.region_of(top), overlay.is_some());
+    }
+
+    /// Shows `text` with the screen bound to the notice slot until the
+    /// notice time is over.
+    fn notify(&mut self, text: String) {
+        let Some(id) = self.registry.resolve_slot(slots::NOTICE.as_str()).cloned() else {
+            return;
+        };
+        let Some(spec) = self.registry.screens.get(&id) else {
+            return;
+        };
+        let env = self.shared.env(self.now);
+        let params = Params::new().with(builtin_params::TEXT, text);
+        let screen = (spec.factory)(&env, &params);
+        let seconds = self
+            .shared
+            .settings
+            .int(core_settings::NOTICE_SECONDS.as_str())
+            .clamp(1, 60) as u32;
+        let region = screen.region(&env).unwrap_or(self.framebuffer.bounds());
+        self.end_notice();
+        self.notice = Some((screen, self.now.add_millis(u64::from(seconds) * 1000)));
+        self.invalidate(region);
+        self.output.request_refresh(RefreshMode::Fast);
+    }
+
+    /// Takes the notice away, if one shows.
+    fn end_notice(&mut self) {
+        let Some((screen, _)) = self.notice.take() else {
+            return;
+        };
+        let env = self.shared.env(self.now);
+        let region = screen.region(&env).unwrap_or(self.framebuffer.bounds());
+        self.invalidate(region);
+        self.output.request_refresh(RefreshMode::Fast);
     }
 
     /// Closes all screens above `index`.
@@ -1837,6 +1880,12 @@ impl Kernel {
                 continue;
             };
             active.screen.draw(&mut canvas.clipped(area), &env);
+        }
+        // A message over everything.
+        if let Some((notice, _)) = &mut self.notice
+            && let Some(area) = notice.region(&env).unwrap_or(bounds).intersection(&region)
+        {
+            notice.draw(&mut canvas.clipped(area), &env);
         }
     }
 

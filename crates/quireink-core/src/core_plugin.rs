@@ -283,6 +283,18 @@ impl Plugin for CorePlugin {
         )?;
         r.add_setting(
             SettingSpec::new(
+                settings::NOTICE_SECONDS,
+                "core.setting.notice-seconds",
+                SettingKind::Int { min: 1, max: 60 },
+                SettingValue::Int(4),
+            )
+            .group(groups::DISPLAY)
+            .advanced()
+            .unit("core.unit.seconds")
+            .description("core.setting.notice-seconds.help"),
+        )?;
+        r.add_setting(
+            SettingSpec::new(
                 settings::LONG_PRESS_MS,
                 "core.setting.long-press-ms",
                 SettingKind::Int {

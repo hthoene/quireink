@@ -314,6 +314,7 @@ impl Sync {
             None => {
                 if let Some(report) = &mut self.report {
                     report.running = false;
+                    out.push(Command::Notify(crate::list::report_text(env, report)));
                 }
                 out.push(Command::Emit(CHANGED, Params::new()));
             }

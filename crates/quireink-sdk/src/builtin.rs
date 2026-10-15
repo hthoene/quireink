@@ -76,6 +76,12 @@ pub mod slots {
     /// The reader opens links out of a book this way, if a browser is
     /// bound here ([`Env::has_slot`](crate::Env::has_slot)).
     pub const BROWSER: Id = Id::new_static("core.browser");
+    /// Shows a short message ([`Command::Notify`](crate::Command::Notify))
+    /// over whatever is open, for a few seconds: parameter
+    /// [`TEXT`](super::params::TEXT). It gets no input and is closed by
+    /// the kernel; bind another screen here for messages that look
+    /// different. Its [`region`](crate::Screen::region) is where it shows.
+    pub const NOTICE: Id = Id::new_static("core.notice");
 }
 
 /// Standard menus. Plugins add entries with
@@ -187,6 +193,8 @@ pub mod settings {
     /// Partial refreshes between two full refreshes; `0` disables full
     /// refreshes for ghosting removal.
     pub const FULL_REFRESH_INTERVAL: Id = Id::new_static("core.full-refresh-interval");
+    /// How long short messages show, in seconds.
+    pub const NOTICE_SECONDS: Id = Id::new_static("core.notice-seconds");
     /// Milliseconds a button or finger must be held for a long press.
     pub const LONG_PRESS_MS: Id = Id::new_static("core.long-press-ms");
     /// Base size of user interface text in points; UI metrics scale with it.

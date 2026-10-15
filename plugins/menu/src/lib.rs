@@ -34,8 +34,11 @@ pub const PLUGIN: Id = Id::new_static("menu");
 pub const SCREEN: Id = Id::new_static("menu.list");
 /// A menu as a panel of controls.
 pub const PANEL: Id = Id::new_static("menu.panel");
+/// Shows short messages (`core.notice`).
+pub const NOTICE: Id = Id::new_static("menu.notice");
 
 mod bar;
+mod notice;
 mod panel;
 
 /// The menu plugin.
@@ -74,6 +77,12 @@ impl Plugin for Menu {
             factory: Box::new(|env, params| Box::new(panel::PanelScreen::open(env, params))),
         })?;
         r.bind_slot(slots::PANEL, PANEL, Priority::DEFAULT)?;
+        r.add_screen(ScreenSpec {
+            id: NOTICE,
+            title: Cow::Borrowed("menu.title"),
+            factory: Box::new(|env, params| Box::new(notice::NoticeScreen::new(env, params))),
+        })?;
+        r.bind_slot(slots::NOTICE, NOTICE, Priority::DEFAULT)?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/en.ini")))?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/de.ini")))?;
         Ok(())

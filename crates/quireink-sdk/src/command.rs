@@ -139,6 +139,11 @@ pub enum Command {
     /// submenus), saved in `[menus]` of `quireink.ini`; `None` returns to
     /// the entries plugins contribute.
     SetMenu(Id, Option<alloc::vec::Vec<Id>>),
+    /// Shows a short message for a few seconds, e.g. "Sync done", by the
+    /// screen bound to [`slots::NOTICE`](crate::builtin::slots::NOTICE),
+    /// over whatever is open and without taking any input. A newer
+    /// message replaces it.
+    Notify(alloc::string::String),
     /// Restarts QuireInk, e.g. to apply switched plugins. The shell builds
     /// a new kernel; the reading position is already saved.
     Restart,

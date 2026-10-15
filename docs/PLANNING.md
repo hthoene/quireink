@@ -779,7 +779,7 @@ makes it replaceable. ✅ done, 🔶 partly, ⬜ open.
 | C1 | Every screen (home, library, reader, menus, keyboard, settings, browser) | Slots | ✅ |
 | C2 | Formats, fonts, hyphenation, translations, key maps, menus | Contributions, data plugins | ✅ |
 | C3 | Status lines: own text size; whole lines from plugins; a tap switches between the chosen ones, above and below the text | `add_status_line`, `add_status_item` | ✅ |
-| C4 | Short messages any plugin can show the same way ("Sync done") | SDK notice | ⬜ |
+| C4 | Short messages any plugin can show the same way ("Sync done"), how long they show | `Command::Notify`, slot `core.notice` | ✅ |
 | C5 | Rules: "when Wi-Fi is there, sync the catalogs", "from 22:00 night mode", "comics get another layout" | Rule plugin on events and actions | ⬜ |
 | C6 | Reading profiles: named sets of settings ("Night", "Commute", "Large print"), switched with a tap | Profiles over settings | ⬜ |
 | C7 | Themes: margins, row heights, UI text sizes, gray levels, header style, corners; icon packs (icons are a font role already) | Theme data plugins over `UiStyle` | ⬜ |

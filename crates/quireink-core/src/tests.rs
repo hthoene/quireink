@@ -718,6 +718,81 @@ fn overlays_redraw_only_their_region_and_close_on_outside_taps() {
     assert_eq!(kernel.frame().pixel(0, 60), Color::WHITE);
 }
 
+/// The base screen and the half overlay as the notice.
+struct NoticePlugin {
+    log: Log,
+}
+
+impl Plugin for NoticePlugin {
+    fn manifest(&self) -> Manifest {
+        Manifest {
+            id: Id::new_static("nt"),
+            name: Cow::Borrowed("Notice"),
+            description: Cow::Borrowed(""),
+            version: Version::new(1, 0, 0),
+            sdk: SDK_VERSION,
+        }
+    }
+
+    fn register(&self, r: &mut dyn Registrar) -> Result<(), RegisterError> {
+        let log = self.log.clone();
+        r.add_screen(ScreenSpec {
+            id: Id::new_static("nt.base"),
+            title: Cow::Borrowed("base"),
+            factory: Box::new(move |_, _| Box::new(BaseScreen { log: log.clone() })),
+        })?;
+        r.bind_slot(slots::HOME, Id::new_static("nt.base"), Priority::DEFAULT)?;
+        r.add_screen(ScreenSpec {
+            id: Id::new_static("nt.notice"),
+            title: Cow::Borrowed("notice"),
+            factory: Box::new(|_, _| Box::new(HalfOverlay)),
+        })?;
+        r.bind_slot(
+            slots::NOTICE,
+            Id::new_static("nt.notice"),
+            Priority::DEFAULT,
+        )?;
+        Ok(())
+    }
+}
+
+#[test]
+fn notices_show_over_everything_and_go_by_themselves() {
+    let log = log();
+    let mut kernel = Kernel::builder(DEVICE)
+        .plugin(NoticePlugin { log: log.clone() })
+        .build()
+        .unwrap();
+    kernel.start(Instant(0));
+    render(&mut kernel);
+
+    kernel.apply(Command::Notify(String::from("Done")));
+    let effects = kernel.finish();
+    assert_eq!(
+        effects.refresh().map(|(r, _)| r),
+        Some(Rect::new(0, 45, 90, 45))
+    );
+    assert_eq!(
+        effects.wake_at(),
+        Some(Instant(4000)),
+        "four seconds by default"
+    );
+    render(&mut kernel);
+    assert_eq!(kernel.frame().pixel(0, 60), Color::BLACK);
+    // Input still goes to the screen below.
+    assert_eq!(kernel.active_screen().map(Id::as_str), Some("nt.base"));
+
+    // Time is up: gone.
+    let effects = kernel.tick(Instant(4000));
+    assert_eq!(
+        effects.refresh().map(|(r, _)| r),
+        Some(Rect::new(0, 45, 90, 45))
+    );
+    render(&mut kernel);
+    assert_eq!(kernel.frame().pixel(0, 60), Color::WHITE);
+    assert_eq!(effects.wake_at(), None);
+}
+
 #[test]
 fn screens_below_overlays_redraw_themselves() {
     let log = log();
