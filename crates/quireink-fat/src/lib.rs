@@ -1,6 +1,7 @@
 //! QuireInk's storage on a FAT file system (FAT12, FAT16, FAT32) with long
 //! file names, e.g. the X4's SD card: [`FatStorage`] over any disk that
-//! reads, writes and seeks in bytes (see [`fatfs::ReadWriteSeek`]).
+//! reads, writes and seeks in bytes (see [`fatfs::ReadWriteSeek`]), such
+//! as a [`BlockDisk`] over an SD card's blocks.
 //!
 //! The file read last stays open, so reading a book a piece at a time
 //! does not look it up again for every piece. Files are replaced through
@@ -10,6 +11,10 @@
 #![no_std]
 
 extern crate alloc;
+
+mod disk;
+
+pub use disk::{BLOCK, BlockDisk, Blocks, DiskError};
 
 use alloc::format;
 use alloc::string::{String, ToString};
@@ -314,6 +319,49 @@ mod tests {
             .unwrap();
         assert!(s.exists(".quireink/plugins/reader/annotations.txt"));
         assert!(!s.exists("missing.txt"));
+    }
+
+    /// A disk of blocks in memory.
+    struct Card {
+        data: Vec<u8>,
+    }
+
+    impl Blocks for Card {
+        fn read_block(&mut self, index: u32, block: &mut [u8; BLOCK]) -> Result<(), DiskError> {
+            let at = index as usize * BLOCK;
+            block.copy_from_slice(self.data.get(at..at + BLOCK).ok_or(DiskError)?);
+            Ok(())
+        }
+        fn write_block(&mut self, index: u32, block: &[u8; BLOCK]) -> Result<(), DiskError> {
+            let at = index as usize * BLOCK;
+            self.data
+                .get_mut(at..at + BLOCK)
+                .ok_or(DiskError)?
+                .copy_from_slice(block);
+            Ok(())
+        }
+        fn blocks(&mut self) -> Result<u32, DiskError> {
+            Ok((self.data.len() / BLOCK) as u32)
+        }
+    }
+
+    #[test]
+    fn on_a_card_of_blocks() {
+        let mut card = BlockDisk::new(Card {
+            data: vec![0; 2 << 20],
+        })
+        .unwrap();
+        fatfs::format_volume(&mut card, FormatVolumeOptions::new()).unwrap();
+        card.flush().unwrap();
+        card.seek(SeekFrom::Start(0)).unwrap();
+        let fs = FileSystem::new(card, FsOptions::new()).unwrap();
+        let s = FatStorage::new(Box::leak(Box::new(fs)));
+        let text: Vec<u8> = (0..3000u32).map(|i| (i % 251) as u8).collect();
+        s.write("Books/A long name.txt", &text).unwrap();
+        let mut buf = [0u8; 700];
+        assert_eq!(s.read_at("Books/A long name.txt", 1000, &mut buf), Ok(700));
+        assert_eq!(&buf[..], &text[1000..1700]);
+        assert_eq!(s.size("Books/A long name.txt"), Ok(3000));
     }
 
     #[test]
