@@ -60,8 +60,8 @@ Hardware on hand:
 
 - **Boox Go 7**: monochrome, Android **[VERIFY version]**
 - **Boox Air 6C**: colour, Android 16 **[VERIFY]**
-- **Xteink X4**: on order
-- **Xteink X4 Pro**: to be supported (not on hand)
+- **Xteink X4**: on order (used)
+- **Xteink X4 Pro**: on order
 
 1. **Desktop emulator**: everything starts here (see §9).
 2. **Xteink X4**: the hardest constraint; proves the architecture.
