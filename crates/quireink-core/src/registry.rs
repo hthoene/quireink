@@ -115,6 +115,7 @@ pub(crate) struct Staging {
     pub(crate) status_items: Vec<StatusItemSpec>,
     pub(crate) status_lines: Vec<StatusLineSpec>,
     pub(crate) widgets: Vec<quireink_sdk::widgets::WidgetSpec>,
+    pub(crate) text_filters: Vec<quireink_sdk::filters::TextFilterSpec>,
 }
 
 impl Staging {
@@ -286,6 +287,16 @@ impl Registrar for PluginRegistrar<'_> {
         self.check_namespace(&item.id)?;
         Self::check_unique(self.staging.status_items.iter().map(|i| &i.id), &item.id)?;
         self.staging.status_items.push(item);
+        Ok(())
+    }
+
+    fn add_text_filter(
+        &mut self,
+        filter: quireink_sdk::filters::TextFilterSpec,
+    ) -> Result<(), RegisterError> {
+        self.check_namespace(&filter.id)?;
+        Self::check_unique(self.staging.text_filters.iter().map(|f| &f.id), &filter.id)?;
+        self.staging.text_filters.push(filter);
         Ok(())
     }
 

@@ -785,7 +785,7 @@ makes it replaceable. ✅ done, 🔶 partly, ⬜ open.
 | C7 | Themes: menu text size, margins, row height, lines, dark or light headers; icon packs (icons are a font role) | Settings group "Appearance"; themes are data plugins with setting defaults (sample `samples/plugins/airy-theme`) | 🔶 (gray levels, corners and an icon pack sample open) |
 | C8 | Menus as tiles with their icons besides lists | Setting `menu.style` (Appearance); other looks by replacing the `core.menu` slot | ✅ |
 | C9 | Sleep screen: cover, own picture, calendar, statistics | Slot `core.sleep` | ⬜ |
-| C10 | Text filters between format and layout: a style sheet per book, replaced words, reading aids, fonts for dyslexia | Document filter stage (§7.5) | ⬜ |
+| C10 | Text filters between format and layout: bold word beginnings, replaced words; a style sheet per book, fonts for dyslexia by plugins | `Registrar::add_text_filter`, `Block::replace`; `aids` plugin | 🔶 (style sheet per book open) |
 | C11 | Footnotes over the page or jumped to; note marks recognised by their text (1, [2], *) | Setting `reader.footnotes`, screen `reader.footnote`, event `reader.follow` | ✅ |
 | C12 | Looking up beside StarDict: Wikipedia summaries online; translators or online dictionaries by plugins | Slot `core.lookup-online` (offered in the dictionary when bound and online), `wikipedia` plugin, `quireink_sdk::json` | ✅ |
 | C13 | Reading aloud | Speech engines as providers | ⬜ |

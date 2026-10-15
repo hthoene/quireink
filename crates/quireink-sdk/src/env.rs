@@ -35,6 +35,8 @@ pub struct Env<'a> {
     pub status: &'a SystemStatus,
     /// Items for status lines, from every plugin.
     pub status_items: &'a StatusItems,
+    /// Filters of book text before it is laid out, from every plugin.
+    pub text_filters: &'a crate::filters::TextFilters,
     /// Widgets for screens that show them, from every plugin.
     pub widgets: &'a crate::widgets::Widgets,
     /// What buttons, taps and swipes do (see [`keys`](crate::keys)).

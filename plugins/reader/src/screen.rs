@@ -229,6 +229,8 @@ struct Typography {
     status: Option<Rect>,
     /// Language whose hyphenation patterns are used, if hyphenating.
     hyphenation: Option<String>,
+    /// What the text filters did when it was made.
+    filters: String,
     /// Identifies this layout; part of the page index file name.
     key: String,
 }
@@ -275,7 +277,7 @@ impl Typography {
         let key = format!(
             "{:016x}",
             fnv(&format!(
-                "{}|{}|{}|{}|{}|{size}|{line_height}|{}|{}|{justify}|{width}x{height}|{}|{}|{}|{word_spacing}",
+                "{}|{}|{}|{}|{}|{size}|{line_height}|{}|{}|{justify}|{width}x{height}|{}|{}|{}|{word_spacing}|{}",
                 quireink_sdk::layout::VERSION,
                 font.id(),
                 face_id(env, &fonts::READING_BOLD),
@@ -286,6 +288,7 @@ impl Typography {
                 hyphenation.as_deref().unwrap_or("-"),
                 settings.bool(crate::settings::PUBLISHER_STYLES.as_str()),
                 uses_book_fonts(env),
+                env.text_filters.signature(env),
             ))
         );
         Self {
@@ -302,8 +305,46 @@ impl Typography {
             top_status,
             status,
             hyphenation,
+            filters: env.text_filters.signature(env),
             key,
         }
+    }
+}
+
+/// The book as the layout sees it: every block through the text
+/// filters of plugins (see `quireink_sdk::filters`).
+struct Filtered<'d, 'e> {
+    document: &'d dyn Document,
+    env: &'d Env<'e>,
+}
+
+impl Document for Filtered<'_, '_> {
+    fn metadata(&self) -> &quireink_sdk::document::Metadata {
+        self.document.metadata()
+    }
+
+    fn sections(&self) -> u32 {
+        self.document.sections()
+    }
+
+    fn section_len(&self, section: u32) -> u32 {
+        self.document.section_len(section)
+    }
+
+    fn block_at(
+        &self,
+        storage: &dyn quireink_sdk::Storage,
+        at: Locator,
+    ) -> Result<Option<quireink_sdk::document::Block>, DocumentError> {
+        let mut block = self.document.block_at(storage, at)?;
+        if let Some(block) = &mut block {
+            self.env.text_filters.apply(self.env, block);
+        }
+        Ok(block)
+    }
+
+    fn progress(&self, at: Locator) -> f32 {
+        self.document.progress(at)
     }
 }
 
@@ -1003,8 +1044,12 @@ impl Book {
                 patterns.hyphenate(word, out);
             }
         };
+        let filtered = Filtered {
+            document: self.document.as_ref(),
+            env,
+        };
         layout_page(
-            self.document.as_ref(),
+            &filtered,
             env.storage,
             at,
             t.width,
@@ -2080,8 +2125,10 @@ impl Screen for ReaderScreen {
             cx.wake_at(env.now);
             return;
         }
-        let affects_layout =
-            font_changed || id.starts_with("reader.") && id != crate::settings::OPEN_LAST.as_str();
+        let filters = env_filters_changed(cx.env(), book);
+        let affects_layout = font_changed
+            || filters
+            || id.starts_with("reader.") && id != crate::settings::OPEN_LAST.as_str();
         if *event == events::SETTING_CHANGED && affects_layout {
             self.selection = None;
             let env = *cx.env();
@@ -2104,6 +2151,12 @@ fn draw_image(canvas: &mut Canvas<'_>, env: &Env<'_>, t: &Typography, image: &Pa
         &image.image,
         Rect::new(left as u16, top as u16, w as u16, h as u16),
     );
+}
+
+/// Whether the text filters do something else now than when the pages
+/// were laid out.
+fn env_filters_changed(env: &Env<'_>, book: &Book) -> bool {
+    book.typography.filters != env.text_filters.signature(env)
 }
 
 /// The font bound to an optional reading face, for the layout key.

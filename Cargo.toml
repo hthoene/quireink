@@ -40,6 +40,7 @@ members = [
     "plugins/profiles",
     "plugins/keys",
     "plugins/wikipedia",
+    "plugins/aids",
     "plugins/plugin-manager",
     "plugins/settings",
     "plugins/home",
@@ -92,6 +93,7 @@ quireink-plugin-rules = { path = "plugins/rules", version = "0.1.0" }
 quireink-plugin-profiles = { path = "plugins/profiles", version = "0.1.0" }
 quireink-plugin-keys = { path = "plugins/keys", version = "0.1.0" }
 quireink-plugin-wikipedia = { path = "plugins/wikipedia", version = "0.1.0" }
+quireink-plugin-aids = { path = "plugins/aids", version = "0.1.0" }
 quireink-plugin-keyboard = { path = "plugins/keyboard", version = "0.1.0" }
 quireink-plugin-plugin-manager = { path = "plugins/plugin-manager", version = "0.1.0" }
 quireink-plugin-hyphenation = { path = "plugins/hyphenation", version = "0.1.0" }

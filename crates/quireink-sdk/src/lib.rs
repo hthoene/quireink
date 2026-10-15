@@ -35,6 +35,7 @@ mod command;
 mod env;
 mod event;
 pub mod files;
+pub mod filters;
 mod fonts;
 mod formats;
 mod gesture;

@@ -142,6 +142,13 @@ pub trait Registrar {
     /// reading time left.
     fn add_status_item(&mut self, item: StatusItemSpec) -> Result<(), RegisterError>;
 
+    /// Adds a filter of book text before it is laid out (see
+    /// [`filters`](crate::filters)).
+    fn add_text_filter(
+        &mut self,
+        filter: crate::filters::TextFilterSpec,
+    ) -> Result<(), RegisterError>;
+
     /// Adds a widget, e.g. for the home screen (see
     /// [`widgets`](crate::widgets)).
     fn add_widget(&mut self, widget: crate::widgets::WidgetSpec) -> Result<(), RegisterError>;

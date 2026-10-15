@@ -223,6 +223,56 @@ impl Block {
         }
     }
 
+    /// Replaces bytes `range` of `text` (on character boundaries) with
+    /// `with`, e.g. in a text filter: styles move along, and positions in
+    /// the source stay right around it (the new text maps to where the old
+    /// one was).
+    pub fn replace(&mut self, range: core::ops::Range<usize>, with: &str) {
+        let (from, to) = (range.start, range.end.min(self.text.len()));
+        if from > to || !self.text.is_char_boundary(from) || !self.text.is_char_boundary(to) {
+            return;
+        }
+        let shift = |i: u32| -> u32 { (i as usize + with.len() - (to - from)) as u32 };
+        let (source_from, source_to) = (self.source_offset(from), self.source_offset(to));
+        let mut checkpoints: Vec<(u32, u32)> = self
+            .map
+            .checkpoints
+            .iter()
+            .copied()
+            .filter(|&(t, _)| (t as usize) < from)
+            .collect();
+        checkpoints.push((from as u32, source_from));
+        checkpoints.push(((from + with.len()) as u32, source_to));
+        checkpoints.extend(
+            self.map
+                .checkpoints
+                .iter()
+                .filter(|&&(t, _)| t as usize > to)
+                .map(|&(t, s)| (shift(t), s)),
+        );
+        // One checkpoint per text index, the last one wins.
+        let mut map = OffsetMap::default();
+        for (t, s) in checkpoints {
+            map.checkpoint(t as usize, s);
+        }
+        self.map = map;
+        let end = (from + with.len()) as u32;
+        for run in &mut self.runs {
+            let (start, stop) = (run.start as usize, run.end as usize);
+            if stop <= from {
+                continue;
+            }
+            run.start = if start >= to {
+                shift(run.start)
+            } else {
+                run.start.min(from as u32)
+            };
+            run.end = if stop >= to { shift(run.end) } else { end };
+        }
+        self.runs.retain(|run| run.start < run.end);
+        self.text.replace_range(from..to, with);
+    }
+
     /// The source offset of byte `index` of `text`.
     pub fn source_offset(&self, index: usize) -> u32 {
         if index >= self.text.len() {
@@ -481,6 +531,37 @@ pub trait Document {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn replacing_keeps_styles_and_positions() {
+        let mut block = Block {
+            kind: BlockKind::Paragraph,
+            continues: false,
+            start: 100,
+            end: 120,
+            text: String::from("Mr. Smith is here."),
+            map: OffsetMap::IDENTITY,
+            runs: alloc::vec![Run {
+                start: 4,
+                end: 9,
+                style: TextStyle::BOLD,
+            }],
+            align: Align::default(),
+            indent: None,
+            space: None,
+            size: None,
+            image: None,
+        };
+        block.replace(0..3, "Mister");
+        assert_eq!(block.text, "Mister Smith is here.");
+        // "Smith" is still bold and still where it was in the book.
+        assert_eq!(block.runs[0].start, 7);
+        assert_eq!(block.runs[0].end, 12);
+        assert_eq!(block.source_offset(7), 104);
+        assert_eq!(block.source_offset(0), 100);
+        assert_eq!(block.text_index(104), 7);
+        assert_eq!(block.source_offset(block.text.len() - 1), 117);
+    }
     use super::*;
 
     fn block(text: &str, start: u32, end: u32, map: OffsetMap) -> Block {
