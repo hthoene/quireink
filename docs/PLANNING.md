@@ -809,7 +809,8 @@ makes it replaceable. ✅ done, 🔶 partly, ⬜ open.
 ### 12.2 Ideas from KOReader and CrossPoint / CrossInk
 
 Looked at on 2026-10-15: what the other readers offer that QuireInk does
-not yet. Each idea stays simple by default and replaceable by plugins.
+not yet, and ideas of our own (U). Each idea stays simple by default and
+replaceable by plugins.
 ⬜ open, ✅ done.
 
 | # | Idea | Seen in | State |
@@ -835,6 +836,8 @@ not yet. Each idea stays simple by default and replaceable by plugins.
 | D4 | Firmware updates over Wi-Fi (X4) | CrossPoint | ⬜ |
 | D5 | Screenshots | CrossPoint, KOReader | ⬜ |
 | S1 | Read-later articles (Wallabag), news feeds as books, highlights to Readwise and Joplin (C15), Calibre wireless (C16) | KOReader | ⬜ |
+| U1 | Typing on a phone: passwords and keys sent from a phone's browser (QR code) into any text field; a store of credentials, replaceable by plugins | own idea | 🔶 (keyboard "Phone", slot `core.remote-keyboard` bound by `transfer`; the credentials store open) |
+| U2 | Pasting with a long press in a text field | phones | ✅ |
 
 ---
 
