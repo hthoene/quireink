@@ -1,4 +1,4 @@
-//! Images for e-ink: JPEG and PNG decoded to grayscale, row by row.
+//! Images for e-ink: JPEG, PNG and GIF decoded to grayscale, row by row.
 //!
 //! Decoders pull bytes from a [`Source`] and push rows of 8-bit gray to an
 //! [`ImageSink`], downscaling while they decode, so memory stays at a few
@@ -12,14 +12,16 @@
 //!
 //! Supported: baseline and progressive JPEG (1 or 3 components, any
 //! sampling; progressive ones keep their coefficients until the last
-//! scan, as few as the output size needs) and non-interlaced PNG (all
-//! colour types and depths, transparency over white). Interlaced PNG and
+//! scan, as few as the output size needs), non-interlaced PNG (all
+//! colour types and depths, transparency over white) and GIF (the first
+//! picture of the file, transparency over white). Interlaced PNG and
 //! other formats return [`ImageError::Unsupported`].
 
 #![no_std]
 
 extern crate alloc;
 
+mod gif;
 mod gray;
 mod jpeg;
 mod png;
@@ -86,6 +88,7 @@ pub trait ImageSink {
 pub enum Format {
     Jpeg,
     Png,
+    Gif,
 }
 
 impl Format {
@@ -94,6 +97,8 @@ impl Format {
             Some(Format::Jpeg)
         } else if head.starts_with(b"\x89PNG\r\n\x1a\n") {
             Some(Format::Png)
+        } else if head.starts_with(b"GIF8") {
+            Some(Format::Gif)
         } else {
             None
         }
@@ -113,6 +118,7 @@ pub fn decode(
     match format {
         Format::Jpeg => jpeg::decode(&mut reader, max_side, sink),
         Format::Png => png::decode(&mut reader, max_side, sink),
+        Format::Gif => gif::decode(&mut reader, max_side, sink),
     }
 }
 

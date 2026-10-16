@@ -257,3 +257,45 @@ fn written_png_reads_back() {
     assert_eq!((image.width, image.height), (w, h));
     assert_eq!(image.pixels[w as usize + 3], 3 * 7 + 40);
 }
+
+#[test]
+fn gif_matches_reference() {
+    let image = decoded(include_bytes!("data/alice-cover.gif"), 1000);
+    assert_eq!((image.width, image.height), (160, 221));
+    let diff = difference(&image.pixels, include_bytes!("data/alice-cover-gif.gray"));
+    assert!(diff < 0.5, "mean difference {diff}");
+}
+
+#[test]
+fn interlaced_gif_matches_the_same_picture() {
+    let image = decoded(include_bytes!("data/alice-cover-interlaced.gif"), 1000);
+    assert_eq!((image.width, image.height), (160, 221));
+    let diff = difference(&image.pixels, include_bytes!("data/alice-cover-gif.gray"));
+    assert!(diff < 0.5, "mean difference {diff}");
+}
+
+#[test]
+fn gif_downscales() {
+    // By whole factors, as PNG: 160×221 by 3 fits 80.
+    let image = decoded(include_bytes!("data/alice-cover.gif"), 80);
+    assert_eq!((image.width, image.height), (54, 74));
+}
+
+#[test]
+fn gif_transparency_is_white_and_the_first_frame_shows() {
+    let image = decoded(include_bytes!("data/transparent.gif"), 100);
+    assert_eq!((image.width, image.height), (24, 16));
+    assert_eq!(image.pixels, include_bytes!("data/transparent.gray"));
+    // The second frame's top row is not drawn.
+    assert_ne!(image.pixels[10], image.pixels[2]);
+}
+
+#[test]
+fn damaged_gifs_fail_without_panicking() {
+    let data = include_bytes!("data/alice-cover.gif");
+    for cut in [6, 13, 400, 800, 5000, data.len() - 1] {
+        let mut source = &data[..cut];
+        let mut out = Collect::default();
+        let _ = decode(Format::Gif, &mut source, 100, &mut out);
+    }
+}
