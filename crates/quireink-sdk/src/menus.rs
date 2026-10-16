@@ -52,6 +52,10 @@ pub enum MenuNeed {
     /// devices it is left out of the menus plugins define; users can still
     /// list it.
     NoTouch,
+    /// A device whose shell shows the screen in other colours than black
+    /// and white ([`settings::TEXT_COLOR`](crate::builtin::settings::TEXT_COLOR)),
+    /// hidden elsewhere.
+    Colors,
 }
 
 /// One entry of a resolved menu.
@@ -85,6 +89,8 @@ pub struct Menus {
     sleeps: bool,
     /// The screen can be turned.
     turns: bool,
+    /// The shell tints the screen.
+    tints: bool,
 }
 
 impl Menus {
@@ -123,6 +129,14 @@ impl Menus {
         self.turns = turns;
     }
 
+    /// Whether the shell shows the screen in the colours of the settings
+    /// [`TEXT_COLOR`](crate::builtin::settings::TEXT_COLOR) and
+    /// [`PAPER_COLOR`](crate::builtin::settings::PAPER_COLOR), for entries
+    /// that need it ([`MenuNeed::Colors`]).
+    pub fn set_colors(&mut self, tints: bool) {
+        self.tints = tints;
+    }
+
     /// Offers `item` only where `need` is met.
     pub fn set_need(&mut self, item: Id, need: MenuNeed) {
         self.needs.insert(item, need);
@@ -149,6 +163,7 @@ impl Menus {
             Some(MenuNeed::Speech) => !self.mute,
             Some(MenuNeed::Sleep) => self.sleeps,
             Some(MenuNeed::Rotation) => self.turns,
+            Some(MenuNeed::Colors) => self.tints,
             Some(MenuNeed::NoTouch) => listed || !self.touch,
             None => true,
         }

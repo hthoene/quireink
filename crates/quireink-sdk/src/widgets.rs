@@ -6,6 +6,13 @@
 //!
 //! A widget may have targets: places that do something when tapped, which
 //! buttons reach one after the other too (see [`WidgetTarget`]).
+//!
+//! A widget may have settings of its own, e.g. where its text sits
+//! ([`align_setting`]): they go in a settings group with the widget's id
+//! ([`settings_group`]). The settings list leaves such groups out; screens
+//! that edit widgets open them (slot
+//! [`SETTINGS`](crate::builtin::slots::SETTINGS) with parameter
+//! [`ID`](crate::builtin::params::ID)).
 
 use alloc::borrow::Cow;
 use alloc::boxed::Box;
@@ -18,6 +25,7 @@ use quireink_platform::Rect;
 
 use crate::env::Env;
 use crate::id::Id;
+use crate::settings::{SettingGroupSpec, SettingKind, SettingSpec, SettingValue};
 
 /// The height a widget needs for a width, in pixels.
 pub type WidgetHeightFn = Box<dyn Fn(&Env<'_>, u16) -> u16>;
@@ -119,5 +127,105 @@ impl Widgets {
     /// What widget `id` shows now (see [`WidgetSignatureFn`]).
     pub fn signature(&self, id: &str, env: &Env<'_>) -> Option<String> {
         self.get(id)?.signature.as_ref().map(|s| s(env))
+    }
+}
+
+/// The values of a widget's alignment setting ([`align_setting`]).
+pub const ALIGNMENTS: [&str; 3] = ["core.align.left", "core.align.center", "core.align.right"];
+
+/// Where a widget's text sits in its place.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Align {
+    Left,
+    Center,
+    Right,
+}
+
+impl Align {
+    /// The alignment a value of [`ALIGNMENTS`] names; left for others.
+    pub fn of(value: &str) -> Self {
+        match ALIGNMENTS.iter().position(|a| *a == value) {
+            Some(1) => Align::Center,
+            Some(2) => Align::Right,
+            _ => Align::Left,
+        }
+    }
+
+    /// Its value in [`ALIGNMENTS`].
+    pub fn value(self) -> &'static str {
+        ALIGNMENTS[self as usize]
+    }
+
+    /// Where something `width` wide starts in `area`.
+    pub fn x(self, area: Rect, width: f32) -> f32 {
+        let left = f32::from(area.x);
+        let room = (f32::from(area.width) - width).max(0.0);
+        match self {
+            Align::Left => left,
+            Align::Center => left + room / 2.0,
+            Align::Right => left + room,
+        }
+    }
+}
+
+/// The settings group of `widget`'s own settings, named as the widget.
+pub fn settings_group(widget: &Id, title: impl Into<Cow<'static, str>>) -> SettingGroupSpec {
+    SettingGroupSpec {
+        id: widget.clone(),
+        title: title.into(),
+        order: 0,
+    }
+}
+
+/// The setting of where `widget`'s text sits, `<widget>.align`, in the
+/// widget's settings group; read it with [`align`].
+pub fn align_setting(widget: &Id, default: Align) -> SettingSpec {
+    let id = Id::parse(&alloc::format!("{widget}.align")).unwrap_or_else(|_| widget.clone());
+    SettingSpec::new(
+        id,
+        "core.setting.align",
+        SettingKind::Choice(ALIGNMENTS.iter().map(|a| Cow::Borrowed(*a)).collect()),
+        SettingValue::Text(Cow::Borrowed(default.value())),
+    )
+    .group(widget.clone())
+}
+
+/// Where `widget`'s text sits, by its [`align_setting`]; left without one.
+pub fn align(env: &Env<'_>, widget: &str) -> Align {
+    Align::of(env.settings.text(&alloc::format!("{widget}.align")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn alignments_place_text_in_the_area() {
+        let area = Rect::new(10, 0, 100, 20);
+        assert_eq!(Align::Left.x(area, 40.0), 10.0);
+        assert_eq!(Align::Center.x(area, 40.0), 40.0);
+        assert_eq!(Align::Right.x(area, 40.0), 70.0);
+        // Too wide: from the left edge.
+        assert_eq!(Align::Right.x(area, 140.0), 10.0);
+    }
+
+    #[test]
+    fn alignments_round_trip() {
+        for align in [Align::Left, Align::Center, Align::Right] {
+            assert_eq!(Align::of(align.value()), align);
+        }
+        assert_eq!(Align::of("sideways"), Align::Left);
+    }
+
+    #[test]
+    fn the_setting_belongs_to_the_widget() {
+        let widget = Id::new_static("home.clock");
+        let spec = align_setting(&widget, Align::Center);
+        assert_eq!(spec.id.as_str(), "home.clock.align");
+        assert_eq!(spec.group, widget);
+        assert_eq!(
+            spec.default,
+            SettingValue::Text(Cow::Borrowed("core.align.center"))
+        );
     }
 }

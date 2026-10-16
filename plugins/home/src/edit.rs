@@ -1,6 +1,6 @@
 //! Editing a list of widgets, as a list that buttons work as well as
-//! taps: the widgets (choosing one offers to move it up or down or to
-//! remove it), then *Add a widget*; for a page of the home screen also
+//! taps: the widgets (choosing one offers to move it up or down, its own
+//! settings where it has some, or to remove it), then *Add a widget*; for a page of the home screen also
 //! *Add a page* and *Remove this page*. Every change is kept at once.
 //!
 //! It edits a page of the home screen (parameter `page`, or `id` with the
@@ -13,7 +13,7 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use quireink_sdk::builtin::{actions, events, params};
+use quireink_sdk::builtin::{actions, events, params, slots};
 use quireink_sdk::status::item_ids;
 use quireink_sdk::ui::choice;
 use quireink_sdk::ui::{self, ListChange, ListView, UiStyle};
@@ -182,6 +182,9 @@ impl EditScreen {
                 if at + 1 < list.len() {
                     options.push("down");
                 }
+                if has_settings(&env, id) {
+                    options.push("settings");
+                }
                 options.push("remove");
                 let title = env
                     .widgets
@@ -237,12 +240,27 @@ impl EditScreen {
             "remove" => {
                 list.remove(at);
             }
+            "settings" => {
+                let params = Params::new().with(params::ID, list[at].clone());
+                cx.command(Command::OpenSlot(slots::SETTINGS, params));
+                return;
+            }
             _ => return,
         }
         let commands = self.target.store(&env, list);
         Self::run(cx, commands);
         self.redraw(cx);
     }
+}
+
+/// Whether widget `id` has settings of its own (a settings group with its
+/// id, see `quireink_sdk::widgets`).
+fn has_settings(env: &Env<'_>, id: &str) -> bool {
+    env.settings.groups().any(|group| group.id.as_str() == id)
+        && env
+            .settings
+            .specs()
+            .any(|spec| env.settings.group_of(spec).as_str() == id)
 }
 
 impl Screen for EditScreen {

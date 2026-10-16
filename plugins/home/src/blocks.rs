@@ -9,6 +9,9 @@
 //!   as a grid of icons, then the settings;
 //! - clock: the time large, with the date.
 //!
+//! The status line, the date and the clock have settings of their own:
+//! where their text sits, and whether the clock shows the date.
+//!
 //! Widgets draw what is stored (covers once looked up, see `covers`),
 //! never opening books themselves, so drawing stays quick.
 
@@ -20,9 +23,10 @@ use alloc::vec::Vec;
 
 use quireink_sdk::builtin::{actions, menus, params, slots};
 use quireink_sdk::ui::{self, UiStyle};
-use quireink_sdk::widgets::{WidgetSpec, WidgetTarget};
+use quireink_sdk::widgets::{self, Align, WidgetSpec, WidgetTarget};
 use quireink_sdk::{
-    Arg, Canvas, Color, Command, Env, Id, Params, Rect, RegisterError, Registrar, time,
+    Arg, Canvas, Color, Command, Env, Id, Params, Rect, RegisterError, Registrar, SettingKind,
+    SettingSpec, SettingValue, time,
 };
 
 use crate::pages::{CONTINUE, DATE, RECENT, STATUS, TOOLS};
@@ -30,6 +34,8 @@ use crate::{ACTIONS, covers, recent};
 
 /// The clock with the date, large.
 pub const CLOCK: &str = "home.clock";
+/// Whether the clock shows the date below the time.
+const CLOCK_DATE: &str = "home.clock.date";
 /// The clock's digits are this much larger than titles.
 const CLOCK_SCALE: f32 = 2.2;
 /// Recent books shown as covers at most.
@@ -74,6 +80,24 @@ pub(crate) fn register(r: &mut dyn Registrar) -> Result<(), RegisterError> {
         )
     }));
     r.add_widget(clock)?;
+    for (id, title) in [
+        (STATUS, "home.widget.status"),
+        (DATE, "home.widget.date"),
+        (CLOCK, "home.widget.clock"),
+    ] {
+        let id = Id::new_static(id);
+        r.add_setting_group(widgets::settings_group(&id, title))?;
+        r.add_setting(widgets::align_setting(&id, Align::Left))?;
+    }
+    r.add_setting(
+        SettingSpec::new(
+            Id::new_static(CLOCK_DATE),
+            "home.setting.clock-date",
+            SettingKind::Bool,
+            SettingValue::Bool(true),
+        )
+        .group(Id::new_static(CLOCK)),
+    )?;
     Ok(())
 }
 
@@ -96,38 +120,30 @@ fn draw_status(canvas: &mut Canvas<'_>, env: &Env<'_>, area: Rect) {
         return;
     };
     let ink = Color::gray(60);
+    let align = widgets::align(env, STATUS);
     if let Some(clock) = time::clock_text(env) {
-        ui::draw_label(
-            canvas,
-            &font,
-            style.small,
-            f32::from(area.x),
-            area,
-            &clock,
-            ink,
-        );
+        let x = align.x(area, font.measure(style.small, &clock));
+        ui::draw_label(canvas, &font, style.small, x, area, &clock, ink);
     }
     if let Some(battery) = env.status.battery {
         let text = env.i18n.format(
             "home.battery",
             &[("percent", Arg::Int(i64::from(battery.percent)))],
         );
-        let right = f32::from(area.x + area.width);
         let width = font.measure(style.small, &text);
-        ui::draw_label(canvas, &font, style.small, right - width, area, &text, ink);
         let icon = if battery.charging { "power" } else { "battery" };
         let size = style.small * 1.2;
         let icon_width = ui::icon_width(env, icon, size);
         let gap = style.gap as f32 / 3.0;
-        ui::draw_icon(
-            canvas,
-            env,
-            icon,
-            size,
-            right - width - gap - icon_width,
-            area,
-            ink,
-        );
+        // At the right, or at the left where the time is at the right.
+        let start = if align == Align::Right {
+            f32::from(area.x)
+        } else {
+            f32::from(area.x + area.width) - width - gap - icon_width
+        };
+        ui::draw_icon(canvas, env, icon, size, start, area, ink);
+        let x = start + icon_width + gap;
+        ui::draw_label(canvas, &font, style.small, x, area, &text, ink);
     }
 }
 
@@ -165,15 +181,8 @@ fn draw_date(canvas: &mut Canvas<'_>, env: &Env<'_>, area: Rect) {
     let style = UiStyle::new(env);
     if let Some(font) = style.font(env) {
         let date = date_text(env);
-        ui::draw_label(
-            canvas,
-            &font,
-            style.text,
-            f32::from(area.x),
-            area,
-            &date,
-            Color::BLACK,
-        );
+        let x = widgets::align(env, DATE).x(area, font.measure(style.text, &date));
+        ui::draw_label(canvas, &font, style.text, x, area, &date, Color::BLACK);
     }
 }
 
@@ -497,7 +506,12 @@ fn draw_tools(canvas: &mut Canvas<'_>, env: &Env<'_>, area: Rect) {
 
 fn clock_height(env: &Env<'_>, _: u16) -> u16 {
     let style = UiStyle::new(env);
-    line_height(env, style.title * CLOCK_SCALE) + line_height(env, style.small) + style.gap as u16
+    let date = if env.settings.bool(CLOCK_DATE) {
+        line_height(env, style.small)
+    } else {
+        0
+    };
+    line_height(env, style.title * CLOCK_SCALE) + date + style.gap as u16
 }
 
 fn draw_clock(canvas: &mut Canvas<'_>, env: &Env<'_>, area: Rect) {
@@ -508,24 +522,28 @@ fn draw_clock(canvas: &mut Canvas<'_>, env: &Env<'_>, area: Rect) {
     let size = style.title * CLOCK_SCALE;
     let big = line_height(env, size);
     let clock = time::clock_text(env).unwrap_or_else(|| String::from("--:--"));
-    let x = f32::from(area.x);
+    let align = widgets::align(env, CLOCK);
     ui::draw_label(
         canvas,
         &font,
         size,
-        x,
+        align.x(area, font.measure(size, &clock)),
         Rect::new(area.x, area.y, area.width, big),
         &clock,
         Color::BLACK,
     );
+    if !env.settings.bool(CLOCK_DATE) {
+        return;
+    }
     let small = line_height(env, style.small);
+    let date = date_text(env);
     ui::draw_label(
         canvas,
         &font,
         style.small,
-        x,
+        align.x(area, font.measure(style.small, &date)),
         Rect::new(area.x, area.y + big, area.width, small),
-        &date_text(env),
+        &date,
         Color::gray(80),
     );
 }

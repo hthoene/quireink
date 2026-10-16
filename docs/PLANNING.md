@@ -806,8 +806,8 @@ makes it replaceable. ✅ done, 🔶 partly, ⬜ open.
 | C18 | Home screen of pages of widgets: status line (time, battery), date, continue reading, recent covers, a grid of tools, a large clock, today's reading with a daily goal, the last 7 days, news headlines, a word of the day, any plugin's; swiped or paged through, edited on the device (pencil or long press; with buttons too) | `Registrar::add_widget` with targets (`WidgetTarget`), settings `home.page-1` to `home.page-4`, menu `core.tools` | ✅ |
 | C19 | OPDS: covers in lists (devices with the memory), a folder per catalog, automatic sync (rules), OPDS 2 (JSON) | `opds` plugin, C5, C20 | ✅ (OPDS 2: JSON catalogs read as they stream, navigation, publications, groups, covers, search templates, next pages) |
 | C20 | Large-memory devices may use more (covers in lists, caches) without separate code | `DeviceInfo::memory` (`MemoryClass::Small`/`Large`) | ✅ |
-| C21 | Widgets with their own settings: where in their place they sit (left, centre, right; many, such as the time, are left aligned now), and what they show (e.g. the clock's format and size) | Settings per widget, given by the plugin that adds it (`add_widget`), edited where the widgets are edited (C18) | ⬜ |
-| C22 | Text and paper colours: pure black on white is hard on the eyes on phone screens; softer text, gray or sepia paper | Settings for the colours of text, paper and menus (Appearance), which themes (C7) set as defaults; the shells draw them where the screen has colour or gray | ⬜ |
+| C21 | Widgets with their own settings: where in their place they sit (left, centre, right), and what they show | A settings group with the widget's id (`widgets::settings_group`), opened from the widget editor (C18) through slot `core.settings` with `id`; `widgets::align_setting` and `widgets::align` for the alignment | ✅ (status line, date, clock (also: show the date), today's reading, word of the day) |
+| C22 | Text and paper colours: pure black on white is hard on the eyes on phone screens; softer text, gray or sepia paper | Settings `core.text-color`, `core.paper-color` (Appearance), which themes (C7) set as defaults; everything is still drawn in grays, and shells that tint (`KernelBuilder::colors`, `Kernel::colors`, `MenuNeed::Colors`) show black and white in these colours, the grays between them | ✅ (Android; night mode swaps them) |
 
 ### 12.2 Ideas from KOReader and CrossPoint / CrossInk
 
@@ -849,7 +849,7 @@ Seen while using QuireInk on the devices, to be checked and fixed.
 
 | # | What | Where | State |
 |---|------|-------|-------|
-| B1 | The status lines above the text never show | Android phone (Sony Xperia) | ⬜ (above the text there is no line by default; items chosen for the parts above show only once a line *Text and symbols* is chosen for that place too, which is easy to miss) |
+| B1 | The status lines above the text never show | Android phone (Sony Xperia) | ✅ (not a fault: above the text there is no line by default; the parts above show once a line *Text and symbols* is chosen for that place) |
 | B2 | In the dictionary, the page of the entry is drawn over *Online* | All, with a network | ✅ (the page at the right edge, *Online* left of it) |
 
 ---

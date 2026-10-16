@@ -238,6 +238,16 @@ Slots are how a plugin replaces another: bind your screen to
 (`core.main`), its tools (`core.tools`) and the settings' pages
 (`core.settings-pages`).
 
+### Widgets with settings
+
+A widget may have settings of its own, such as where its text sits. Put
+them in a settings group with the widget's id
+(`widgets::settings_group`); the settings list leaves such groups out,
+and the home screen's editor offers them as the widget's *Settings*. For
+the alignment there is a ready setting: register
+`widgets::align_setting(&id, Align::Left)` and place each text with
+`widgets::align(env, id).x(area, width)`.
+
 ### Passwords and keys
 
 Plugins keep passwords, API keys and tokens with

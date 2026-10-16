@@ -380,6 +380,30 @@ impl Plugin for CorePlugin {
             .description("core.setting.rotation.help"),
         )?;
         r.set_menu_need(settings::ROTATION, quireink_sdk::MenuNeed::Rotation)?;
+        for (id, title, values) in [
+            (
+                settings::TEXT_COLOR,
+                "core.setting.text-color",
+                &settings::TEXT_COLORS,
+            ),
+            (
+                settings::PAPER_COLOR,
+                "core.setting.paper-color",
+                &settings::PAPER_COLORS,
+            ),
+        ] {
+            r.add_setting(
+                SettingSpec::new(
+                    id.clone(),
+                    title,
+                    SettingKind::Choice(values.iter().map(|v| Cow::Borrowed(*v)).collect()),
+                    SettingValue::Text(Cow::Borrowed(values[0])),
+                )
+                .group(groups::LOOK)
+                .description("core.setting.colors.help"),
+            )?;
+            r.set_menu_need(id, quireink_sdk::MenuNeed::Colors)?;
+        }
         r.add_setting(
             SettingSpec::new(
                 settings::NOTICE_SECONDS,

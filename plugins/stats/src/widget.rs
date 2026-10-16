@@ -11,7 +11,7 @@ use alloc::string::ToString;
 use alloc::vec::Vec;
 
 use quireink_sdk::ui::{self, UiStyle};
-use quireink_sdk::widgets::WidgetSpec;
+use quireink_sdk::widgets::{self, Align, WidgetSpec};
 use quireink_sdk::{
     Arg, Canvas, Color, Env, Id, Rect, RegisterError, Registrar, SettingKind, SettingSpec,
     SettingValue,
@@ -163,6 +163,8 @@ pub(crate) fn register(r: &mut dyn Registrar) -> Result<(), RegisterError> {
             }
         }),
     )?;
+    r.add_setting_group(widgets::settings_group(&TODAY, "stats.widget.today"))?;
+    r.add_setting(widgets::align_setting(&TODAY, Align::Left))?;
     r.add_widget(WidgetSpec {
         id: TODAY,
         title: Cow::Borrowed("stats.widget.today"),
@@ -329,24 +331,26 @@ fn draw(canvas: &mut Canvas<'_>, env: &Env<'_>, area: Rect) {
     };
     let small = font.line_metrics(style.small).line_height as u16;
     let text = font.line_metrics(style.title).line_height as u16;
-    let x = f32::from(area.x);
+    let align = widgets::align(env, TODAY.as_str());
+    let x = |size: f32, text: &str| align.x(area, font.measure(size, text));
     let (first, second) = lines(env, &numbers);
     let row = |y: u16, h: u16| Rect::new(area.x, y, area.width, h);
     let gray = Color::gray(80);
+    let label = env.i18n.tr("stats.today");
     ui::draw_label(
         canvas,
         &font,
         style.small,
-        x,
+        x(style.small, label),
         row(area.y, small),
-        env.i18n.tr("stats.today"),
+        label,
         gray,
     );
     ui::draw_label(
         canvas,
         &font,
         style.title,
-        x,
+        x(style.title, &first),
         row(area.y + small, text),
         &first,
         Color::BLACK,
@@ -364,7 +368,8 @@ fn draw(canvas: &mut Canvas<'_>, env: &Env<'_>, area: Rect) {
         canvas.fill_rect(i32::from(area.x), top, filled, height, Color::BLACK);
         y += band;
     }
-    ui::draw_label(canvas, &font, style.small, x, row(y, small), &second, gray);
+    let at = x(style.small, &second);
+    ui::draw_label(canvas, &font, style.small, at, row(y, small), &second, gray);
 }
 
 #[cfg(test)]

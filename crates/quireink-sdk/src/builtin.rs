@@ -63,7 +63,9 @@ pub mod slots {
     /// Shows a menu (an overlay). Opened with the parameter
     /// [`MENU`](super::params::MENU).
     pub const MENU: Id = Id::new_static("core.menu");
-    /// Shows and edits settings.
+    /// Shows and edits settings; with the parameter
+    /// [`ID`](super::params::ID), the settings of that group, e.g. a
+    /// widget's own (see [`widgets`](crate::widgets)).
     pub const SETTINGS: Id = Id::new_static("core.settings");
     /// Looks up a word (an overlay): opened with the parameters
     /// [`WORD`](super::params::WORD) and, if known,
@@ -281,6 +283,43 @@ pub mod settings {
         "core.rotation.upside-down",
         "core.rotation.landscape-flipped",
     ];
+    /// The colour black is shown in: one of [`TEXT_COLORS`], where the
+    /// shell tints the screen (see [`MenuNeed::Colors`](crate::MenuNeed)).
+    /// Everything is drawn in grays; the shell shows black as this colour,
+    /// white as [`PAPER_COLOR`] and the grays between them.
+    pub const TEXT_COLOR: Id = Id::new_static("core.text-color");
+    /// The colour white is shown in: one of [`PAPER_COLORS`].
+    pub const PAPER_COLOR: Id = Id::new_static("core.paper-color");
+    /// The values of [`TEXT_COLOR`]: black, dark gray, brown, dark blue.
+    pub const TEXT_COLORS: [&str; 4] = [
+        "core.color.black",
+        "core.color.dark-gray",
+        "core.color.brown",
+        "core.color.dark-blue",
+    ];
+    /// The values of [`PAPER_COLOR`]: white, cream, sepia, light gray.
+    pub const PAPER_COLORS: [&str; 4] = [
+        "core.paper.white",
+        "core.paper.cream",
+        "core.paper.sepia",
+        "core.paper.light-gray",
+    ];
+
+    /// The red, green and blue of a value of [`TEXT_COLOR`] or
+    /// [`PAPER_COLOR`].
+    pub fn rgb(value: &str) -> Option<[u8; 3]> {
+        Some(match value {
+            "core.color.black" => [0, 0, 0],
+            "core.color.dark-gray" => [51, 51, 51],
+            "core.color.brown" => [91, 70, 54],
+            "core.color.dark-blue" => [28, 42, 68],
+            "core.paper.white" => [255, 255, 255],
+            "core.paper.cream" => [250, 246, 236],
+            "core.paper.sepia" => [244, 236, 216],
+            "core.paper.light-gray" => [232, 232, 232],
+            _ => return None,
+        })
+    }
     /// Margin of menus and lists, in millimetres.
     pub const UI_MARGIN: Id = Id::new_static("core.ui-margin");
     /// Height of list rows, in percent of a line of text.
