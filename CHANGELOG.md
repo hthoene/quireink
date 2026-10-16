@@ -6,6 +6,10 @@ change the plugin SDK.
 
 ## [Unreleased]
 
+- Rules can have a condition: only between two times of day, only while
+  reading or while not, only on battery or while charging, only while a
+  switch is on or off (hold a rule, *Only if …*). They can also set a
+  number (e.g. the light to 20) and show a message.
 - Drag and drop in lists, as on phones: entries of menus (*Customise
   menus*), the widgets of the sleep screen and the items of status lines
   carry a grip (≡) at their end; drag it to move the row, a bar shows

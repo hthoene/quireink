@@ -7,11 +7,14 @@
 //!   closed or read to its end; the device wakes up or goes to sleep; the
 //!   battery falls below a percentage; charging begins or ends; a switch
 //!   (any on/off setting) is turned on or off.
-//! - Then: run any action (from any plugin), or turn any switch on or
-//!   off.
+//! - Then: run any action (from any plugin), turn any switch on or off,
+//!   set a number (e.g. the light) or show a message.
+//! - Only if (optional): between two times of day, while reading or not,
+//!   on battery or while charging, while a switch is on or off.
 //!
 //! The rules are listed under Settings › Customise › Rules: tapping one
-//! pauses it, holding it removes it, *Add rule* asks when and what. Times
+//! pauses it, holding it offers a condition or to remove it, *Add rule*
+//! asks when and what. Times
 //! come through the kernel's timer for plugins (`Command::Schedule`), so
 //! they apply whatever screen is open.
 
@@ -36,7 +39,7 @@ use quireink_sdk::{
     Registrar, SDK_VERSION, ScreenSpec, SettingValue, Version, time,
 };
 
-use crate::rule::{EVERY_DAY, Effect, Rule, Trigger, WEEKDAYS, WEEKENDS};
+use crate::rule::{Condition, EVERY_DAY, Effect, Rule, Trigger, WEEKDAYS, WEEKENDS};
 
 pub const PLUGIN: Id = Id::new_static("rules");
 /// Opens the list of rules.
@@ -61,10 +64,31 @@ pub(crate) const DAY_NAMES: [&str; 7] = [
     "rules.day.6",
 ];
 
-/// Runs the rules whose trigger `applies`.
-fn run(env: &Env<'_>, out: &mut Vec<Command>, applies: impl Fn(&Trigger) -> bool) {
+/// Whether a book is open, as the reading events tell.
+type Reading = Rc<Cell<bool>>;
+
+/// Whether `condition` holds now.
+fn holds(env: &Env<'_>, condition: &Condition, reading: bool) -> bool {
+    let switch = |id: &Id| env.settings.get(id.as_str()) == Some(&SettingValue::Bool(true));
+    let charging = env.status.battery.map(|b| b.charging);
+    match condition {
+        Condition::Always => true,
+        Condition::Between { from, to } => time::local_time(env).is_some_and(|t| {
+            rule::between(u16::from(t.hour) * 60 + u16::from(t.minute), *from, *to)
+        }),
+        Condition::Reading => reading,
+        Condition::NotReading => !reading,
+        Condition::OnBattery => charging == Some(false),
+        Condition::Charging => charging == Some(true),
+        Condition::SwitchOn(id) => switch(id),
+        Condition::SwitchOff(id) => !switch(id),
+    }
+}
+
+/// Runs the rules whose trigger `applies` and whose condition holds.
+fn run(env: &Env<'_>, reading: bool, out: &mut Vec<Command>, applies: impl Fn(&Trigger) -> bool) {
     for rule in rule::load(env.storage) {
-        if !rule.on || !applies(&rule.trigger) {
+        if !rule.on || !applies(&rule.trigger) || !holds(env, &rule.condition, reading) {
             continue;
         }
         match rule.effect {
@@ -74,6 +98,12 @@ fn run(env: &Env<'_>, out: &mut Vec<Command>, applies: impl Fn(&Trigger) -> bool
                     out.push(Command::SetSetting(id, SettingValue::Bool(on)));
                 }
             }
+            Effect::Number(id, value) => {
+                if env.settings.get(id.as_str()) != Some(&SettingValue::Int(value)) {
+                    out.push(Command::SetSetting(id, SettingValue::Int(value)));
+                }
+            }
+            Effect::Message(text) => out.push(Command::Notify(text)),
         }
     }
 }
@@ -141,6 +171,48 @@ fn setting_title<'e>(env: &Env<'e>, id: &'e Id) -> &'e str {
     env.i18n.tr(title)
 }
 
+/// When a rule applies, with its condition, in words.
+fn when_text(env: &Env<'_>, rule: &Rule) -> String {
+    let when = trigger_text(env, &rule.trigger);
+    match condition_text(env, &rule.condition) {
+        Some(condition) => env.i18n.format(
+            "rules.when-if",
+            &[
+                ("when", Arg::Str(&when)),
+                ("condition", Arg::Str(&condition)),
+            ],
+        ),
+        None => when,
+    }
+}
+
+/// A condition in words; `None` for always.
+fn condition_text(env: &Env<'_>, condition: &Condition) -> Option<String> {
+    let tr = |key: &str| env.i18n.tr(key).to_string();
+    Some(match condition {
+        Condition::Always => return None,
+        Condition::Between { from, to } => env.i18n.format(
+            "rules.if.between",
+            &[
+                ("from", Arg::Str(&rule::clock(*from))),
+                ("to", Arg::Str(&rule::clock(*to))),
+            ],
+        ),
+        Condition::Reading => tr("rules.if.reading"),
+        Condition::NotReading => tr("rules.if.not-reading"),
+        Condition::OnBattery => tr("rules.if.battery"),
+        Condition::Charging => tr("rules.if.charging"),
+        Condition::SwitchOn(id) => env.i18n.format(
+            "rules.if.switch-on",
+            &[("setting", Arg::Str(setting_title(env, id)))],
+        ),
+        Condition::SwitchOff(id) => env.i18n.format(
+            "rules.if.switch-off",
+            &[("setting", Arg::Str(setting_title(env, id)))],
+        ),
+    })
+}
+
 /// When a rule applies, in words.
 fn trigger_text(env: &Env<'_>, trigger: &Trigger) -> String {
     let tr = |key: &str| env.i18n.tr(key).to_string();
@@ -201,6 +273,16 @@ fn effect_text(env: &Env<'_>, effect: &Effect) -> String {
                 ],
             )
         }
+        Effect::Number(id, value) => env.i18n.format(
+            "rules.do.number",
+            &[
+                ("setting", Arg::Str(setting_title(env, id))),
+                ("value", Arg::Int(*value)),
+            ],
+        ),
+        Effect::Message(text) => env
+            .i18n
+            .format("rules.do.message", &[("text", Arg::Str(text))]),
     }
 }
 
@@ -250,49 +332,60 @@ impl Plugin for Rules {
             order: 230,
         })?;
         r.add_icon(OPEN, Cow::Borrowed("clock"))?;
+        let reading: Reading = Rc::new(Cell::new(false));
+        let book = reading.clone();
         r.subscribe(
             events::STARTED,
-            Box::new(|env: &Env<'_>, _: &Params, out: &mut Vec<Command>| {
-                run(env, out, |t| *t == Trigger::Start);
+            Box::new(move |env: &Env<'_>, _: &Params, out: &mut Vec<Command>| {
+                run(env, book.get(), out, |t| *t == Trigger::Start);
                 schedule(env, out);
             }),
         )?;
-        for (event, trigger) in [
-            (events::BOOK_OPENED, Trigger::BookOpened),
-            (events::BOOK_CLOSED, Trigger::BookClosed),
-            (events::BOOK_FINISHED, Trigger::BookFinished),
-            (events::SUSPEND, Trigger::Sleep),
+        for (event, trigger, open) in [
+            (events::BOOK_OPENED, Trigger::BookOpened, Some(true)),
+            (events::BOOK_CLOSED, Trigger::BookClosed, Some(false)),
+            (events::BOOK_FINISHED, Trigger::BookFinished, None),
+            (events::SUSPEND, Trigger::Sleep, None),
         ] {
+            let book = reading.clone();
             r.subscribe(
                 event,
                 Box::new(move |env: &Env<'_>, _: &Params, out: &mut Vec<Command>| {
-                    run(env, out, |t| *t == trigger);
+                    if let Some(open) = open {
+                        book.set(open);
+                    }
+                    run(env, book.get(), out, |t| *t == trigger);
                 }),
             )?;
         }
+        let book = reading.clone();
         r.subscribe(
             events::RESUME,
-            Box::new(|env: &Env<'_>, _: &Params, out: &mut Vec<Command>| {
-                run(env, out, |t| *t == Trigger::Resume);
+            Box::new(move |env: &Env<'_>, _: &Params, out: &mut Vec<Command>| {
+                run(env, book.get(), out, |t| *t == Trigger::Resume);
                 // The clock may have moved on while asleep.
                 schedule(env, out);
             }),
         )?;
+        let book = reading.clone();
         r.subscribe(
             TIME,
-            Box::new(|env: &Env<'_>, params: &Params, out: &mut Vec<Command>| {
-                let today = time::local_time(env).map_or(0, |t| t.weekday);
-                if let Some(at) = params.get(MINUTE).and_then(|m| m.parse::<u16>().ok()) {
-                    run(env, out, |t| {
-                        matches!(t, Trigger::Time { minute, days }
+            Box::new(
+                move |env: &Env<'_>, params: &Params, out: &mut Vec<Command>| {
+                    let today = time::local_time(env).map_or(0, |t| t.weekday);
+                    if let Some(at) = params.get(MINUTE).and_then(|m| m.parse::<u16>().ok()) {
+                        run(env, book.get(), out, |t| {
+                            matches!(t, Trigger::Time { minute, days }
                             if *minute == at && days & (1 << today) != 0)
-                    });
-                }
-                schedule(env, out);
-            }),
+                        });
+                    }
+                    schedule(env, out);
+                },
+            ),
         )?;
         // Minutes since the start, for the rules that repeat.
         let minutes = Rc::new(Cell::new(0u32));
+        let book = reading.clone();
         r.subscribe(
             TICK,
             Box::new(move |env: &Env<'_>, _: &Params, out: &mut Vec<Command>| {
@@ -300,6 +393,7 @@ impl Plugin for Rules {
                 minutes.set(now);
                 run(
                     env,
+                    book.get(),
                     out,
                     |t| matches!(t, Trigger::Every(every) if now % u32::from(*every) == 0),
                 );
@@ -309,6 +403,7 @@ impl Plugin for Rules {
         // The battery as it was last: a charge falling below a mark, and
         // charging beginning or ending, compare with it.
         let battery: Rc<Cell<Option<(u8, bool)>>> = Rc::new(Cell::new(None));
+        let book = reading.clone();
         r.subscribe(
             events::STATUS_CHANGED,
             Box::new(move |env: &Env<'_>, _: &Params, out: &mut Vec<Command>| {
@@ -318,7 +413,7 @@ impl Plugin for Rules {
                 let Some((was, was_charging)) = battery.replace(Some(now)) else {
                     return;
                 };
-                run(env, out, |t| match t {
+                run(env, book.get(), out, |t| match t {
                     Trigger::BatteryBelow(mark) => was >= *mark && now.0 < *mark,
                     Trigger::Charging => !was_charging && now.1,
                     Trigger::Unplugged => was_charging && !now.1,
@@ -328,20 +423,22 @@ impl Plugin for Rules {
         )?;
         r.subscribe(
             events::SETTING_CHANGED,
-            Box::new(|env: &Env<'_>, params: &Params, out: &mut Vec<Command>| {
-                let Some(id) = params.get(params::ID) else {
-                    return;
-                };
-                let Some(SettingValue::Bool(on)) = env.settings.get(id) else {
-                    return;
-                };
-                let on = *on;
-                run(env, out, |t| match t {
-                    Trigger::SwitchOn(s) => on && s.as_str() == id,
-                    Trigger::SwitchOff(s) => !on && s.as_str() == id,
-                    _ => false,
-                });
-            }),
+            Box::new(
+                move |env: &Env<'_>, params: &Params, out: &mut Vec<Command>| {
+                    let Some(id) = params.get(params::ID) else {
+                        return;
+                    };
+                    let Some(SettingValue::Bool(on)) = env.settings.get(id) else {
+                        return;
+                    };
+                    let on = *on;
+                    run(env, reading.get(), out, |t| match t {
+                        Trigger::SwitchOn(s) => on && s.as_str() == id,
+                        Trigger::SwitchOff(s) => !on && s.as_str() == id,
+                        _ => false,
+                    });
+                },
+            ),
         )?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/en.ini")))?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/de.ini")))?;
