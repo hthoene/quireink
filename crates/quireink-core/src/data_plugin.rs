@@ -9,6 +9,7 @@
 //!   keymap.ini     key bindings
 //!   settings.ini   new defaults for any plugin's settings ([reader] font-size = 14)
 //!   fonts/*.ttf    fonts to read with (also .otf, .ttc), by family
+//!   styles.css     a stylesheet for books, after a book's own
 //! ```
 //!
 //! The kernel lists them like every other plugin, so they can be switched
@@ -35,6 +36,7 @@ pub(crate) struct DataPlugin {
     /// Taken by `register`, which runs once.
     translations: RefCell<Vec<String>>,
     keymap: RefCell<Option<String>>,
+    styles: RefCell<Option<String>>,
     settings: RefCell<Option<String>>,
     /// Paths of font files.
     fonts: RefCell<Vec<String>>,
@@ -48,6 +50,9 @@ impl Plugin for DataPlugin {
     fn register(&self, r: &mut dyn Registrar) -> Result<(), RegisterError> {
         for source in self.translations.take() {
             r.add_translations(Cow::Owned(source))?;
+        }
+        if let Some(css) = self.styles.take() {
+            r.add_stylesheet(Cow::Owned(css))?;
         }
         if let Some(source) = self.keymap.take() {
             r.add_keymap(Cow::Owned(source))?;
@@ -137,6 +142,7 @@ fn load(storage: &dyn Storage, path: &str, folder: &str) -> Result<DataPlugin, S
         manifest,
         translations: RefCell::new(translations),
         keymap: RefCell::new(read(storage, &format!("{path}/keymap.ini"), MAX_FILE)),
+        styles: RefCell::new(read(storage, &format!("{path}/styles.css"), MAX_FILE)),
         settings: RefCell::new(read(storage, &format!("{path}/settings.ini"), MAX_FILE)),
         fonts: RefCell::new(font_files(storage, &format!("{path}/fonts"))),
     })
@@ -196,6 +202,7 @@ pub(crate) fn font_folder(storage: &dyn Storage, dirs: &[String]) -> Option<Data
         },
         translations: RefCell::new(Vec::new()),
         keymap: RefCell::new(None),
+        styles: RefCell::new(None),
         settings: RefCell::new(None),
         fonts: RefCell::new(fonts),
     })
@@ -275,6 +282,7 @@ mod tests {
                 "[plugin]\nname = Large print\ndescription = Bigger text.\nversion = 1.2.0\n",
             )
             .with("plugins/large/settings.ini", "[core]\nui-size = 14\n")
+            .with("plugins/large/styles.css", "p { line-height: 1.6 }")
             .with("plugins/large/i18n/de.ini", "[meta]\nlanguage = de\n")
             .with("plugins/broken/readme.txt", "")
             .with("plugins/bad-id/plugin.ini", "[plugin]\nid = a.b\n");
@@ -288,6 +296,10 @@ mod tests {
         assert_eq!(large.translations.borrow().len(), 1);
         assert!(large.settings.borrow().is_some());
         assert!(large.keymap.borrow().is_none());
+        assert_eq!(
+            large.styles.borrow().as_deref(),
+            Some("p { line-height: 1.6 }")
+        );
         assert_eq!(warnings.len(), 2, "{warnings:?}");
     }
 

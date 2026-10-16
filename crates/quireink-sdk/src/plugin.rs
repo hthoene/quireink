@@ -91,6 +91,10 @@ pub trait Registrar {
     /// tap.center = core.menu
     /// ```
     fn add_keymap(&mut self, source: Cow<'static, str>) -> Result<(), RegisterError>;
+    /// A stylesheet for books, applied after a book's own (where the
+    /// format reads CSS, e.g. EPUB), e.g. for a theme that sets books
+    /// apart; see [`Env::stylesheets`](crate::Env).
+    fn add_stylesheet(&mut self, css: Cow<'static, str>) -> Result<(), RegisterError>;
 
     /// Adds a key map preset (same format as [`Registrar::add_keymap`]) that
     /// users can select with the `core.keymap-preset` setting. Its title

@@ -117,6 +117,7 @@ pub(crate) struct Staging {
     pub(crate) status_lines: Vec<StatusLineSpec>,
     pub(crate) widgets: Vec<quireink_sdk::widgets::WidgetSpec>,
     pub(crate) text_filters: Vec<quireink_sdk::filters::TextFilterSpec>,
+    pub(crate) stylesheets: Vec<Cow<'static, str>>,
 }
 
 impl Staging {
@@ -375,6 +376,11 @@ impl Registrar for PluginRegistrar<'_> {
     fn add_keymap(&mut self, source: Cow<'static, str>) -> Result<(), RegisterError> {
         validate_keymap(&source)?;
         self.staging.keymaps.push(source);
+        Ok(())
+    }
+
+    fn add_stylesheet(&mut self, css: Cow<'static, str>) -> Result<(), RegisterError> {
+        self.staging.stylesheets.push(css);
         Ok(())
     }
 

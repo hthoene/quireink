@@ -299,10 +299,14 @@ plugins/large-print/
   keymap.ini     key bindings
   settings.ini   new defaults for any plugin's settings ([reader] font-size = 14)
   fonts/*.ttf    fonts to read with (also .otf, .ttc), by family
+  styles.css     a stylesheet for books, after a book's own (EPUB)
 ```
 
 Copy it into the `plugins` folder of a device (or of the emulator's
-library) and restart. [`samples/plugins`](../samples/plugins) has two:
+library) and restart. A plugin's `styles.css` comes after a book's own
+stylesheets and before one's own (`styles.css` beside the books, then
+the one named like a book), so the more particular wins; plugins with
+code add theirs with `Registrar::add_stylesheet`. [`samples/plugins`](../samples/plugins) has two:
 large print and an airy theme.
 
 [`Plugin`]: ../crates/quireink-sdk/src/plugin.rs

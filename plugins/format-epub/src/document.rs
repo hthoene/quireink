@@ -116,6 +116,25 @@ impl EpubDocument {
         path: &str,
         styles: bool,
     ) -> Result<Self, DocumentError> {
+        Self::open_styled(storage, path, styles, "")
+    }
+
+    /// Opens a book as `options` say: with its styles or not, and with
+    /// stylesheets to apply after its own (e.g. the plugins').
+    pub fn open_options(
+        storage: &dyn Storage,
+        path: &str,
+        options: &quireink_sdk::OpenOptions,
+    ) -> Result<Self, DocumentError> {
+        Self::open_styled(storage, path, options.publisher_styles, &options.css)
+    }
+
+    fn open_styled(
+        storage: &dyn Storage,
+        path: &str,
+        styles: bool,
+        plugin_css: &str,
+    ) -> Result<Self, DocumentError> {
         let archive = ZipArchive::open(storage, path).map_err(package::error)?;
         let cache = alloc::format!("{}/{:016x}", Env::plugin_dir(PLUGIN.as_str()), fnv(path));
         let size = storage.size(path)?;
@@ -134,7 +153,7 @@ impl EpubDocument {
         // One's own stylesheets: chapters converted with them go into a
         // cache of their own, so a changed stylesheet applies at once.
         let user_css = if styles {
-            user_css(storage, path)
+            user_css(storage, path, plugin_css)
         } else {
             String::new()
         };
@@ -238,14 +257,18 @@ impl EpubDocument {
 /// Longest stylesheet of one's own that is read.
 const MAX_USER_CSS: usize = 64 * 1024;
 
-/// One's own stylesheets for the book at `path`: `styles.css` in its
-/// folder (for all books there), then the one named like the book
-/// (`Alice.css` for `Alice.epub`), each applied after the book's own.
-pub(crate) fn user_css(storage: &dyn Storage, path: &str) -> String {
+/// The stylesheets for the book at `path` after its own: `plugins'`
+/// (e.g. a theme's), then one's own: `styles.css` in its folder (for all
+/// books there), then the one named like the book (`Alice.css` for
+/// `Alice.epub`). The later win.
+pub(crate) fn user_css(storage: &dyn Storage, path: &str, plugins: &str) -> String {
     let folder = quireink_sdk::files::parent(path);
     let name = quireink_sdk::files::name(path);
     let stem = name.rsplit_once('.').map_or(name, |(s, _)| s);
-    let mut css = String::new();
+    let mut css = String::from(plugins);
+    if !css.is_empty() {
+        css.push('\n');
+    }
     for file in [String::from("styles.css"), alloc::format!("{stem}.css")] {
         let file = quireink_sdk::files::join(folder, &file);
         if let Ok(data) = quireink_sdk::read_file(storage, &file, MAX_USER_CSS) {

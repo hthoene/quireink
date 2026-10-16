@@ -24,6 +24,10 @@ change the plugin SDK.
 - GIF pictures in books, comics and the sleep screen's own pictures: the
   first picture of the file (also of an animation, interlaced or with
   transparency), decoded to gray row by row like JPEG and PNG.
+- Plugins can bring a stylesheet for books: a data plugin's
+  `styles.css`, or `Registrar::add_stylesheet`, applied after a book's
+  own and before one's own (EPUB). SDK: `Env::stylesheets`,
+  `OpenOptions::css` (no longer `Copy`).
 - Books' embedded fonts in WOFF are used too (WOFF 2 is not read).
 - Calibre's wireless device connection (`calibre` plugin, in the tools):
   the device finds Calibre in the network (or connects to the address
