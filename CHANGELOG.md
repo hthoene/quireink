@@ -6,6 +6,17 @@ change the plugin SDK.
 
 ## [Unreleased]
 
+- Drag and drop in lists, as on phones: entries of menus (*Customise
+  menus*), the widgets of the sleep screen and the items of status lines
+  carry a grip (≡) at their end; drag it to move the row, a bar shows
+  where it lands. The status line's chosen items now come first, in
+  their order. Buttons move rows as before.
+- Plugin SDK: `ui::Reorder` (rows moved by dragging a grip, for any
+  `ListView`), and screens get a finger before the swipes in from the
+  edges do (`Screen::on_pointer`), so grips and handles at the edges
+  work.
+- The quick panel has its name in *Customise menus*.
+
 - Rules know many more moments: at a time of day on chosen days (every
   day, Monday to Friday, at weekends, one day), every so many minutes,
   when a book is closed or read to its end, when the device goes to
