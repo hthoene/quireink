@@ -6,6 +6,8 @@ change the plugin SDK.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-16
+
 - Screen lock (off by default): a PIN, a pattern or a password asked for
   when QuireInk starts and when the device wakes up, set under System ›
   *Screen lock*. The code is kept only as a salted hash. Locked, nothing
@@ -241,6 +243,7 @@ Xteink X4 is built but has not run on a device yet.
 - The Xteink X4's firmware, its display, buttons, battery and SD card
   tested against simulated hardware ([ADR 0013](docs/adr/0013-x4-firmware.md)).
 
+[0.3.0]: https://github.com/hthoene/quireink/releases/tag/v0.3.0
 [0.2.0]: https://github.com/hthoene/quireink/releases/tag/v0.2.0
 [0.1.1]: https://github.com/hthoene/quireink/releases/tag/v0.1.1
 [0.1.0]: https://github.com/hthoene/quireink/releases/tag/v0.1.0
