@@ -33,6 +33,7 @@ extern crate alloc;
 mod add;
 mod blocks;
 mod covers;
+mod drawer;
 mod edit;
 mod grid;
 mod pages;
@@ -66,6 +67,10 @@ pub(crate) const ADD_SCREEN: Id = Id::new_static("home.add-widget");
 /// Adding a widget to a list of widgets.
 pub(crate) const LIST_ADD_SCREEN: Id = Id::new_static("home.add-to-list");
 pub(crate) const CHOICE: Id = Id::new_static("home.choice");
+/// Every tool at once (swipe up on the home screen).
+pub const ALL_TOOLS: Id = Id::new_static("home.all-tools");
+const DRAWER_SCREEN: Id = Id::new_static("home.drawer");
+const TIPS_SCREEN: Id = Id::new_static("home.tips");
 /// An item's options were chosen.
 const CHOSEN: Id = Id::new_static("home.item-chosen");
 
@@ -113,6 +118,39 @@ impl Plugin for Home {
             factory: Box::new(|env, params| Box::new(Choice::new(env, params))),
         })?;
         r.bind_slot(slots::HOME, SCREEN, Priority::DEFAULT)?;
+        r.add_screen(ScreenSpec {
+            id: DRAWER_SCREEN,
+            title: Cow::Borrowed("home.drawer"),
+            factory: Box::new(|env, _| Box::new(drawer::DrawerScreen::new(env))),
+        })?;
+        r.add_screen(ScreenSpec {
+            id: TIPS_SCREEN,
+            title: Cow::Borrowed("home.tips.title"),
+            factory: Box::new(|env, _| Box::new(drawer::TipsScreen::new(env))),
+        })?;
+        r.add_action(quireink_sdk::ActionSpec {
+            id: ALL_TOOLS,
+            title: Cow::Borrowed("home.drawer"),
+            handler: Some(Box::new(|_: &Env<'_>, out: &mut Vec<Command>| {
+                out.push(Command::OpenScreen(DRAWER_SCREEN, Params::new()));
+            })),
+        })?;
+        r.add_icon(ALL_TOOLS, Cow::Borrowed("apps"))?;
+        // As on phones: up on the home screen shows every tool.
+        r.add_keymap(Cow::Borrowed(
+            "[keymap.core.home]\nswipe.up = home.all-tools\n",
+        ))?;
+        r.add_setting(
+            quireink_sdk::SettingSpec::new(
+                drawer::TIPS_SETTING,
+                "home.setting.gesture-tips",
+                quireink_sdk::SettingKind::Bool,
+                quireink_sdk::SettingValue::Bool(true),
+            )
+            .group(quireink_sdk::builtin::groups::LOOK)
+            .advanced()
+            .description("home.setting.gesture-tips.help"),
+        )?;
         r.add_menu_entry(MenuEntry {
             menu: ACTIONS,
             item: actions::LIBRARY,
@@ -680,6 +718,10 @@ impl Screen for Dashboard {
     fn on_show(&mut self, cx: &mut Cx<'_, '_>) {
         // The reader may have changed the recent books meanwhile.
         let env = *cx.env();
+        // The first time on a touch screen: how the gestures go.
+        if drawer::tips_due(&env) {
+            cx.command(Command::OpenScreen(TIPS_SCREEN, Params::new()));
+        }
         self.layout(&env);
         cx.request_redraw();
         cx.wake_at(env.now);

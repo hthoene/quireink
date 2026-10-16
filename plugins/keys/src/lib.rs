@@ -192,6 +192,7 @@ fn rows(env: &Env<'_>, everywhere: bool) -> Vec<Row> {
         gestures.push(("keys.section.swipes", each("swipe", &SWIPES)));
         gestures.push(("keys.section.taps", each("tap", &ZONES)));
         gestures.push(("keys.section.held-taps", each("long-tap", &ZONES)));
+        gestures.push(("keys.section.fingers", each("pinch", &["out", "in"])));
     }
     let mut buttons: Vec<(&'static str, Vec<String>)> = Vec::new();
     if input.buttons {
@@ -237,6 +238,7 @@ fn input_name(env: &Env<'_>, input: &str) -> String {
             .format("keys.long-tap", &[("zone", Arg::Str(&part("zone")))]),
         "swipe" => part("swipe"),
         "edge" => part("edge"),
+        "pinch" => part("pinch"),
         _ => input.to_string(),
     }
 }

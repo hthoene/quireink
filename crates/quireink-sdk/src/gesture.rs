@@ -26,6 +26,11 @@ pub enum GestureKind {
     Tap,
     LongPress,
     Swipe(Direction),
+    /// Two fingers moved apart (`out`) or together: in readers the text
+    /// larger or smaller.
+    Pinch {
+        out: bool,
+    },
 }
 
 /// A gesture recognized by the kernel from raw pointer samples.

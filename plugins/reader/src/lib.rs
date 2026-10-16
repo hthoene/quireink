@@ -543,10 +543,12 @@ impl Plugin for Reader {
             })),
         })?;
         // A tap at the bottom of a page opens it. Swipes in from the sides
-        // turn pages, as swipes do, rather than going back.
+        // turn pages, as swipes do, rather than going back; two fingers
+        // apart or together make the text larger or smaller.
         r.add_keymap(Cow::Borrowed(
             "[keymap.reader.screen]\ntap.bottom = reader.quick-settings\n\
-             edge.left = core.prev-page\nedge.right = core.next-page\n",
+             edge.left = core.prev-page\nedge.right = core.next-page\n\
+             pinch.out = reader.font-larger\npinch.in = reader.font-smaller\n",
         ))?;
         // A short menu; settings in it show their state and change in
         // place.

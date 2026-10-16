@@ -86,6 +86,8 @@ pub(crate) enum InputKey {
     /// `left`, `right`), before the screen sees it: for going home,
     /// opening the quick panel, going back.
     Edge(Direction),
+    /// `pinch.out`, `pinch.in`: two fingers moved apart or together.
+    Pinch(bool),
     /// `gestures.policy`: how a screen takes gestures, bound to one of
     /// [`POLICIES`] (see [`Policy`]).
     Policy,
@@ -165,6 +167,8 @@ impl InputKey {
             .find(|d| side_id(*d) == name)
             .map(InputKey::Edge),
             "gestures" if name == "policy" => Some(InputKey::Policy),
+            "pinch" if name == "out" => Some(InputKey::Pinch(true)),
+            "pinch" if name == "in" => Some(InputKey::Pinch(false)),
             _ => None,
         }
     }

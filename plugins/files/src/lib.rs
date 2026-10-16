@@ -278,6 +278,10 @@ impl Plugin for Files {
                 order,
             })?;
         }
+        // As on phones: down on the home screen searches.
+        r.add_keymap(Cow::Borrowed(
+            "[keymap.core.home]\nswipe.down = files.search\n",
+        ))?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/en.ini")))?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/de.ini")))?;
         Ok(())

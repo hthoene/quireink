@@ -133,6 +133,23 @@ const CASES: &[Case] = &[
         colour: 0,
     },
     Case {
+        name: "boox-gesture-tips",
+        profile: "boox-go-7",
+        book: None,
+        sets: &["home.gesture-tips=true"],
+        script: "",
+        colour: 0,
+    },
+    Case {
+        name: "boox-all-tools",
+        profile: "boox-go-7",
+        book: None,
+        // Up on the home screen: every tool.
+        sets: &[],
+        script: "swipe:600:1100:600:500,wait:300",
+        colour: 0,
+    },
+    Case {
         name: "kobo-colour-cover",
         profile: "kobo-libra-colour",
         book: Some("books/alice-in-wonderland.epub"),
@@ -245,6 +262,8 @@ fn draw(case: &Case) -> (u32, u32, Vec<u8>, usize) {
     if !case.script.is_empty() {
         command.args(["--script", case.script]);
     }
+    // The hint on gestures would cover every first home screen.
+    command.args(["--set", "home.gesture-tips=false"]);
     for set in case.sets {
         command.args(["--set", set]);
     }
@@ -328,6 +347,7 @@ fn screens_say_what_they_show() {
         .args(["--profile", case.profile, "--headless", "--library"])
         .arg(&library)
         .args(["--set", "reader.open-last=false"])
+        .args(["--set", "home.gesture-tips=false"])
         .args(["--set", case.sets[0]])
         .args(["--script", "tap-on:Display,wait:300,describe"])
         .output()
