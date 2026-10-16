@@ -25,6 +25,20 @@ The Android app (arm64, Android 8 or later) is attached to each
 [release](https://github.com/hthoene/quireink/releases); F-Droid is to
 follow. To build it yourself, see [shells/android](shells/android/README.md).
 
+To read your books, QuireInk needs *All files access*; the home screen
+asks for it. Android 13 and later may grey out that switch for apps
+installed from a browser or a file manager (a "restricted setting"). Open
+*Settings, Apps, QuireInk*, choose *Allow restricted settings* in the
+menu at the top, then turn the switch on. Where that menu has no such
+entry, a computer with `adb` lifts the restriction:
+
+```sh
+adb shell appops set --user 0 io.github.hthoene.quireink ACCESS_RESTRICTED_SETTINGS allow
+```
+
+For updates as they are released, [Obtainium](https://github.com/ImranR98/Obtainium)
+installs new versions from the releases page.
+
 ## Why QuireInk?
 
 - **Runs where others can't.** The smallest target is the Xteink X4 with an
