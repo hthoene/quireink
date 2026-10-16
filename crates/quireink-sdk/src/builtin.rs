@@ -226,6 +226,12 @@ pub mod events {
     /// The reader moved to another page; same parameters as
     /// [`BOOK_OPENED`].
     pub const PAGE_TURNED: Id = Id::new_static("core.page-turned");
+    /// The book read was closed (the reader left, or another book
+    /// opened); same parameters as [`BOOK_OPENED`], where it was left.
+    pub const BOOK_CLOSED: Id = Id::new_static("core.book-closed");
+    /// The last page of a book was reached, once each time it is opened;
+    /// same parameters as [`BOOK_OPENED`].
+    pub const BOOK_FINISHED: Id = Id::new_static("core.book-finished");
     /// A book file was moved or renamed: parameters
     /// [`FROM`](super::params::FROM) (the old path) and
     /// [`PATH`](super::params::PATH) (the new one). Plugins that keep data

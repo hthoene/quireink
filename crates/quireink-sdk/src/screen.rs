@@ -105,6 +105,13 @@ pub trait Screen {
         let _ = (event, params, cx);
     }
 
+    /// Called once when the screen is closed (gone back from, or replaced
+    /// in its slot), before it is dropped: a moment to say so, e.g. the
+    /// reader emits that the book was closed.
+    fn on_close(&mut self, cx: &mut Cx<'_, '_>) {
+        let _ = cx;
+    }
+
     /// Called when a time requested with [`Cx::wake_at`] has come. Long
     /// work (e.g. paginating a book) is split into steps that each request
     /// the next wake-up, so input stays responsive.

@@ -2322,7 +2322,7 @@ impl Kernel {
                     }
                     // The slot for something else (e.g. another book):
                     // opened anew in place of the old screen.
-                    self.stack.truncate(index);
+                    self.close_from(index);
                     self.stop_for_closed_screens();
                 }
                 match self.registry.resolve_slot(slot.as_str()).cloned() {
@@ -2549,6 +2549,18 @@ impl Kernel {
         self.output.request_refresh(RefreshMode::Fast);
     }
 
+    /// Closes the screens from `index` on, the top one first, telling
+    /// each ([`Screen::on_close`]).
+    fn close_from(&mut self, index: usize) {
+        for i in (index..self.stack.len()).rev() {
+            self.with_screen(i, |screen, cx| {
+                screen.on_close(cx);
+                Handled::Yes
+            });
+            self.stack.truncate(i);
+        }
+    }
+
     /// Closes all screens above `index`.
     fn close_above(&mut self, index: usize) {
         let mut region: Option<Rect> = None;
@@ -2558,7 +2570,7 @@ impl Kernel {
             overlays_only &= self.overlay(i).is_some();
             region = Some(region.map_or(r, |u: Rect| u.union(&r)));
         }
-        self.stack.truncate(index + 1);
+        self.close_from(index + 1);
         self.stop_for_closed_screens();
         if let Some(region) = region {
             self.screen_changed(region, overlays_only);

@@ -465,6 +465,8 @@ struct Book {
     /// Read aloud (`volume`) or turning its pages by itself (`clock`):
     /// the icon shown in the status line.
     hands_free: Option<&'static str>,
+    /// Its last page was reached ([`events::BOOK_FINISHED`] was emitted).
+    finished: bool,
 }
 
 /// A word on the page, with its box on the screen and its place in the
@@ -1468,6 +1470,7 @@ impl Book {
             chapter_marks: String::new(),
             landed: None,
             hands_free: None,
+            finished: false,
         };
         book.chapter_marks = book.chapter_marks(env);
         book.embedded = Embedded::load(env, book.document.as_ref());
@@ -1667,6 +1670,14 @@ impl Book {
         self.save_position(&env);
         if !self.web() {
             cx.command(Command::Emit(events::PAGE_TURNED, self.event_params(&env)));
+            // The last page: the book is read to the end.
+            if !self.finished && self.document.progress(self.page.end) >= 0.999 {
+                self.finished = true;
+                cx.command(Command::Emit(
+                    events::BOOK_FINISHED,
+                    self.event_params(&env),
+                ));
+            }
         }
         cx.request_redraw();
         true
@@ -2502,6 +2513,16 @@ fn draw_linking(
 }
 
 impl Screen for ReaderScreen {
+    /// The book is closed: said, where it was left.
+    fn on_close(&mut self, cx: &mut Cx<'_, '_>) {
+        let env = *cx.env();
+        if let Ok(book) = &self.book
+            && !book.web()
+        {
+            cx.command(Command::Emit(events::BOOK_CLOSED, book.event_params(&env)));
+        }
+    }
+
     fn draw(&mut self, canvas: &mut Canvas<'_>, env: &Env<'_>) {
         let book = match &self.book {
             Ok(book) => book,
