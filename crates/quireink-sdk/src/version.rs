@@ -10,7 +10,7 @@ pub struct Version {
 
 /// The SDK version implemented by this crate. Plugins declare the version
 /// they were built against in their [`Manifest`](crate::Manifest).
-pub const SDK_VERSION: Version = Version::new(0, 2, 0);
+pub const SDK_VERSION: Version = Version::new(0, 3, 0);
 
 impl Version {
     pub const fn new(major: u16, minor: u16, patch: u16) -> Self {

@@ -1,0 +1,1 @@
+Eine Startseite wie auf dem Handy, Gesten wie auf dem Handy (Startseite, Schnellzugriff, zurück, alle Werkzeuge, Schriftgröße mit zwei Fingern), Listen per Ziehen sortieren, Regeln mit Bedingungen und eine optionale Displaysperre mit PIN, Muster oder Passwort.

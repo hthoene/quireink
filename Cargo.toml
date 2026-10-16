@@ -67,7 +67,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.85"
 license = "Apache-2.0"
@@ -76,62 +76,62 @@ homepage = "https://github.com/hthoene/quireink"
 authors = ["Hannes Thoene", "The QuireInk contributors"]
 
 [workspace.dependencies]
-quireink-platform = { path = "crates/quireink-platform", version = "0.2.0" }
-quireink-config = { path = "crates/quireink-config", version = "0.2.0" }
-quireink-sqlite = { path = "crates/quireink-sqlite", version = "0.2.0" }
-quireink-serve = { path = "crates/quireink-serve", version = "0.2.0" }
-quireink-i18n = { path = "crates/quireink-i18n", version = "0.2.0" }
-quireink-graphics = { path = "crates/quireink-graphics", version = "0.2.0" }
-quireink-text = { path = "crates/quireink-text", version = "0.2.0" }
-quireink-document = { path = "crates/quireink-document", version = "0.2.0" }
-quireink-zip = { path = "crates/quireink-zip", version = "0.2.0" }
-quireink-xml = { path = "crates/quireink-xml", version = "0.2.0" }
-quireink-stardict = { path = "crates/quireink-stardict", version = "0.2.0" }
-quireink-layout = { path = "crates/quireink-layout", version = "0.2.0" }
-quireink-x4 = { path = "crates/quireink-x4", version = "0.2.0" }
+quireink-platform = { path = "crates/quireink-platform", version = "0.3.0" }
+quireink-config = { path = "crates/quireink-config", version = "0.3.0" }
+quireink-sqlite = { path = "crates/quireink-sqlite", version = "0.3.0" }
+quireink-serve = { path = "crates/quireink-serve", version = "0.3.0" }
+quireink-i18n = { path = "crates/quireink-i18n", version = "0.3.0" }
+quireink-graphics = { path = "crates/quireink-graphics", version = "0.3.0" }
+quireink-text = { path = "crates/quireink-text", version = "0.3.0" }
+quireink-document = { path = "crates/quireink-document", version = "0.3.0" }
+quireink-zip = { path = "crates/quireink-zip", version = "0.3.0" }
+quireink-xml = { path = "crates/quireink-xml", version = "0.3.0" }
+quireink-stardict = { path = "crates/quireink-stardict", version = "0.3.0" }
+quireink-layout = { path = "crates/quireink-layout", version = "0.3.0" }
+quireink-x4 = { path = "crates/quireink-x4", version = "0.3.0" }
 quireink-fat = { path = "crates/quireink-fat" }
-quireink-sdk = { path = "crates/quireink-sdk", version = "0.2.0" }
-quireink-core = { path = "crates/quireink-core", version = "0.2.0" }
-quireink-hyphen = { path = "crates/quireink-hyphen", version = "0.2.0" }
-quireink-image = { path = "crates/quireink-image", version = "0.2.0" }
-quireink-app = { path = "crates/quireink-app", version = "0.2.0" }
-quireink-fs = { path = "crates/quireink-fs", version = "0.2.0" }
-quireink-plugin-diagnostics = { path = "plugins/diagnostics", version = "0.2.0" }
-quireink-plugin-dictionary = { path = "plugins/dictionary", version = "0.2.0" }
-quireink-plugin-menu = { path = "plugins/menu", version = "0.2.0" }
-quireink-plugin-menu-editor = { path = "plugins/menu-editor", version = "0.2.0" }
-quireink-plugin-kosync = { path = "plugins/kosync", version = "0.2.0" }
-quireink-plugin-calibre = { path = "plugins/calibre", version = "0.2.0" }
-quireink-plugin-stats = { path = "plugins/stats", version = "0.2.0" }
-quireink-plugin-file-manager = { path = "plugins/file-manager", version = "0.2.0" }
-quireink-plugin-transfer = { path = "plugins/transfer", version = "0.2.0" }
-quireink-plugin-browser = { path = "plugins/browser", version = "0.2.0" }
-quireink-plugin-opds = { path = "plugins/opds", version = "0.2.0" }
-quireink-plugin-rules = { path = "plugins/rules", version = "0.2.0" }
-quireink-plugin-lock = { path = "plugins/lock", version = "0.2.0" }
-quireink-plugin-profiles = { path = "plugins/profiles", version = "0.2.0" }
-quireink-plugin-keys = { path = "plugins/keys", version = "0.2.0" }
-quireink-plugin-wikipedia = { path = "plugins/wikipedia", version = "0.2.0" }
-quireink-plugin-aids = { path = "plugins/aids", version = "0.2.0" }
-quireink-plugin-vocabulary = { path = "plugins/vocabulary", version = "0.2.0" }
-quireink-plugin-sleep = { path = "plugins/sleep", version = "0.2.0" }
-quireink-plugin-translate = { path = "plugins/translate", version = "0.2.0" }
-quireink-plugin-readwise = { path = "plugins/readwise", version = "0.2.0" }
-quireink-plugin-koreader = { path = "plugins/koreader", version = "0.2.0" }
-quireink-plugin-wallabag = { path = "plugins/wallabag", version = "0.2.0" }
-quireink-plugin-about = { path = "plugins/about", version = "0.2.0" }
-quireink-plugin-news = { path = "plugins/news", version = "0.2.0" }
-quireink-plugin-keyboard = { path = "plugins/keyboard", version = "0.2.0" }
-quireink-plugin-plugin-manager = { path = "plugins/plugin-manager", version = "0.2.0" }
-quireink-plugin-hyphenation = { path = "plugins/hyphenation", version = "0.2.0" }
-quireink-plugin-home = { path = "plugins/home", version = "0.2.0" }
-quireink-plugin-settings = { path = "plugins/settings", version = "0.2.0" }
-quireink-plugin-files = { path = "plugins/files", version = "0.2.0" }
-quireink-plugin-reader = { path = "plugins/reader", version = "0.2.0" }
-quireink-plugin-format-epub = { path = "plugins/format-epub", version = "0.2.0" }
-quireink-plugin-format-txt = { path = "plugins/format-txt", version = "0.2.0" }
-quireink-plugin-format-xtc = { path = "plugins/format-xtc", version = "0.2.0" }
-quireink-plugin-fonts-default = { path = "plugins/fonts-default", version = "0.2.0", default-features = false }
+quireink-sdk = { path = "crates/quireink-sdk", version = "0.3.0" }
+quireink-core = { path = "crates/quireink-core", version = "0.3.0" }
+quireink-hyphen = { path = "crates/quireink-hyphen", version = "0.3.0" }
+quireink-image = { path = "crates/quireink-image", version = "0.3.0" }
+quireink-app = { path = "crates/quireink-app", version = "0.3.0" }
+quireink-fs = { path = "crates/quireink-fs", version = "0.3.0" }
+quireink-plugin-diagnostics = { path = "plugins/diagnostics", version = "0.3.0" }
+quireink-plugin-dictionary = { path = "plugins/dictionary", version = "0.3.0" }
+quireink-plugin-menu = { path = "plugins/menu", version = "0.3.0" }
+quireink-plugin-menu-editor = { path = "plugins/menu-editor", version = "0.3.0" }
+quireink-plugin-kosync = { path = "plugins/kosync", version = "0.3.0" }
+quireink-plugin-calibre = { path = "plugins/calibre", version = "0.3.0" }
+quireink-plugin-stats = { path = "plugins/stats", version = "0.3.0" }
+quireink-plugin-file-manager = { path = "plugins/file-manager", version = "0.3.0" }
+quireink-plugin-transfer = { path = "plugins/transfer", version = "0.3.0" }
+quireink-plugin-browser = { path = "plugins/browser", version = "0.3.0" }
+quireink-plugin-opds = { path = "plugins/opds", version = "0.3.0" }
+quireink-plugin-rules = { path = "plugins/rules", version = "0.3.0" }
+quireink-plugin-lock = { path = "plugins/lock", version = "0.3.0" }
+quireink-plugin-profiles = { path = "plugins/profiles", version = "0.3.0" }
+quireink-plugin-keys = { path = "plugins/keys", version = "0.3.0" }
+quireink-plugin-wikipedia = { path = "plugins/wikipedia", version = "0.3.0" }
+quireink-plugin-aids = { path = "plugins/aids", version = "0.3.0" }
+quireink-plugin-vocabulary = { path = "plugins/vocabulary", version = "0.3.0" }
+quireink-plugin-sleep = { path = "plugins/sleep", version = "0.3.0" }
+quireink-plugin-translate = { path = "plugins/translate", version = "0.3.0" }
+quireink-plugin-readwise = { path = "plugins/readwise", version = "0.3.0" }
+quireink-plugin-koreader = { path = "plugins/koreader", version = "0.3.0" }
+quireink-plugin-wallabag = { path = "plugins/wallabag", version = "0.3.0" }
+quireink-plugin-about = { path = "plugins/about", version = "0.3.0" }
+quireink-plugin-news = { path = "plugins/news", version = "0.3.0" }
+quireink-plugin-keyboard = { path = "plugins/keyboard", version = "0.3.0" }
+quireink-plugin-plugin-manager = { path = "plugins/plugin-manager", version = "0.3.0" }
+quireink-plugin-hyphenation = { path = "plugins/hyphenation", version = "0.3.0" }
+quireink-plugin-home = { path = "plugins/home", version = "0.3.0" }
+quireink-plugin-settings = { path = "plugins/settings", version = "0.3.0" }
+quireink-plugin-files = { path = "plugins/files", version = "0.3.0" }
+quireink-plugin-reader = { path = "plugins/reader", version = "0.3.0" }
+quireink-plugin-format-epub = { path = "plugins/format-epub", version = "0.3.0" }
+quireink-plugin-format-txt = { path = "plugins/format-txt", version = "0.3.0" }
+quireink-plugin-format-xtc = { path = "plugins/format-xtc", version = "0.3.0" }
+quireink-plugin-fonts-default = { path = "plugins/fonts-default", version = "0.3.0", default-features = false }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

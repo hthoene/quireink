@@ -1,0 +1,1 @@
+A home screen arranged like a phone's, gestures as on phones (home, quick panel, back, all tools, pinch for the text size), lists sorted by dragging, rules with conditions, and an optional screen lock with a PIN, a pattern or a password.
