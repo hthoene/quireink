@@ -2057,15 +2057,19 @@ impl Kernel {
             return None;
         }
         let display = self.shared.device.display;
-        let margin = Metrics::new(display.dpi).mm(4) as i32;
+        // Wide at the top and the bottom: on Android the outermost strip is
+        // the system's (its notifications, its home), a swipe begun just
+        // inside it is ours. Narrow at the sides, where pages are tapped.
+        let metrics = Metrics::new(display.dpi);
+        let (across, along) = (metrics.mm(10) as i32, metrics.mm(5) as i32);
         let (w, h) = (i32::from(display.width), i32::from(display.height));
-        let side = if point.y < margin {
+        let side = if point.y < across {
             Direction::Up
-        } else if point.y >= h - margin {
+        } else if point.y >= h - across {
             Direction::Down
-        } else if point.x < margin {
+        } else if point.x < along {
             Direction::Left
-        } else if point.x >= w - margin {
+        } else if point.x >= w - along {
             Direction::Right
         } else {
             return None;

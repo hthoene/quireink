@@ -442,7 +442,7 @@ fn swipes_in_from_the_edges_come_first() {
     swipe(&mut kernel, 100, (45, 88), (45, 30));
     swipe(&mut kernel, 300, (2, 45), (70, 45));
     // The same swipes in the middle of the screen turn pages.
-    swipe(&mut kernel, 500, (45, 70), (45, 20));
+    swipe(&mut kernel, 500, (45, 50), (45, 5));
     // At an edge, a tap is a tap.
     tap(&mut kernel, 700, 88, 45);
     assert_eq!(
@@ -468,7 +468,7 @@ gestures.policy = core.gestures.own
     let mut kernel = Kernel::builder(DEVICE).plugin(plugin).build().unwrap();
     kernel.start(Instant(0));
     // Swipes and taps of the key map do nothing: the tool takes them.
-    swipe(&mut kernel, 100, (45, 70), (45, 20));
+    swipe(&mut kernel, 100, (45, 50), (45, 5));
     tap(&mut kernel, 300, 85, 45);
     assert!(log.borrow().is_empty());
     // From the edge, the second swipe goes home; one alone does not.
