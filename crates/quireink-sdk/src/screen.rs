@@ -83,10 +83,13 @@ pub trait Screen {
         false
     }
 
-    /// Raw pointer samples, offered before gesture recognition. Returning
-    /// [`Handled::Yes`] for a `Down` event captures that pointer: all its
-    /// further samples go here and no gesture is recognized. Drawing and
-    /// handwriting screens use this.
+    /// Raw pointer samples, offered before gesture recognition and before
+    /// swipes in from the edges. Returning [`Handled::Yes`] for a `Down`
+    /// event captures that pointer: all its further samples go here and
+    /// no gesture is recognized. Drawing and handwriting screens use this,
+    /// and grips that move rows ([`ui::Reorder`](crate::ui::Reorder)).
+    /// Take only fingers meant for the screen: one taken at an edge does
+    /// not swipe in from it.
     fn on_pointer(&mut self, event: &PointerEvent, cx: &mut Cx<'_, '_>) -> Handled {
         let _ = (event, cx);
         Handled::No

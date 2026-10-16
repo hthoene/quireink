@@ -150,6 +150,15 @@ const CASES: &[Case] = &[
         colour: 0,
     },
     Case {
+        name: "boox-menu-drag",
+        profile: "boox-go-7",
+        book: None,
+        // The main menu's first entry dragged by its grip to the fourth place.
+        sets: &[],
+        script: "swipe:600:1100:600:500,wait:300,tap-on:Settings,wait:300,                 tap-on:Customise menus,wait:300,tap-on:Main menu,wait:300,                 swipe:1220:159:1220:420,wait:300",
+        colour: 0,
+    },
+    Case {
         name: "kobo-colour-cover",
         profile: "kobo-libra-colour",
         book: Some("books/alice-in-wonderland.epub"),

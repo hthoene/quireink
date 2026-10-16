@@ -8,9 +8,12 @@
 pub mod choice;
 #[path = "items.rs"]
 pub mod items;
+#[path = "reorder.rs"]
+pub mod reorder;
 #[path = "rows.rs"]
 mod rows;
 
+pub use reorder::{Reorder, ReorderStep};
 pub use rows::Rows;
 
 use crate::semantics::Role;

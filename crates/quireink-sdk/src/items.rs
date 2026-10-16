@@ -3,8 +3,9 @@
 //! [`screens::STATUS_ITEMS`](crate::builtin::screens::STATUS_ITEMS) and
 //! [`screens::STATUS_LINES`](crate::builtin::screens::STATUS_LINES). Name
 //! one as the setting's editor ([`SettingSpec::editor`](crate::SettingSpec)):
-//! it lists every item with whether it is shown, and tapping one shows or
-//! hides it (shown items keep the order in which they were chosen).
+//! it lists the items shown, in their order, then the others; tapping one
+//! shows or hides it (a newly shown one goes last), and shown items are
+//! moved by dragging their grip.
 
 use alloc::borrow::Cow;
 use alloc::format;
@@ -13,10 +14,10 @@ use alloc::vec::Vec;
 
 use crate::builtin::{actions, params};
 use crate::status::item_ids;
-use crate::ui::{self, ListChange, ListView, UiStyle};
+use crate::ui::{self, ListChange, ListView, Reorder, ReorderStep, UiStyle};
 use crate::{
-    Canvas, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Params, Rect, RefreshMode, Screen,
-    SettingValue,
+    Canvas, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Params, PointerEvent, Rect,
+    RefreshMode, Screen, SettingValue,
 };
 
 /// The value of [`params::MODE`] that lists status lines, not items.
@@ -30,6 +31,7 @@ pub struct ItemsScreen {
     style: UiStyle,
     header: ui::Header,
     list: ListView,
+    reorder: Reorder,
 }
 
 impl ItemsScreen {
@@ -57,21 +59,50 @@ impl ItemsScreen {
             setting,
             items,
             list: ListView::new(area, style.row).focus_on_keys(env),
+            reorder: Reorder::default(),
             style,
             header,
         }
     }
 
+    /// The items shown, in their order (only those there are).
     fn chosen<'e>(&self, env: &Env<'e>) -> Vec<&'e str> {
         self.setting
             .as_ref()
-            .map(|s| item_ids(env.settings.text(s.as_str())).collect())
+            .map(|s| {
+                item_ids(env.settings.text(s.as_str()))
+                    .filter(|c| self.items.iter().any(|(id, _)| id.as_str() == *c))
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
-    fn toggle(&mut self, index: usize, cx: &mut Cx<'_, '_>) {
+    /// The rows: indexes into the items, the shown ones first.
+    fn order(&self, env: &Env<'_>) -> Vec<usize> {
+        let chosen = self.chosen(env);
+        let at = |c: &str| self.items.iter().position(|(id, _)| id.as_str() == c);
+        let mut order: Vec<usize> = chosen.iter().filter_map(|c| at(c)).collect();
+        let rest: Vec<usize> = (0..self.items.len())
+            .filter(|i| !order.contains(i))
+            .collect();
+        order.extend(rest);
+        order
+    }
+
+    fn keep(&self, chosen: &[&str], cx: &mut Cx<'_, '_>) {
+        if let Some(setting) = &self.setting {
+            cx.command(Command::SetSetting(
+                setting.clone(),
+                SettingValue::Text(Cow::Owned(chosen.join(", "))),
+            ));
+        }
+        cx.request_redraw();
+        cx.request_refresh(RefreshMode::Fast);
+    }
+
+    fn toggle(&mut self, row: usize, cx: &mut Cx<'_, '_>) {
         let env = *cx.env();
-        let (Some(setting), Some((id, _))) = (&self.setting, self.items.get(index)) else {
+        let Some((id, _)) = self.order(&env).get(row).and_then(|&i| self.items.get(i)) else {
             return;
         };
         let mut chosen = self.chosen(&env);
@@ -81,12 +112,7 @@ impl ItemsScreen {
             }
             None => chosen.push(id.as_str()),
         }
-        cx.command(Command::SetSetting(
-            setting.clone(),
-            SettingValue::Text(Cow::Owned(chosen.join(", "))),
-        ));
-        cx.request_redraw();
-        cx.request_refresh(RefreshMode::Fast);
+        self.keep(&chosen, cx);
     }
 }
 
@@ -111,11 +137,18 @@ impl Screen for ItemsScreen {
         self.header
             .draw(canvas, env, &style, &title, None, self.list.paging(len));
         let chosen = self.chosen(env);
+        let order = self.order(env);
         let items = &self.items;
         self.list
-            .draw(canvas, &style, len, |canvas, index, rect, focused| {
-                let (id, name) = &items[index];
+            .draw(canvas, &style, len, |canvas, row, rect, focused| {
+                let (id, name) = &items[order[row]];
                 let on = chosen.iter().position(|c| *c == id.as_str());
+                let rect = if on.is_some() {
+                    Reorder::draw_grip(canvas, env, &style, rect, focused);
+                    Reorder::content(rect)
+                } else {
+                    rect
+                };
                 // Shown items carry their place: "On (2)".
                 let value = match on {
                     Some(at) if chosen.len() > 1 => {
@@ -134,6 +167,28 @@ impl Screen for ItemsScreen {
                     &value,
                 );
             });
+        self.reorder.draw(canvas, &style, &self.list);
+    }
+
+    fn on_pointer(&mut self, event: &PointerEvent, cx: &mut Cx<'_, '_>) -> Handled {
+        let env = *cx.env();
+        let mut chosen = self.chosen(&env);
+        let Some(step) = self.reorder.on_pointer(event, &self.list, chosen.len()) else {
+            return Handled::No;
+        };
+        match step {
+            ReorderStep::Dropped { from, to } if from != to => {
+                ui::reorder::moved(&mut chosen, from, to);
+                self.list.focus = to;
+                self.keep(&chosen, cx);
+            }
+            ReorderStep::Same => {}
+            _ => {
+                cx.request_redraw();
+                cx.request_refresh(RefreshMode::Fast);
+            }
+        }
+        Handled::Yes
     }
 
     fn on_action(&mut self, action: &Id, cx: &mut Cx<'_, '_>) -> Handled {
