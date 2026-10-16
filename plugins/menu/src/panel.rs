@@ -733,16 +733,10 @@ fn draw_head(
 ) {
     let time = quireink_sdk::time::clock_text(env).unwrap_or_default();
     let x = f32::from(area.x);
-    let after = ui::draw_label(canvas, font, style.title, x, area, &time, Color::BLACK);
-    if let Some(now) = quireink_sdk::time::local_time(env) {
-        let date = env.i18n.format(
-            "menu.quick.date",
-            &[
-                ("day", quireink_sdk::Arg::Int(i64::from(now.day))),
-                ("month", quireink_sdk::Arg::Int(i64::from(now.month))),
-            ],
-        );
-        let gap = style.gap as f32;
+    // `draw_label` gives the width drawn.
+    let after = x + ui::draw_label(canvas, font, style.title, x, area, &time, Color::BLACK);
+    if let Some(date) = quireink_sdk::time::date_text(env) {
+        let gap = style.gap as f32 * 1.5;
         ui::draw_label(
             canvas,
             font,
