@@ -209,12 +209,15 @@ pub fn index(env: &Env<'_>, path: &str) -> Book {
     book.size = storage.size(path).unwrap_or_default();
     book.indexed = true;
     if let Ok(document) = env.formats.open(storage, path) {
+        // What the book names; else what its source said ([`provide`]).
         let metadata = document.metadata();
-        book.title = metadata.title.clone();
-        book.author = metadata.authors.first().cloned();
-        book.series = metadata.series.clone();
-        book.series_index = metadata.series_index.clone();
-        book.tags = metadata.subjects.clone();
+        book.title = metadata.title.clone().or(book.title.take());
+        book.author = metadata.authors.first().cloned().or(book.author.take());
+        book.series = metadata.series.clone().or(book.series.take());
+        book.series_index = metadata.series_index.clone().or(book.series_index.take());
+        if !metadata.subjects.is_empty() {
+            book.tags = metadata.subjects.clone();
+        }
         book.cover = document.cover(storage).ok().flatten();
     }
     save(storage, path, &book);
@@ -228,6 +231,35 @@ pub fn indexed(env: &Env<'_>, path: &str) -> Book {
         Some(book) if book.indexed => book,
         _ => index(env, path),
     }
+}
+
+/// What a source knows of a book it brought, e.g. a catalog or Calibre
+/// ([`provide`]).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Provided {
+    pub title: Option<String>,
+    pub author: Option<String>,
+    pub series: Option<String>,
+    pub series_index: Option<String>,
+    pub tags: Vec<String>,
+}
+
+/// Keeps what a source knows of the book at `path`, for books that name
+/// nothing themselves (text files, PDFs): what the book names wins when
+/// it is read ([`index`]).
+pub fn provide(storage: &dyn Storage, path: &str, provided: Provided) {
+    let mut book = book_or_new(storage, path);
+    let some = |s: Option<String>| s.filter(|s| !s.trim().is_empty());
+    book.title = some(provided.title).or(book.title);
+    book.author = some(provided.author).or(book.author);
+    book.series = some(provided.series).or(book.series);
+    book.series_index = some(provided.series_index).or(book.series_index);
+    if !provided.tags.is_empty() {
+        book.tags = provided.tags;
+    }
+    // Read from the book anew, keeping this where it names nothing.
+    book.indexed = false;
+    save(storage, path, &book);
 }
 
 /// Sets field `id` of the book at `path` (a plugin's, e.g.
@@ -376,6 +408,25 @@ mod tests {
         // Replaced by a file of another size: forgotten.
         let storage = storage.with("books/a.txt", "hello!");
         assert_eq!(super::book(&storage, "books/a.txt"), None);
+    }
+
+    #[test]
+    fn what_sources_provide_is_kept() {
+        let storage = MemoryStorage::new().with("books/a.txt", "hello");
+        provide(
+            &storage,
+            "books/a.txt",
+            Provided {
+                title: Some("Alice".into()),
+                author: Some("Lewis Carroll".into()),
+                tags: alloc::vec!["Classics".into()],
+                ..Provided::default()
+            },
+        );
+        let book = super::book(&storage, "books/a.txt").unwrap();
+        assert_eq!(book.title.as_deref(), Some("Alice"));
+        assert_eq!(book.tags, ["Classics"]);
+        assert!(!book.indexed);
     }
 
     #[test]

@@ -3,10 +3,12 @@
 **A lean, fast and endlessly customisable e-reader for e-ink devices, from a
 380 KB microcontroller to Linux and Android e-readers, from one codebase.**
 
-> **Status: first release (0.1).** QuireInk runs on Android e-readers
+> **Status: early releases (0.2).** QuireInk runs on Android e-readers
 > (tested on a Boox Go 7) and in the desktop emulator: EPUB, FB2,
-> Markdown, text, comics and PDF, sync with KOReader, OPDS catalogs and
-> much more; see the [changelog](CHANGELOG.md). The firmware for the
+> Markdown, text, comics and PDF, colour pictures on colour screens,
+> reading positions, bookmarks and highlights shared with KOReader,
+> Calibre's wireless connection, OPDS catalogs and much more; see the
+> [changelog](CHANGELOG.md). The firmware for the
 > Xteink X4 is built but has not run on a device yet. The
 > [project plan](docs/PLANNING.md) has the
 > [roadmap](docs/PLANNING.md#12-roadmap).
