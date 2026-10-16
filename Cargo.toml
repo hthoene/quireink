@@ -35,6 +35,7 @@ members = [
     "plugins/menu",
     "plugins/menu-editor",
     "plugins/kosync",
+    "plugins/calibre",
     "plugins/stats",
     "plugins/file-manager",
     "plugins/transfer",
@@ -98,6 +99,7 @@ quireink-plugin-dictionary = { path = "plugins/dictionary", version = "0.1.1" }
 quireink-plugin-menu = { path = "plugins/menu", version = "0.1.1" }
 quireink-plugin-menu-editor = { path = "plugins/menu-editor", version = "0.1.1" }
 quireink-plugin-kosync = { path = "plugins/kosync", version = "0.1.1" }
+quireink-plugin-calibre = { path = "plugins/calibre", version = "0.1.1" }
 quireink-plugin-stats = { path = "plugins/stats", version = "0.1.1" }
 quireink-plugin-file-manager = { path = "plugins/file-manager", version = "0.1.1" }
 quireink-plugin-transfer = { path = "plugins/transfer", version = "0.1.1" }

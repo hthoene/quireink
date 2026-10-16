@@ -1,6 +1,6 @@
 //! The little JSON web services answer with: flat objects of strings and
 //! numbers (e.g. a sync server's, an encyclopedia's summary). Nested
-//! values are skipped.
+//! values are skipped, or taken as they are written ([`raw_member`]).
 
 pub mod stream;
 
@@ -54,6 +54,125 @@ pub fn string(text: &str) -> String {
     }
     out.push('"');
     out
+}
+
+/// The JSON text of member `key` of the object `text`, as it is written
+/// (nested objects and arrays whole), e.g. to keep a value as it came.
+pub fn raw_member<'a>(text: &'a str, key: &str) -> Option<&'a str> {
+    let bytes = text.as_bytes();
+    let mut i = skip_space(bytes, 0);
+    if bytes.get(i) != Some(&b'{') {
+        return None;
+    }
+    i += 1;
+    loop {
+        i = skip_space(bytes, i);
+        if bytes.get(i) != Some(&b'"') {
+            return None;
+        }
+        let name_end = string_end(bytes, i)?;
+        let name = unquote(&text[i..name_end])?;
+        i = skip_space(bytes, name_end);
+        if bytes.get(i) != Some(&b':') {
+            return None;
+        }
+        let start = skip_space(bytes, i + 1);
+        let end = value_end(bytes, start)?;
+        if name == key {
+            return Some(text[start..end].trim_end());
+        }
+        i = skip_space(bytes, end);
+        match bytes.get(i) {
+            Some(b',') => i += 1,
+            _ => return None,
+        }
+    }
+}
+
+/// The string a JSON string literal (with its quotes) stands for.
+pub fn unquote(literal: &str) -> Option<String> {
+    Parser(literal.trim().chars().peekable()).string()
+}
+
+/// The strings of a JSON array literal; other items are left out.
+pub fn string_array(literal: &str) -> Vec<String> {
+    let bytes = literal.as_bytes();
+    let mut i = skip_space(bytes, 0);
+    let mut out = Vec::new();
+    if bytes.get(i) != Some(&b'[') {
+        return out;
+    }
+    i += 1;
+    loop {
+        i = skip_space(bytes, i);
+        let Some(end) = value_end(bytes, i).filter(|&end| end > i) else {
+            return out;
+        };
+        if let Some(text) = unquote(&literal[i..end]) {
+            out.push(text);
+        }
+        i = skip_space(bytes, end);
+        match bytes.get(i) {
+            Some(b',') => i += 1,
+            _ => return out,
+        }
+    }
+}
+
+fn skip_space(bytes: &[u8], mut i: usize) -> usize {
+    while bytes.get(i).is_some_and(u8::is_ascii_whitespace) {
+        i += 1;
+    }
+    i
+}
+
+/// Where the string whose `"` is at `i` ends, after its closing `"`.
+fn string_end(bytes: &[u8], i: usize) -> Option<usize> {
+    let mut j = i + 1;
+    while j < bytes.len() {
+        match bytes[j] {
+            b'\\' => j += 2,
+            b'"' => return Some(j + 1),
+            _ => j += 1,
+        }
+    }
+    None
+}
+
+/// Where the value starting at `i` ends.
+fn value_end(bytes: &[u8], i: usize) -> Option<usize> {
+    match bytes.get(i)? {
+        b'"' => string_end(bytes, i),
+        b'{' | b'[' => {
+            let mut depth = 0usize;
+            let mut j = i;
+            while j < bytes.len() {
+                match bytes[j] {
+                    b'"' => {
+                        j = string_end(bytes, j)?;
+                        continue;
+                    }
+                    b'{' | b'[' => depth += 1,
+                    b'}' | b']' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            return Some(j + 1);
+                        }
+                    }
+                    _ => {}
+                }
+                j += 1;
+            }
+            None
+        }
+        _ => {
+            let mut j = i;
+            while j < bytes.len() && !matches!(bytes[j], b',' | b'}' | b']') {
+                j += 1;
+            }
+            Some(j)
+        }
+    }
 }
 
 struct Parser<'a>(core::iter::Peekable<core::str::Chars<'a>>);
@@ -207,6 +326,28 @@ mod tests {
         assert_eq!(text(&o, "missing"), None);
         assert!(object("{}").is_empty());
         assert!(object("not json").is_empty());
+    }
+
+    #[test]
+    fn raw_members_whole() {
+        let o = r#"{"lpath": "A \"B\".epub", "n": 12 , "meta": {"t": "x}", "a": ["y", {"z": "]"}]},
+            "list": ["one", 2, "tw\u00f6"], "last": true}"#;
+        assert_eq!(raw_member(o, "n"), Some("12"));
+        assert_eq!(
+            raw_member(o, "lpath").and_then(unquote).as_deref(),
+            Some("A \"B\".epub")
+        );
+        let meta = raw_member(o, "meta").unwrap();
+        assert!(meta.starts_with('{') && meta.ends_with('}'));
+        assert_eq!(
+            raw_member(meta, "t").and_then(unquote).as_deref(),
+            Some("x}")
+        );
+        assert_eq!(string_array(raw_member(o, "list").unwrap()), ["one", "twö"]);
+        assert_eq!(raw_member(o, "last"), Some("true"));
+        assert_eq!(raw_member(o, "missing"), None);
+        assert_eq!(raw_member("[1]", "x"), None);
+        assert!(string_array("{}").is_empty());
     }
 
     #[test]
