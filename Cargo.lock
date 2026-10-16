@@ -1272,6 +1272,7 @@ dependencies = [
  "quireink-plugin-hyphenation",
  "quireink-plugin-keyboard",
  "quireink-plugin-keys",
+ "quireink-plugin-koreader",
  "quireink-plugin-kosync",
  "quireink-plugin-menu",
  "quireink-plugin-menu-editor",
@@ -1525,6 +1526,16 @@ version = "0.1.1"
 dependencies = [
  "quireink-i18n",
  "quireink-sdk",
+]
+
+[[package]]
+name = "quireink-plugin-koreader"
+version = "0.1.1"
+dependencies = [
+ "quireink-i18n",
+ "quireink-plugin-format-epub",
+ "quireink-sdk",
+ "quireink-zip",
 ]
 
 [[package]]

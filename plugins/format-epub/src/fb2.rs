@@ -411,6 +411,7 @@ impl Fb2Document {
             anchors: format!("{cache}/0.anc"),
             links: format!("{cache}/0.lnk"),
             positions: format!("{cache}/0.pos"),
+            xpointers: format!("{cache}/0.xpt"),
             end: format!("{cache}/0.end"),
         };
         // Read again when the file or the way it is read changed.

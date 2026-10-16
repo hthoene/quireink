@@ -630,6 +630,7 @@ fn book_moved(env: &Env<'_>, params: &Params, _: &mut Vec<Command>) {
     let _ = env
         .storage
         .rename(&screen::book_dir(from), &screen::book_dir(to));
+    quireink_sdk::annotations::moved(env.storage, from, to);
     if last_book(env).as_deref() == Some(from) {
         screen::remember_last(env.storage, to);
     }

@@ -220,9 +220,12 @@ mod tests {
 
     #[test]
     fn positions_as_koreader_writes_them() {
+        // Text nodes and their characters as crengine keeps them: white
+        // space folded, white space alone at the start of a block dropped.
         let ch2 = String::from(
-            "<html><body><div><p>Eins</p><p>Zwei <b>fett</b></p></div>\
-             <div><h2>Titel</h2><p>Drei</p></div></body></html>",
+            "<html><body><div><p>Eins</p><p>Zwei <b>fett</b> und  mehr</p></div>\n\
+             <div><h2>Titel</h2><p>Drei &amp; vier\n   f\u{fc}nf</p><p>\n  Hallo</p>\
+             <p>\n<em>x</em> y</p></div></body></html>",
         );
         let storage = epub(ch2);
         let doc = EpubDocument::open(&storage, "books/test.epub").unwrap();
@@ -235,27 +238,82 @@ mod tests {
             }
             starts
         };
-        let xp = |offset| doc.xpointer(&storage, Locator::new(1, offset)).unwrap();
-        assert_eq!(xp(blocks[0]), "/body/DocFragment[2]/body/div[1]/p[1]");
-        assert_eq!(xp(blocks[1] + 2), "/body/DocFragment[2]/body/div[1]/p[2]");
-        assert_eq!(xp(blocks[3]), "/body/DocFragment[2]/body/div[2]/p[1]");
-        let at = |x: &str| {
-            doc.locate_xpointer(&storage, x)
-                .map(|l| (l.section, l.offset))
+        let xp = |offset| {
+            let x = doc.xpointer(&storage, Locator::new(1, offset)).unwrap();
+            String::from(x.strip_prefix("/body/DocFragment[2]/body/").unwrap())
         };
-        // KOReader leaves out [1] and points into text.
+        assert_eq!(xp(blocks[0]), "div[1]/p[1]/text()[1].0");
+        // "Zwei fett und mehr"
+        assert_eq!(xp(blocks[1] + 2), "div[1]/p[2]/text()[1].2");
+        assert_eq!(xp(blocks[1] + 5), "div[1]/p[2]/b[1]/text()[1].0");
+        assert_eq!(xp(blocks[1] + 9), "div[1]/p[2]/text()[2].0");
+        assert_eq!(xp(blocks[1] + 14), "div[1]/p[2]/text()[2].5");
+        assert_eq!(xp(blocks[2]), "div[2]/h2[1]/text()[1].0");
+        // "Drei & vier fünf": characters, not bytes.
+        assert_eq!(xp(blocks[3] + 12), "div[2]/p[1]/text()[1].12");
+        assert_eq!(xp(blocks[3] + 15), "div[2]/p[1]/text()[1].14");
+        // The folded space before "Hallo" is in the node.
+        assert_eq!(xp(blocks[4]), "div[2]/p[2]/text()[1].1");
+        // The line break alone before <em> is no node.
+        assert_eq!(xp(blocks[5]), "div[2]/p[3]/em[1]/text()[1].0");
+        assert_eq!(xp(blocks[5] + 2), "div[2]/p[3]/text()[1].1");
+
+        let at = |x: &str| {
+            doc.locate_xpointer(&storage, &alloc::format!("/body/DocFragment[2]/body/{x}"))
+                .map(|l| l.offset)
+        };
+        // Back again, also as KOReader writes them without [1].
+        for (i, offset) in [
+            (0, 0),
+            (1, 2),
+            (1, 5),
+            (1, 9),
+            (1, 14),
+            (3, 15),
+            (4, 0),
+            (5, 2),
+        ] {
+            let x = xp(blocks[i] + offset);
+            assert_eq!(at(&x), Some(blocks[i] + offset), "{x}");
+        }
+        assert_eq!(at("div/p[2]/text()[2].5"), Some(blocks[1] + 14));
+        assert_eq!(at("div[1]/p[2]/b/text().1"), Some(blocks[1] + 6));
+        // Elements, and text QuireInk does not show: the block.
+        assert_eq!(at("div[2]"), Some(blocks[2]));
+        assert_eq!(at("div[2]/p[2]/text().0"), Some(blocks[4]));
+        assert_eq!(at("div[1]/p[2]/b"), Some(blocks[1]));
         assert_eq!(
-            at("/body/DocFragment[2]/body/div/p[2]/text().3"),
-            Some((1, blocks[1]))
+            doc.locate_xpointer(&storage, "/body/DocFragment[9]/body/p"),
+            None
         );
-        assert_eq!(at("/body/DocFragment[2]/body/div[2]"), Some((1, blocks[2])));
-        // Deeper than blocks: the block containing it.
+        assert_eq!(doc.locate_xpointer(&storage, "nonsense"), None);
+    }
+
+    #[test]
+    fn positions_go_on_in_split_paragraphs() {
+        let words = "wort ".repeat(1500);
+        let ch2 = alloc::format!("<html><body><p>{words}</p></body></html>");
+        let storage = epub(ch2);
+        let doc = EpubDocument::open(&storage, "books/test.epub").unwrap();
+        let first = doc.block_at(&storage, Locator::new(1, 0)).unwrap().unwrap();
+        let second = doc
+            .block_at(&storage, Locator::new(1, first.end))
+            .unwrap()
+            .unwrap();
+        // The second block goes on after the first's text and the space
+        // it was split at.
+        let char = first.text.chars().count() + 1;
+        let x = doc
+            .xpointer(&storage, Locator::new(1, second.start + 3))
+            .unwrap();
         assert_eq!(
-            at("/body/DocFragment[2]/body/div[1]/p[2]/b/text().1"),
-            Some((1, blocks[1]))
+            x,
+            alloc::format!("/body/DocFragment[2]/body/p[1]/text()[1].{}", char + 3)
         );
-        assert_eq!(at("/body/DocFragment[9]/body/p"), None);
-        assert_eq!(at("nonsense"), None);
+        assert_eq!(
+            doc.locate_xpointer(&storage, &x),
+            Some(Locator::new(1, second.start + 3))
+        );
     }
 
     #[test]

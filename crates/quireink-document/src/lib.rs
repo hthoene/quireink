@@ -502,16 +502,19 @@ pub trait Document {
     }
 
     /// Position `at` as other readers write it, to sync reading positions
-    /// with them: for EPUB, KOReader's XPointer to the paragraph (e.g.
-    /// `/body/DocFragment[3]/body/div[2]/p[5]`). `None` where the format
-    /// has no such positions.
+    /// and highlights with them: for EPUB, KOReader's XPointer, down to the
+    /// character where `at` is in text (e.g.
+    /// `/body/DocFragment[3]/body/div[2]/p[5]/text()[1].12`), else to the
+    /// element (`/body/DocFragment[3]/body/div[2]/p[5]`). `None` where the
+    /// format has no such positions.
     fn xpointer(&self, storage: &dyn Storage, at: Locator) -> Option<String> {
         let _ = (storage, at);
         None
     }
 
-    /// The position of an XPointer (see [`Document::xpointer`]), to the
-    /// precision of a paragraph; `None` if it does not fit the document.
+    /// The position of an XPointer (see [`Document::xpointer`]), down to
+    /// the character where it points into text the document shows, else
+    /// to the paragraph; `None` if it does not fit the document.
     fn locate_xpointer(&self, storage: &dyn Storage, xpointer: &str) -> Option<Locator> {
         let _ = (storage, xpointer);
         None
