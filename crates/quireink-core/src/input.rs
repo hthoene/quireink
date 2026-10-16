@@ -38,6 +38,8 @@ struct TrackedPointer {
     tool: PointerTool,
     moved: bool,
     long_fired: bool,
+    /// Lifted as part of two fingers: no tap or swipe of its own.
+    paired: bool,
 }
 
 #[derive(Debug, Default)]
@@ -95,6 +97,7 @@ impl Recognizer {
                     tool: event.tool,
                     moved: false,
                     long_fired: false,
+                    paired: false,
                 });
                 None
             }
@@ -112,8 +115,28 @@ impl Recognizer {
                 if distance(pointer.start, event.point) > thresholds.tap_slop {
                     pointer.moved = true;
                 }
-                if pointer.long_fired {
+                if pointer.long_fired || pointer.paired {
                     return None;
+                }
+                // Two fingers: a pinch if they moved apart or together;
+                // the other one then makes no gesture of its own.
+                if let Some(other) = self.pointers.iter_mut().find(|p| !p.paired) {
+                    other.paired = true;
+                    let before = distance(pointer.start, other.start).max(1);
+                    let now = distance(pointer.last, other.last);
+                    let kind = if now * 4 >= before * 5 {
+                        GestureKind::Pinch { out: true }
+                    } else if now * 5 <= before * 4 {
+                        GestureKind::Pinch { out: false }
+                    } else {
+                        return None;
+                    };
+                    return Some(Recognized::Gesture(Gesture {
+                        kind,
+                        start: pointer.start,
+                        end: pointer.last,
+                        tool: pointer.tool,
+                    }));
                 }
                 let kind = if !pointer.moved {
                     GestureKind::Tap
@@ -140,6 +163,8 @@ impl Recognizer {
     /// Fires long presses that are due at `now`.
     pub(crate) fn tick(&mut self, now: Instant, thresholds: &Thresholds) -> Vec<Recognized> {
         let mut fired = Vec::new();
+        // Two fingers down: no long press, maybe a pinch.
+        let together = self.pointers.len() > 1;
         for button in &mut self.buttons {
             if !button.long_fired && now.since(button.since) >= thresholds.long_press_ms {
                 button.long_fired = true;
@@ -152,6 +177,7 @@ impl Recognizer {
         for pointer in &mut self.pointers {
             if !pointer.long_fired
                 && !pointer.moved
+                && !together
                 && now.since(pointer.since) >= thresholds.long_press_ms
             {
                 pointer.long_fired = true;
@@ -305,6 +331,74 @@ mod tests {
         ));
         assert_eq!(
             r.pointer(&pointer(PointerPhase::Up, 10, 10), Instant(700), &T),
+            None
+        );
+    }
+
+    fn finger(id: u8, phase: PointerPhase, x: i32, y: i32) -> PointerEvent {
+        PointerEvent {
+            id,
+            ..pointer(phase, x, y)
+        }
+    }
+
+    #[test]
+    fn two_fingers_pinch() {
+        let mut r = Recognizer::default();
+        for (out, from, to) in [(false, 40, 10), (true, 10, 40)] {
+            r.pointer(
+                &finger(1, PointerPhase::Down, 200 - from, 300),
+                Instant(0),
+                &T,
+            );
+            r.pointer(
+                &finger(2, PointerPhase::Down, 200 + from, 300),
+                Instant(10),
+                &T,
+            );
+            // Held long, but two fingers make no long press.
+            assert!(r.tick(Instant(600), &T).is_empty());
+            r.pointer(
+                &finger(1, PointerPhase::Move, 200 - to, 300),
+                Instant(700),
+                &T,
+            );
+            r.pointer(
+                &finger(2, PointerPhase::Move, 200 + to, 300),
+                Instant(700),
+                &T,
+            );
+            let pinch = r.pointer(
+                &finger(1, PointerPhase::Up, 200 - to, 300),
+                Instant(750),
+                &T,
+            );
+            assert!(matches!(
+                pinch,
+                Some(Recognized::Gesture(Gesture {
+                    kind: GestureKind::Pinch { out: o },
+                    ..
+                })) if o == out
+            ));
+            // The second finger makes nothing of its own.
+            assert_eq!(
+                r.pointer(
+                    &finger(2, PointerPhase::Up, 200 + to, 300),
+                    Instant(760),
+                    &T
+                ),
+                None
+            );
+        }
+        // Two fingers that barely moved: nothing.
+        r.pointer(&finger(1, PointerPhase::Down, 100, 300), Instant(0), &T);
+        r.pointer(&finger(2, PointerPhase::Down, 300, 300), Instant(0), &T);
+        assert_eq!(
+            r.pointer(&finger(1, PointerPhase::Up, 102, 300), Instant(80), &T),
+            None
+        );
+        assert_eq!(
+            r.pointer(&finger(2, PointerPhase::Up, 300, 300), Instant(90), &T),
             None
         );
     }

@@ -2172,6 +2172,7 @@ impl Kernel {
                     GestureKind::Tap => InputKey::Tap(zone),
                     GestureKind::LongPress => InputKey::LongTap(zone),
                     GestureKind::Swipe(direction) => InputKey::Swipe(direction),
+                    GestureKind::Pinch { out } => InputKey::Pinch(out),
                     _ => return,
                 };
                 self.route_key(key);

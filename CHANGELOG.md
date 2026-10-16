@@ -24,6 +24,13 @@ change the plugin SDK.
   what it holds. *Refresh the screen* (`core.refresh-screen`) clears
   e-ink ghosting with a full refresh, from the quick panel or any button
   or gesture it is bound to. Swipes in from the edges come before the screen sees them.
+- More gestures as on phones: up on the home screen shows every tool at
+  once (*All tools*, `home.all-tools`), down on it searches the library,
+  and two fingers apart or together make the text larger or smaller
+  while reading (`pinch.out`, `pinch.in`, in a section *Two fingers* of
+  *Buttons and gestures*). The first home screen on a touch screen
+  explains the gestures once (*Hint on the gestures* under Appearance
+  shows it again).
 - Gestures per tool: as standard, the tool's own (gestures go to it, a
   swipe in from an edge needs a second one: for games and drawing) or
   off. A tool sets its default (`gestures.policy` in its key map); the
