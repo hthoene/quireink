@@ -159,6 +159,15 @@ const CASES: &[Case] = &[
         colour: 0,
     },
     Case {
+        name: "boox-lock-pin",
+        profile: "boox-go-7",
+        book: None,
+        // Setting up a screen lock: the keypad for a new PIN.
+        sets: &[],
+        script: "swipe:600:1100:600:500,wait:300,tap-on:Settings,wait:300,                 tap-on:System,wait:300,tap-on:Screen lock,wait:300,tap-on:PIN,wait:300",
+        colour: 0,
+    },
+    Case {
         name: "kobo-colour-cover",
         profile: "kobo-libra-colour",
         book: Some("books/alice-in-wonderland.epub"),

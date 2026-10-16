@@ -6,6 +6,12 @@ change the plugin SDK.
 
 ## [Unreleased]
 
+- Screen lock (off by default): a PIN, a pattern or a password asked for
+  when QuireInk starts and when the device wakes up, set under System ›
+  *Screen lock*. The code is kept only as a salted hash. Locked, nothing
+  else can be used; after five wrong tries the next one waits half a
+  minute. *Lock now* locks at once from any button, gesture or rule.
+- `Canvas::draw_line`.
 - Plugin SDK: input filters (`Registrar::add_input_filter`) see every
   button and finger before screens and key maps do, and may take it or
   run an action instead; refresh filters (`Registrar::add_refresh_filter`)
@@ -22,6 +28,7 @@ change the plugin SDK.
   reading or while not, only on battery or while charging, only while a
   switch is on or off (hold a rule, *Only if …*). They can also set a
   number (e.g. the light to 20) and show a message.
+
 - Drag and drop in lists, as on phones: entries of menus (*Customise
   menus*), the widgets of the sleep screen and the items of status lines
   carry a grip (≡) at their end; drag it to move the row, a bar shows

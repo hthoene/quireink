@@ -1274,6 +1274,7 @@ dependencies = [
  "quireink-plugin-keys",
  "quireink-plugin-koreader",
  "quireink-plugin-kosync",
+ "quireink-plugin-lock",
  "quireink-plugin-menu",
  "quireink-plugin-menu-editor",
  "quireink-plugin-news",
@@ -1540,6 +1541,14 @@ dependencies = [
 
 [[package]]
 name = "quireink-plugin-kosync"
+version = "0.2.0"
+dependencies = [
+ "quireink-i18n",
+ "quireink-sdk",
+]
+
+[[package]]
+name = "quireink-plugin-lock"
 version = "0.2.0"
 dependencies = [
  "quireink-i18n",
