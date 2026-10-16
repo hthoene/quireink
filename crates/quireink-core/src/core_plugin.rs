@@ -220,6 +220,24 @@ impl Plugin for CorePlugin {
             // Lowest possible priority: any real screen wins.
             r.bind_slot(id, screens::PLACEHOLDER, Priority(i16::MIN))?;
         }
+        // Choosing the items or lines of a status line, for any setting.
+        r.add_screen(ScreenSpec {
+            id: screens::STATUS_ITEMS,
+            title: Cow::Borrowed("core.status.choose"),
+            factory: Box::new(|env, params| {
+                Box::new(quireink_sdk::ui::items::ItemsScreen::open(env, params))
+            }),
+        })?;
+        r.add_screen(ScreenSpec {
+            id: screens::STATUS_LINES,
+            title: Cow::Borrowed("core.status.choose"),
+            factory: Box::new(|env, params| {
+                let params = params
+                    .clone()
+                    .with(params::MODE, quireink_sdk::ui::items::LINES);
+                Box::new(quireink_sdk::ui::items::ItemsScreen::open(env, &params))
+            }),
+        })?;
         r.add_screen(ScreenSpec {
             id: screens::PLACEHOLDER,
             title: Cow::Borrowed("core.screen.placeholder"),
@@ -339,6 +357,23 @@ impl Plugin for CorePlugin {
             .description("core.setting.speak-focus.help"),
         )?;
         r.set_menu_need(settings::SPEAK_FOCUS, quireink_sdk::MenuNeed::Speech)?;
+        for (id, title, default, max) in [
+            (settings::EDGE_ENDS, "core.setting.edge-ends", 10, 25),
+            (settings::EDGE_SIDES, "core.setting.edge-sides", 5, 25),
+        ] {
+            r.add_setting(
+                SettingSpec::new(
+                    id.clone(),
+                    title,
+                    SettingKind::Int { min: 0, max },
+                    SettingValue::Int(default),
+                )
+                .group(groups::CONTROLS)
+                .unit("core.unit.mm")
+                .advanced()
+                .description("core.setting.edge.help"),
+            )?;
+        }
         r.add_setting(
             SettingSpec::new(
                 settings::UI_SIZE,
@@ -620,6 +655,11 @@ impl Plugin for CorePlugin {
             id: status_items::CLOCK,
             title: Cow::Borrowed("core.status.clock"),
             value: Box::new(|env, _| time::clock_text(env).map(StatusValue::Text)),
+        })?;
+        r.add_status_item(StatusItemSpec {
+            id: status_items::DATE,
+            title: Cow::Borrowed("core.status.date"),
+            value: Box::new(|env, _| time::date_text(env).map(StatusValue::Text)),
         })?;
         r.add_status_item(StatusItemSpec {
             id: status_items::BATTERY,

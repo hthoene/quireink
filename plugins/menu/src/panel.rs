@@ -229,7 +229,14 @@ impl PanelScreen {
             rows.len().max(1)
         };
         // Hanging from the top, the time, the date and the battery first.
-        let head = if top { row_height } else { 0 };
+        let head = if top {
+            let size = env
+                .metrics
+                .pt(env.settings.int(QUICK_SIZE.as_str()).clamp(6, 24) as f32);
+            (size * 1.6) as u16 + style.gap as u16
+        } else {
+            0
+        };
         let height = border + 2 * gap + head + row_height * per_page as u16 + bar;
         let region = if top {
             Rect::new(0, 0, width, height)
@@ -722,38 +729,36 @@ impl Screen for PanelScreen {
     }
 }
 
-/// The quick panel's head: the time and the date at the left, the
-/// battery at the right.
+/// The quick panel's head: a status line of the items chosen for its
+/// left, centre and right ([`QUICK_PARTS`]), as large as set.
 fn draw_head(
     canvas: &mut Canvas<'_>,
     env: &Env<'_>,
-    style: &UiStyle,
+    _: &UiStyle,
     font: &quireink_sdk::FontHandle<'_>,
     area: Rect,
 ) {
-    let time = quireink_sdk::time::clock_text(env).unwrap_or_default();
-    let x = f32::from(area.x);
-    // `draw_label` gives the width drawn.
-    let after = x + ui::draw_label(canvas, font, style.title, x, area, &time, Color::BLACK);
-    if let Some(date) = quireink_sdk::time::date_text(env) {
-        let gap = style.gap as f32 * 1.5;
-        ui::draw_label(
-            canvas,
-            font,
-            style.text,
-            after + gap,
-            area,
-            &date,
-            style.faint(80),
-        );
-    }
-    if let Some(battery) = env.status.battery {
-        let text = alloc::format!("{} %", battery.percent);
-        let w = font.measure(style.text, &text);
-        let x = f32::from(area.x + area.width) - w;
-        ui::draw_label(canvas, font, style.text, x, area, &text, Color::BLACK);
-    }
+    let lists = QUICK_PARTS.map(|id| env.settings.text(id.as_str()));
+    let line = quireink_sdk::status::StatusLine {
+        area,
+        lists,
+        size: env
+            .metrics
+            .pt(env.settings.int(QUICK_SIZE.as_str()).clamp(6, 24) as f32),
+        color: Color::BLACK,
+        percent: true,
+    };
+    line.draw(canvas, env, font, &Params::new());
 }
+
+/// What the quick panel's head shows at its left, centre and right.
+pub(crate) const QUICK_PARTS: [Id; 3] = [
+    Id::new_static("menu.quick.left"),
+    Id::new_static("menu.quick.center"),
+    Id::new_static("menu.quick.right"),
+];
+/// The size of the quick panel's head, in points.
+pub(crate) const QUICK_SIZE: Id = Id::new_static("menu.quick.size");
 
 #[cfg(test)]
 mod slider_tests {

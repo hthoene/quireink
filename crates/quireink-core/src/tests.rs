@@ -456,6 +456,74 @@ fn swipes_in_from_the_edges_come_first() {
     );
 }
 
+/// A screen that holds the edges for itself, taking every finger.
+struct EdgeHolder {
+    log: Log,
+}
+
+impl Screen for EdgeHolder {
+    fn draw(&mut self, _: &mut Canvas<'_>, _: &Env<'_>) {}
+
+    fn on_action(&mut self, action: &Id, _: &mut Cx<'_, '_>) -> Handled {
+        self.log
+            .borrow_mut()
+            .push(alloc::format!("holder:{action}"));
+        Handled::Yes
+    }
+
+    fn holds_edges(&self) -> bool {
+        true
+    }
+
+    fn on_pointer(&mut self, event: &PointerEvent, _: &mut Cx<'_, '_>) -> Handled {
+        if event.phase == PointerPhase::Down {
+            self.log.borrow_mut().push(String::from("holder:down"));
+        }
+        Handled::Yes
+    }
+}
+
+struct EdgeHolderPlugin(Log);
+
+impl Plugin for EdgeHolderPlugin {
+    fn manifest(&self) -> Manifest {
+        Manifest {
+            id: Id::new_static("holder"),
+            name: Cow::Borrowed("Holder"),
+            description: Cow::Borrowed(""),
+            version: Version::new(1, 0, 0),
+            sdk: SDK_VERSION,
+        }
+    }
+
+    fn register(&self, r: &mut dyn Registrar) -> Result<(), RegisterError> {
+        let log = self.0.clone();
+        r.add_screen(ScreenSpec {
+            id: Id::new_static("holder.screen"),
+            title: Cow::Borrowed("holder"),
+            factory: Box::new(move |_, _| Box::new(EdgeHolder { log: log.clone() })),
+        })?;
+        r.bind_slot(
+            slots::HOME,
+            Id::new_static("holder.screen"),
+            Priority::DEFAULT,
+        )
+    }
+}
+
+#[test]
+fn screens_may_hold_the_edges() {
+    let log = log();
+    let mut kernel = Kernel::builder(DEVICE)
+        .plugin(EdgeHolderPlugin(log.clone()))
+        .build()
+        .unwrap();
+    kernel.start(Instant(0));
+    // The finger at the edge is the screen's: no going home.
+    swipe(&mut kernel, 100, (45, 88), (45, 30));
+    assert_eq!(*log.borrow(), ["holder:down"]);
+}
+
 #[test]
 fn tools_with_their_own_gestures_need_a_second_swipe() {
     let log = log();

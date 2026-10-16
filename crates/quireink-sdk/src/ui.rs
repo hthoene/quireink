@@ -6,6 +6,8 @@
 
 #[path = "choice.rs"]
 pub mod choice;
+#[path = "items.rs"]
+pub mod items;
 #[path = "rows.rs"]
 mod rows;
 

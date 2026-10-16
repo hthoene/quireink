@@ -890,6 +890,12 @@ impl Screen for Dashboard {
         Handled::Yes
     }
 
+    /// While editing, the edges are the grid's: items at them are dragged
+    /// and sized, not the screen left.
+    fn holds_edges(&self) -> bool {
+        self.edit.is_some()
+    }
+
     /// While editing, a finger on an item drags it (by its corner: sizes
     /// it); lifted where it was, it offers the item's options.
     fn on_pointer(&mut self, event: &PointerEvent, cx: &mut Cx<'_, '_>) -> Handled {

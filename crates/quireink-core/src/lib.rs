@@ -2053,7 +2053,12 @@ impl Kernel {
     /// The edge a finger coming down at `point` may swipe in from: one
     /// with something bound, where the screen lets edges apply.
     fn edge_at(&self, point: Point) -> Option<Direction> {
-        if self.policy() == keymap::Policy::Off {
+        if self.policy() == keymap::Policy::Off
+            || self
+                .stack
+                .last()
+                .is_some_and(|top| top.screen.holds_edges())
+        {
             return None;
         }
         let display = self.shared.device.display;
@@ -2061,7 +2066,14 @@ impl Kernel {
         // the system's (its notifications, its home), a swipe begun just
         // inside it is ours. Narrow at the sides, where pages are tapped.
         let metrics = Metrics::new(display.dpi);
-        let (across, along) = (metrics.mm(10) as i32, metrics.mm(5) as i32);
+        let mm = |id: &Id| {
+            let value = self.shared.settings.int(id.as_str()).clamp(0, 50) as u32;
+            metrics.mm(value) as i32
+        };
+        let (across, along) = (
+            mm(&core_settings::EDGE_ENDS),
+            mm(&core_settings::EDGE_SIDES),
+        );
         let (w, h) = (i32::from(display.width), i32::from(display.height));
         let side = if point.y < across {
             Direction::Up

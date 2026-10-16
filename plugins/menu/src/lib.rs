@@ -100,6 +100,38 @@ impl Plugin for Menu {
             .group(quireink_sdk::builtin::groups::LOOK)
             .description("menu.setting.style.help"),
         )?;
+        // The quick panel's head: what it shows, and how large.
+        let defaults = [
+            "core.status.clock, core.status.date",
+            "",
+            "core.status.battery",
+        ];
+        let titles = ["menu.quick.left", "menu.quick.center", "menu.quick.right"];
+        for ((id, title), default) in panel::QUICK_PARTS.into_iter().zip(titles).zip(defaults) {
+            r.add_setting(
+                SettingSpec::new(
+                    id,
+                    title,
+                    SettingKind::List,
+                    quireink_sdk::SettingValue::Text(Cow::Borrowed(default)),
+                )
+                .group(quireink_sdk::builtin::groups::LOOK)
+                .section("menu.quick.section")
+                .editor(quireink_sdk::builtin::screens::STATUS_ITEMS),
+            )?;
+        }
+        r.add_setting(
+            SettingSpec::new(
+                panel::QUICK_SIZE,
+                "menu.quick.size",
+                SettingKind::Int { min: 6, max: 24 },
+                quireink_sdk::SettingValue::Int(11),
+            )
+            .group(quireink_sdk::builtin::groups::LOOK)
+            .section("menu.quick.section")
+            .unit("core.unit.pt")
+            .description("menu.quick.size.help"),
+        )?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/en.ini")))?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/de.ini")))?;
         Ok(())

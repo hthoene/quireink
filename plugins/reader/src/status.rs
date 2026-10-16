@@ -6,7 +6,7 @@
 //! (`Registrar::add_status_line`); the reader brings three:
 //!
 //! - *Text and symbols* ([`lines::ITEMS`]): a left, centre and right part,
-//!   each with the status items chosen for it on [`ItemsScreen`] (the
+//!   each with the status items chosen for it (`core.status-items`: the
 //!   kernel's time and battery, the reader's title, chapter, page and
 //!   progress, and whatever other plugins add);
 //! - *Progress bar* ([`lines::PROGRESS`]): the book as a bar, with a mark
@@ -23,22 +23,18 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use quireink_sdk::builtin::{actions, fonts, params};
+use quireink_sdk::builtin::{fonts, params, screens};
 use quireink_sdk::status::{StatusFrame, StatusLine, StatusValue, context, item_ids};
-use quireink_sdk::ui::{self, ListChange, ListView, UiStyle};
+use quireink_sdk::ui::UiStyle;
 use quireink_sdk::{
-    Arg, Canvas, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Params, Rect, RefreshMode,
-    RegisterError, Registrar, Screen, ScreenSpec, SettingGroupSpec, SettingKind, SettingSpec,
-    SettingValue, StatusItemSpec, StatusLineSpec, Storage,
+    Arg, Canvas, Env, Id, Params, RegisterError, Registrar, SettingGroupSpec, SettingKind,
+    SettingSpec, SettingValue, StatusItemSpec, StatusLineSpec, Storage,
 };
 
 use crate::PLUGIN;
 
 /// The settings group of the status lines.
 pub const GROUP: Id = Id::new_static("reader.group.status");
-/// The screen that chooses the items of one part (parameter `id`: the
-/// part's setting).
-pub const ITEMS_SCREEN: Id = Id::new_static("reader.status-items");
 
 /// The battery's charge in percent beside its symbol.
 pub const PERCENT: Id = Id::new_static("reader.status.battery-percent");
@@ -148,7 +144,7 @@ pub(crate) fn register(r: &mut dyn Registrar) -> Result<(), RegisterError> {
             )
             .group(GROUP)
             .section(SECTIONS[i])
-            .editor(ITEMS_SCREEN)
+            .editor(screens::STATUS_LINES)
             .description("reader.status.lines.help"),
         )?;
     }
@@ -161,7 +157,7 @@ pub(crate) fn register(r: &mut dyn Registrar) -> Result<(), RegisterError> {
         )
         .group(GROUP)
         .section(SECTIONS[n / 3])
-        .editor(ITEMS_SCREEN);
+        .editor(screens::STATUS_ITEMS);
         r.add_setting(spec)?;
     }
     r.add_setting(
@@ -210,11 +206,6 @@ pub(crate) fn register(r: &mut dyn Registrar) -> Result<(), RegisterError> {
         title: Cow::Borrowed("reader.status.line.empty"),
         draw: Box::new(|_, _, _| {}),
         signature: Some(Box::new(|_, _| String::new())),
-    })?;
-    r.add_screen(ScreenSpec {
-        id: ITEMS_SCREEN,
-        title: Cow::Borrowed("reader.group.status"),
-        factory: Box::new(|env, params| Box::new(ItemsScreen::open(env, params))),
     })?;
     let text = |value: Option<&str>| value.map(|v| StatusValue::Text(v.to_string()));
     r.add_status_item(StatusItemSpec {
@@ -429,162 +420,4 @@ fn items_signature(env: &Env<'_>, context: &Params) -> String {
         }
     }
     out
-}
-
-/// Chooses the items of one part of a status line: every status item with
-/// whether it is shown; tapping one shows or hides it (shown items keep
-/// the order in which they were chosen).
-pub(crate) struct ItemsScreen {
-    setting: Option<Id>,
-    /// Item ids and the translation keys of their names.
-    items: Vec<(Id, String)>,
-    style: UiStyle,
-    header: ui::Header,
-    list: ListView,
-}
-
-impl ItemsScreen {
-    fn open(env: &Env<'_>, params: &Params) -> Self {
-        let setting = params
-            .get(params::ID)
-            .and_then(|id| Id::parse(id).ok())
-            .filter(|id| PARTS.contains(id) || LINES.contains(id));
-        // Status lines for the lines' settings, else status items.
-        let items = if setting.as_ref().is_some_and(|s| LINES.contains(s)) {
-            env.status_items
-                .lines()
-                .map(|(id, title)| (id.clone(), title.to_string()))
-                .collect()
-        } else {
-            env.status_items
-                .iter()
-                .map(|(id, title)| (id.clone(), title.to_string()))
-                .collect()
-        };
-        let style = UiStyle::new(env);
-        let display = env.device.display;
-        let header = ui::Header::new(env, &style, true);
-        let top = header.area.height + style.gap as u16;
-        let area = Rect::new(0, top, display.width, display.height - top);
-        Self {
-            setting,
-            items,
-            list: ListView::new(area, style.row).focus_on_keys(env),
-            style,
-            header,
-        }
-    }
-
-    fn chosen<'e>(&self, env: &Env<'e>) -> Vec<&'e str> {
-        self.setting
-            .as_ref()
-            .map(|s| item_ids(env.settings.text(s.as_str())).collect())
-            .unwrap_or_default()
-    }
-
-    fn toggle(&mut self, index: usize, cx: &mut Cx<'_, '_>) {
-        let env = *cx.env();
-        let (Some(setting), Some((id, _))) = (&self.setting, self.items.get(index)) else {
-            return;
-        };
-        let mut chosen = self.chosen(&env);
-        match chosen.iter().position(|c| *c == id.as_str()) {
-            Some(at) => {
-                chosen.remove(at);
-            }
-            None => chosen.push(id.as_str()),
-        }
-        cx.command(Command::SetSetting(
-            setting.clone(),
-            SettingValue::Text(Cow::Owned(chosen.join(", "))),
-        ));
-        cx.request_redraw();
-        cx.request_refresh(RefreshMode::Fast);
-    }
-}
-
-impl Screen for ItemsScreen {
-    fn draw(&mut self, canvas: &mut Canvas<'_>, env: &Env<'_>) {
-        let style = self.style;
-        let title = self.setting.as_ref().map_or(String::new(), |s| {
-            env.settings
-                .specs()
-                .find(|spec| spec.id == *s)
-                .map_or(String::new(), |spec| env.i18n.tr(&spec.title).to_string())
-        });
-        let len = self.items.len();
-        self.header
-            .draw(canvas, env, &style, &title, None, self.list.paging(len));
-        let chosen = self.chosen(env);
-        let items = &self.items;
-        self.list
-            .draw(canvas, &style, len, |canvas, index, rect, focused| {
-                let (id, name) = &items[index];
-                let on = chosen.iter().position(|c| *c == id.as_str());
-                // Shown items carry their place: "On (2)".
-                let value = match on {
-                    Some(at) if chosen.len() > 1 => {
-                        format!("{} ({})", env.i18n.tr("settings.on"), at + 1)
-                    }
-                    Some(_) => env.i18n.tr("settings.on").to_string(),
-                    None => env.i18n.tr("settings.off").to_string(),
-                };
-                ui::draw_value_row(
-                    canvas,
-                    env,
-                    &style,
-                    rect,
-                    focused,
-                    env.i18n.tr(name),
-                    &value,
-                );
-            });
-    }
-
-    fn on_action(&mut self, action: &Id, cx: &mut Cx<'_, '_>) -> Handled {
-        let len = self.items.len();
-        let rows = self.list.rows() as isize;
-        let a = action;
-        let delta = if [actions::UP, actions::LEFT, actions::PREVIOUS].contains(a) {
-            -1
-        } else if [actions::DOWN, actions::RIGHT, actions::NEXT].contains(a) {
-            1
-        } else if *a == actions::NEXT_PAGE {
-            rows
-        } else if *a == actions::PREV_PAGE {
-            -rows
-        } else if *a == actions::CONFIRM {
-            self.toggle(self.list.focus, cx);
-            return Handled::Yes;
-        } else {
-            return Handled::No;
-        };
-        if self.list.move_focus(delta, len) != ListChange::None {
-            cx.request_redraw();
-            cx.request_refresh(RefreshMode::Fast);
-        }
-        Handled::Yes
-    }
-
-    fn on_gesture(&mut self, gesture: Gesture, cx: &mut Cx<'_, '_>) -> Handled {
-        if gesture.kind != GestureKind::Tap {
-            return Handled::No;
-        }
-        let paging = self.list.paging(self.items.len());
-        let tapped = self
-            .header
-            .tap(cx.env(), &self.style, gesture.start, paging);
-        if let Some(action) = tapped {
-            cx.command(Command::RunAction(action));
-            return Handled::Yes;
-        }
-        match self.list.hit(gesture.start, self.items.len()) {
-            Some(index) => {
-                self.list.focus = index;
-                self.toggle(index, cx);
-                Handled::Yes
-            }
-            None => Handled::No,
-        }
-    }
 }

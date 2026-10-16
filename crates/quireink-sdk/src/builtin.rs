@@ -259,6 +259,8 @@ pub mod status_items {
     pub const CLOCK: Id = Id::new_static("core.status.clock");
     /// The battery's charge.
     pub const BATTERY: Id = Id::new_static("core.status.battery");
+    /// Today in words ([`time::date_text`](crate::time::date_text)).
+    pub const DATE: Id = Id::new_static("core.status.date");
 }
 
 /// Standard screens.
@@ -267,6 +269,11 @@ pub mod screens {
 
     /// Shown when a slot has no screen bound to it.
     pub const PLACEHOLDER: Id = Id::new_static("core.placeholder");
+    /// Chooses the status items a setting lists (see
+    /// [`ui::items`](crate::ui::items)): name it as the setting's editor.
+    pub const STATUS_ITEMS: Id = Id::new_static("core.status-items");
+    /// Chooses the status lines a setting lists.
+    pub const STATUS_LINES: Id = Id::new_static("core.status-lines");
 }
 
 /// Global settings.
@@ -277,6 +284,11 @@ pub mod settings {
     pub const LANGUAGE: Id = Id::new_static("core.language");
     /// Draw everything inverted.
     pub const NIGHT_MODE: Id = Id::new_static("core.night-mode");
+    /// How far in from the top and the bottom edge a swipe begins to count
+    /// as one in from the edge, in millimetres (0: none).
+    pub const EDGE_ENDS: Id = Id::new_static("core.edge-ends");
+    /// The same at the left and right edges.
+    pub const EDGE_SIDES: Id = Id::new_static("core.edge-sides");
     /// Say what the buttons move to (a row, a button), where the device
     /// speaks: for using QuireInk without seeing the screen.
     pub const SPEAK_FOCUS: Id = Id::new_static("core.speak-focus");
