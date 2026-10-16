@@ -67,14 +67,37 @@ fn paths(cache: &str, section: u32) -> CachePaths {
         anchors: alloc::format!("{cache}/{section}.anc"),
         links: alloc::format!("{cache}/{section}.lnk"),
         positions: alloc::format!("{cache}/{section}.pos"),
+        xpointers: alloc::format!("{cache}/{section}.xpt"),
         end: alloc::format!("{cache}/{section}.end"),
     }
 }
 
-/// The section and the element path below `<body>` of an XPointer such
-/// as `/body/DocFragment[3]/body/div/p[5]/text().12`: indexes are filled in
-/// (`div` is `div[1]`), text positions dropped.
-fn parse_xpointer(xpointer: &str) -> Option<(u32, String)> {
+/// What an XPointer points at: the section, the element path below
+/// `<body>`, and the text node in it with the character, if it points
+/// into text.
+struct XPointer {
+    section: u32,
+    element: String,
+    text: Option<(u32, u32)>,
+}
+
+impl XPointer {
+    /// The text node as `<n>.xpt` names it, e.g. `div[1]/p[5]/text()[1]`.
+    fn node(&self) -> Option<(String, u32)> {
+        let (index, char) = self.text?;
+        let node = if self.element.is_empty() {
+            alloc::format!("text()[{index}]")
+        } else {
+            alloc::format!("{}/text()[{index}]", self.element)
+        };
+        Some((node, char))
+    }
+}
+
+/// The parts of an XPointer such as
+/// `/body/DocFragment[3]/body/div/p[5]/text().12`: indexes are filled in
+/// (`div` is `div[1]`, `text()` is `text()[1]`).
+fn parse_xpointer(xpointer: &str) -> Option<XPointer> {
     let rest = xpointer.trim().strip_prefix("/body/DocFragment")?;
     let (index, rest) = match rest.strip_prefix('[') {
         Some(r) => {
@@ -85,8 +108,19 @@ fn parse_xpointer(xpointer: &str) -> Option<(u32, String)> {
     };
     let rest = rest.strip_prefix("/body").unwrap_or(rest);
     let mut segments: Vec<String> = Vec::new();
+    let mut text = None;
     for segment in rest.split('/').filter(|s| !s.is_empty()) {
-        if segment.starts_with("text()") {
+        if let Some(node) = segment.strip_prefix("text()") {
+            // `text()[2].5`, `text().5`
+            let (index, char) = match node.strip_prefix('[') {
+                Some(r) => {
+                    let (n, r) = r.split_once(']')?;
+                    (n.parse::<u32>().ok()?, r)
+                }
+                None => (1, node),
+            };
+            let char = char.strip_prefix('.').and_then(|c| c.parse::<u32>().ok());
+            text = char.map(|char| (index, char));
             break;
         }
         // A position inside an element (`p[3].5`) counts as the element.
@@ -97,7 +131,50 @@ fn parse_xpointer(xpointer: &str) -> Option<(u32, String)> {
             segments.push(alloc::format!("{segment}[1]"));
         }
     }
-    Some((index.checked_sub(1)?, segments.join("/")))
+    Some(XPointer {
+        section: index.checked_sub(1)?,
+        element: segments.join("/"),
+        text,
+    })
+}
+
+/// The lines of the file at `path` in order, read a piece at a time,
+/// until `each` returns `false`.
+fn each_line(storage: &dyn Storage, path: &str, mut each: impl FnMut(&str) -> bool) {
+    let mut chunk = [0u8; 512];
+    let mut line: Vec<u8> = Vec::new();
+    let mut at = 0u64;
+    loop {
+        let Ok(n) = storage.read_at(path, at, &mut chunk) else {
+            return;
+        };
+        if n == 0 {
+            break;
+        }
+        at += n as u64;
+        for &byte in &chunk[..n] {
+            if byte == b'\n' {
+                if !each(&String::from_utf8_lossy(&line)) {
+                    return;
+                }
+                line.clear();
+            } else {
+                line.push(byte);
+            }
+        }
+    }
+    if !line.is_empty() {
+        each(&String::from_utf8_lossy(&line));
+    }
+}
+
+/// A line of `<n>.xpt`: offset, text node, character.
+fn origin(line: &str) -> Option<(u32, &str, u32)> {
+    let mut fields = line.split('\t');
+    let offset = fields.next()?.parse().ok()?;
+    let node = fields.next()?;
+    let char = fields.next()?.parse().ok()?;
+    Some((offset, node, char))
 }
 
 /// Where chapters converted without the book's styles are kept.
@@ -377,32 +454,75 @@ impl Document for EpubDocument {
             .unwrap_or_else(|| self.spine.get(section as usize).map_or(0, |c| c.size))
     }
 
-    /// Estimated from the chapters' sizes in the archive, so it needs no
-    /// conversion of unread chapters.
+    /// Down to the character in its text node, as KOReader counts them,
+    /// where it is in text; else the element of its block.
     fn xpointer(&self, storage: &dyn Storage, at: Locator) -> Option<String> {
         let positions = self.positions(storage, at.section)?;
-        let path = positions
+        let (block, path) = positions
             .iter()
             .take_while(|(offset, _)| *offset <= at.offset)
             .last()
-            .map_or("", |(_, path)| path.as_str());
-        let path = if path.is_empty() {
-            String::new()
+            .map_or((0, ""), |(offset, path)| (*offset, path.as_str()));
+        let fragment = alloc::format!("/body/DocFragment[{}]/body", at.section + 1);
+        // The text node the block's text at `at` comes from.
+        let paths = self.paths(at.section);
+        let mut found: Option<(u32, String, u32)> = None;
+        each_line(storage, &paths.xpointers, |line| {
+            let Some((offset, node, char)) = origin(line) else {
+                return true;
+            };
+            if offset > at.offset {
+                return false;
+            }
+            found = Some((offset, String::from(node), char));
+            true
+        });
+        if let Some((offset, node, char)) = found.filter(|(offset, ..)| *offset >= block) {
+            let mut text = alloc::vec![0u8; (at.offset - offset) as usize];
+            let n = storage
+                .read_at(&paths.text, u64::from(offset), &mut text)
+                .ok()?;
+            let chars = String::from_utf8_lossy(&text[..n]).chars().count() as u32;
+            return Some(alloc::format!("{fragment}/{node}.{}", char + chars));
+        }
+        if path.is_empty() {
+            Some(fragment)
         } else {
-            alloc::format!("/{path}")
-        };
-        Some(alloc::format!(
-            "/body/DocFragment[{}]/body{path}",
-            at.section + 1
-        ))
+            Some(alloc::format!("{fragment}/{path}"))
+        }
     }
 
     fn locate_xpointer(&self, storage: &dyn Storage, xpointer: &str) -> Option<Locator> {
-        let (section, target) = parse_xpointer(xpointer)?;
+        let pointer = parse_xpointer(xpointer)?;
+        let section = pointer.section;
         if section >= self.sections() {
             return None;
         }
         let positions = self.positions(storage, section)?;
+        // Exactly, where it points into text QuireInk shows.
+        if let Some((node, char)) = pointer.node() {
+            let paths = self.paths(section);
+            let mut found: Option<(u32, u32)> = None;
+            each_line(storage, &paths.xpointers, |line| {
+                if let Some((offset, at, from)) = origin(line)
+                    && at == node
+                    && from <= char
+                {
+                    found = Some((offset, char - from));
+                }
+                true
+            });
+            if let Some((offset, chars)) = found {
+                let mut text = alloc::vec![0u8; (chars as usize * 4).min(16 * 1024)];
+                let n = storage
+                    .read_at(&paths.text, u64::from(offset), &mut text)
+                    .ok()?;
+                let text = String::from_utf8_lossy(&text[..n]);
+                let bytes: usize = text.chars().take(chars as usize).map(char::len_utf8).sum();
+                return Some(Locator::new(section, offset + bytes as u32));
+            }
+        }
+        let target = pointer.element;
         let inside = |path: &str, of: &str| {
             of.is_empty() || path == of || path.strip_prefix(of).is_some_and(|r| r.starts_with('/'))
         };

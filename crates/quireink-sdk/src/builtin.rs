@@ -220,6 +220,11 @@ pub mod events {
     /// [`PATH`](super::params::PATH) (the new one). Plugins that keep data
     /// by a book's path move it along (progress, notes, statistics).
     pub const BOOK_MOVED: Id = Id::new_static("core.book-moved");
+    /// The bookmarks or highlights of a book changed
+    /// ([`annotations`](crate::annotations)): parameter
+    /// [`PATH`](super::params::PATH). Readers show them anew, syncs pass
+    /// them on.
+    pub const ANNOTATIONS_CHANGED: Id = Id::new_static("core.annotations-changed");
     /// A word of a book was looked up: parameters
     /// [`WORD`](super::params::WORD), [`LANGUAGE`](super::params::LANGUAGE),
     /// [`TEXT`](super::params::TEXT) (its sentence), the book's

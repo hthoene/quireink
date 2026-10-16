@@ -1,24 +1,20 @@
-//! Bookmarks and highlights of a book, and the screen that lists them.
-//! The list ends with *Export as Markdown*: a file in `Notes` beside the
-//! library folder, then the event [`EXPORTED`] for plugins that take it
-//! further (a notes app, a sync).
-//!
-//! They are kept in `annotations.txt` in the book's data folder, one per
-//! line, sorted by position: kind, start and end (section and offset in
-//! the source, so they outlast font sizes and layouts), the reading
-//! progress, a snippet of the text and the reader's note on it. While
-//! reading, only the positions are held in memory.
+//! The screen that lists the bookmarks and highlights of a book (kept by
+//! [`quireink_sdk::annotations`]). The list ends with *Export as
+//! Markdown*: a file in `Notes` beside the library folder, then the event
+//! [`EXPORTED`] for plugins that take it further (a notes app, a sync).
+//! While reading, only the positions are held in memory.
 
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
+pub(crate) use quireink_sdk::annotations::{
+    Annotation, Kind, Mark, add, changed, load, marks, note_of, remove, set_note, snippet,
+};
 use quireink_sdk::builtin::{actions, params};
-use quireink_sdk::document::Locator;
 use quireink_sdk::ui::{self, ListChange, ListView, UiStyle};
 use quireink_sdk::{
     Canvas, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Params, Rect, RefreshMode, Screen,
-    Storage,
 };
 
 use crate::GOTO;
@@ -30,187 +26,6 @@ use crate::toc::locator_params;
 pub const EXPORTED: Id = Id::new_static("reader.notes-exported");
 /// Where exported notes go, beside the library folder.
 const NOTES: &str = "Notes";
-
-/// Longest snippet kept with an annotation.
-const MAX_TEXT: usize = 240;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Kind {
-    Bookmark,
-    Highlight,
-}
-
-/// Where an annotation is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Mark {
-    pub kind: Kind,
-    pub start: Locator,
-    pub end: Locator,
-    /// It has a note.
-    pub noted: bool,
-}
-
-impl Mark {
-    /// Whether the mark covers part of `start..end`.
-    pub fn overlaps(&self, start: Locator, end: Locator) -> bool {
-        self.start < end && start < self.end
-    }
-}
-
-/// An annotation with what is shown in the list.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Annotation {
-    pub mark: Mark,
-    /// Reading progress at the start, in percent.
-    pub percent: u8,
-    pub text: String,
-    /// What the reader noted on it, if anything.
-    pub note: String,
-}
-
-fn file(dir: &str) -> String {
-    format!("{dir}/annotations.txt")
-}
-
-/// Every annotation of the book whose data is in `dir`, by position.
-pub(crate) fn load(storage: &dyn Storage, dir: &str) -> Vec<Annotation> {
-    let Ok(data) = quireink_sdk::read_file(storage, &file(dir), 1 << 20) else {
-        return Vec::new();
-    };
-    String::from_utf8_lossy(&data)
-        .lines()
-        .filter_map(parse)
-        .collect()
-}
-
-/// Only where the annotations are, for drawing them.
-pub(crate) fn marks(storage: &dyn Storage, dir: &str) -> Vec<Mark> {
-    load(storage, dir).into_iter().map(|a| a.mark).collect()
-}
-
-fn parse(line: &str) -> Option<Annotation> {
-    let mut fields = line.splitn(8, '\t');
-    let kind = match fields.next()? {
-        "b" => Kind::Bookmark,
-        "h" => Kind::Highlight,
-        _ => return None,
-    };
-    let mut number = || fields.next()?.parse::<u32>().ok();
-    let start = Locator::new(number()?, number()?);
-    let end = Locator::new(number()?, number()?);
-    let percent = number()?.min(100) as u8;
-    let text = fields.next().unwrap_or_default().to_string();
-    let note = fields.next().unwrap_or_default().to_string();
-    Some(Annotation {
-        mark: Mark {
-            kind,
-            start,
-            end,
-            noted: !note.is_empty(),
-        },
-        percent,
-        text,
-        note,
-    })
-}
-
-fn save(storage: &dyn Storage, dir: &str, annotations: &[Annotation]) {
-    let mut out = String::new();
-    for a in annotations {
-        let kind = match a.mark.kind {
-            Kind::Bookmark => 'b',
-            Kind::Highlight => 'h',
-        };
-        out.push_str(&format!(
-            "{kind}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
-            a.mark.start.section,
-            a.mark.start.offset,
-            a.mark.end.section,
-            a.mark.end.offset,
-            a.percent,
-            a.text,
-            one_line(&a.note)
-        ));
-    }
-    let _ = storage.write(&file(dir), out.as_bytes());
-}
-
-/// `text` on one line, at most [`MAX_TEXT`] bytes.
-pub(crate) fn snippet(text: &str) -> String {
-    let mut out: String = text
-        .chars()
-        .map(|c| if c.is_whitespace() { ' ' } else { c })
-        .collect();
-    if out.len() > MAX_TEXT {
-        let mut end = MAX_TEXT;
-        while !out.is_char_boundary(end) {
-            end -= 1;
-        }
-        out.truncate(end);
-        out.push('…');
-    }
-    out
-}
-
-/// `text` on one line.
-fn one_line(text: &str) -> String {
-    text.chars()
-        .map(|c| {
-            if c == '\t' || c == '\n' || c == '\r' {
-                ' '
-            } else {
-                c
-            }
-        })
-        .collect::<String>()
-        .trim()
-        .to_string()
-}
-
-/// Puts `note` on the highlight that starts at `start` (an empty one
-/// removes it); `false` if there is no such highlight.
-pub(crate) fn set_note(storage: &dyn Storage, dir: &str, start: Locator, note: &str) -> bool {
-    let mut all = load(storage, dir);
-    let Some(a) = all
-        .iter_mut()
-        .find(|a| a.mark.kind == Kind::Highlight && a.mark.start == start)
-    else {
-        return false;
-    };
-    a.note = one_line(note);
-    a.mark.noted = !a.note.is_empty();
-    save(storage, dir, &all);
-    true
-}
-
-/// The note on the highlight that starts at `start`.
-pub(crate) fn note_of(storage: &dyn Storage, dir: &str, start: Locator) -> String {
-    load(storage, dir)
-        .into_iter()
-        .find(|a| a.mark.kind == Kind::Highlight && a.mark.start == start)
-        .map(|a| a.note)
-        .unwrap_or_default()
-}
-
-/// Adds an annotation.
-pub(crate) fn add(storage: &dyn Storage, dir: &str, annotation: Annotation) {
-    let mut all = load(storage, dir);
-    let at = all.partition_point(|a| a.mark.start <= annotation.mark.start);
-    all.insert(at, annotation);
-    save(storage, dir, &all);
-}
-
-/// Removes the annotations `remove` picks; `true` if there were any.
-pub(crate) fn remove(storage: &dyn Storage, dir: &str, remove: impl Fn(&Mark) -> bool) -> bool {
-    let mut all = load(storage, dir);
-    let before = all.len();
-    all.retain(|a| !remove(&a.mark));
-    let removed = all.len() != before;
-    if removed {
-        save(storage, dir, &all);
-    }
-    removed
-}
 
 /// The notes of the book at `path` as Markdown: its title and author,
 /// the highlights as quotes, the bookmarks as a list, each with where it
@@ -271,7 +86,7 @@ pub(crate) struct AnnotationsScreen {
 impl AnnotationsScreen {
     pub(crate) fn open(env: &Env<'_>, params: &Params) -> Self {
         let path = params.get(params::PATH).unwrap_or_default().to_string();
-        let annotations = load(env.storage, &crate::screen::book_dir(&path));
+        let annotations = load(env.storage, &path);
         let style = UiStyle::new(env);
         let display = env.device.display;
         let header = ui::Header::new(env, &style, true);
@@ -451,70 +266,5 @@ impl Screen for AnnotationsScreen {
             }
             None => Handled::No,
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use quireink_sdk::MemoryStorage;
-
-    fn annotation(kind: Kind, start: u32, end: u32, text: &str) -> Annotation {
-        Annotation {
-            mark: Mark {
-                kind,
-                start: Locator::new(1, start),
-                end: Locator::new(1, end),
-                noted: false,
-            },
-            percent: 5,
-            text: snippet(text),
-            note: String::new(),
-        }
-    }
-
-    #[test]
-    fn kept_by_position_and_removed() {
-        let storage = MemoryStorage::new();
-        add(
-            &storage,
-            "b",
-            annotation(Kind::Highlight, 50, 60, "zweite\tStelle"),
-        );
-        add(&storage, "b", annotation(Kind::Bookmark, 10, 10, "erste"));
-        let all = load(&storage, "b");
-        assert_eq!(all.len(), 2);
-        assert_eq!(all[0].mark.kind, Kind::Bookmark);
-        assert_eq!(all[1].text, "zweite Stelle");
-        assert!(
-            all[1]
-                .mark
-                .overlaps(Locator::new(1, 55), Locator::new(1, 70))
-        );
-        assert!(
-            !all[1]
-                .mark
-                .overlaps(Locator::new(1, 60), Locator::new(1, 70))
-        );
-        // Notes on highlights.
-        assert!(set_note(&storage, "b", Locator::new(1, 50), "Why?\tReally"));
-        assert_eq!(note_of(&storage, "b", Locator::new(1, 50)), "Why? Really");
-        assert!(marks(&storage, "b")[1].noted);
-        assert!(!set_note(
-            &storage,
-            "b",
-            Locator::new(1, 10),
-            "not a highlight"
-        ));
-        assert!(remove(&storage, "b", |m| m.kind == Kind::Bookmark));
-        assert_eq!(marks(&storage, "b").len(), 1);
-        assert!(!remove(&storage, "b", |m| m.kind == Kind::Bookmark));
-    }
-
-    #[test]
-    fn snippets_are_short_single_lines() {
-        assert_eq!(snippet("a\nb"), "a b");
-        let long = "ø".repeat(200);
-        assert!(snippet(&long).len() <= MAX_TEXT + '…'.len_utf8());
     }
 }

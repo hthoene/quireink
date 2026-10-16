@@ -6,6 +6,17 @@ change the plugin SDK.
 
 ## [Unreleased]
 
+- Bookmarks and highlights shared with KOReader (`koreader` plugin), for
+  books read in both on one device or in one synced library folder:
+  what KOReader has in `Book.sdr` comes over when a book is opened, and
+  what is new here goes to KOReader the next time it opens the book;
+  removing one, or a later note, goes across too. EPUB only.
+- EPUB positions as KOReader writes them, down to the character: reading
+  positions synced with KOReader land on the word, not the paragraph.
+- Plugin SDK: bookmarks and highlights are kept by `annotations`, for
+  every plugin, with when they were made and changed; event
+  `core.annotations-changed`. `Document::xpointer` and
+  `Document::locate_xpointer` are exact to the character.
 - Colour pictures on colour screens (ADR 0015): covers, pictures in
   books, comics, OPDS covers and the sleep screen's pictures are shown
   in colour on phones and tablets and on colour e-ink (Boox models named

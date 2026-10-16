@@ -168,10 +168,16 @@ r.subscribe(events::BOOK_OPENED, Box::new(move |env, params, out| {
 
 The kernel and plugins emit events with parameters; any plugin can
 listen. Standard ones are in `builtin::events`: started, a setting
-changed, a book opened, a page turned, a book moved, a word looked up,
-the device suspends or resumes. Plugins define their own (the reader's
-`reader.notes-exported`, for example), and `Command::Schedule` emits one
-at a time of day. Open screens get every event too (`Screen::on_event`).
+changed, a book opened, a page turned, a book moved, its bookmarks or
+highlights changed, a word looked up, the device suspends or resumes.
+Plugins define their own (the reader's `reader.notes-exported`, for
+example), and `Command::Schedule` emits one at a time of day. Open
+screens get every event too (`Screen::on_event`).
+
+The bookmarks and highlights of books are shared: `annotations` reads
+and keeps them, and whoever changes them emits
+`annotations::changed(book)`, so the reader shows them anew and syncs
+pass them on (the `koreader` plugin, for example).
 
 State a plugin keeps between events lives in an `Rc` it hands to its
 handlers when it registers.

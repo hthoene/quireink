@@ -981,7 +981,7 @@ impl ReaderScreen {
         } else if *item == crate::actions::HIGHLIGHT {
             let highlight = |m: &Mark| m.kind == Kind::Highlight && m.overlaps(start, end);
             // On highlighted text the item removes the highlight.
-            if !annotations::remove(env.storage, &book.dir, highlight) {
+            if !annotations::remove(env.storage, &book.path, highlight) {
                 let annotation = Annotation {
                     mark: Mark {
                         kind: Kind::Highlight,
@@ -990,12 +990,15 @@ impl ReaderScreen {
                         noted: false,
                     },
                     percent: (book.document.progress(start) * 100.0 + 0.5) as u8,
+                    created: quireink_sdk::time::unix_seconds(&env).unwrap_or(0),
+                    updated: 0,
                     text: annotations::snippet(&text),
                     note: String::new(),
                 };
-                annotations::add(env.storage, &book.dir, annotation);
+                annotations::add(env.storage, &book.path, annotation);
             }
-            book.marks = annotations::marks(env.storage, &book.dir);
+            book.marks = annotations::marks(env.storage, &book.path);
+            cx.command(annotations::changed(&book.path));
         } else if *item == crate::actions::NOTE {
             // On the highlight there (made if there is none), typed on
             // the keyboard.
@@ -1007,7 +1010,7 @@ impl ReaderScreen {
             let at = existing.unwrap_or_else(|| {
                 annotations::add(
                     env.storage,
-                    &book.dir,
+                    &book.path,
                     Annotation {
                         mark: Mark {
                             kind: Kind::Highlight,
@@ -1016,14 +1019,17 @@ impl ReaderScreen {
                             noted: false,
                         },
                         percent: (book.document.progress(start) * 100.0 + 0.5) as u8,
+                        created: quireink_sdk::time::unix_seconds(&env).unwrap_or(0),
+                        updated: 0,
                         text: annotations::snippet(&text),
                         note: String::new(),
                     },
                 );
                 start
             });
-            book.marks = annotations::marks(env.storage, &book.dir);
-            let note = annotations::note_of(env.storage, &book.dir, at);
+            book.marks = annotations::marks(env.storage, &book.path);
+            cx.command(annotations::changed(&book.path));
+            let note = annotations::note_of(env.storage, &book.path, at);
             cx.command(Command::OpenSlot(
                 slots::KEYBOARD,
                 crate::toc::locator_params(&book.path, at)
@@ -1370,11 +1376,11 @@ impl ReaderScreen {
         };
         let (start, end) = (book.page.start, book.page.end);
         let on_page = |m: &Mark| m.kind == Kind::Bookmark && m.start >= start && m.start < end;
-        if !annotations::remove(env.storage, &book.dir, on_page) {
+        if !annotations::remove(env.storage, &book.path, on_page) {
             let text: Vec<&str> = book.page.lines.iter().map(|l| l.text.as_str()).collect();
             annotations::add(
                 env.storage,
-                &book.dir,
+                &book.path,
                 Annotation {
                     mark: Mark {
                         kind: Kind::Bookmark,
@@ -1383,12 +1389,15 @@ impl ReaderScreen {
                         noted: false,
                     },
                     percent: (book.percent() + 0.5) as u8,
+                    created: quireink_sdk::time::unix_seconds(&env).unwrap_or(0),
+                    updated: 0,
                     text: annotations::snippet(&text.join(" ")),
                     note: String::new(),
                 },
             );
         }
-        book.marks = annotations::marks(env.storage, &book.dir);
+        book.marks = annotations::marks(env.storage, &book.path);
+        cx.command(annotations::changed(&book.path));
         cx.request_redraw_area(book.ribbon_area(&env));
         cx.request_refresh(RefreshMode::Fast);
     }
@@ -1425,7 +1434,13 @@ impl Book {
             .unwrap_or_else(|| env.i18n.language().to_string());
         let typography = Typography::new(env, &font, &language, document.whole_pages());
         let dir = book_dir(path);
-        let marks = annotations::marks(env.storage, &dir);
+        // Kept with the reader's data of the book before plugins shared
+        // them.
+        let _ = env.storage.rename(
+            &format!("{dir}/annotations.txt"),
+            &quireink_sdk::annotations::file(path),
+        );
+        let marks = annotations::marks(env.storage, path);
         let title = document
             .metadata()
             .title
@@ -2883,6 +2898,16 @@ impl Screen for ReaderScreen {
             self.spoken(params, cx);
             return;
         }
+        // Changed elsewhere too, e.g. by a sync.
+        if *event == events::ANNOTATIONS_CHANGED && this_book {
+            let marks = annotations::marks(cx.env().storage, &book.path);
+            if marks != book.marks {
+                book.marks = marks;
+                cx.request_redraw();
+                cx.request_refresh(RefreshMode::Partial);
+            }
+            return;
+        }
         if *event == crate::FOLLOW && this_book {
             let href = params
                 .get(crate::footnote::HREF)
@@ -2921,8 +2946,10 @@ impl Screen for ReaderScreen {
         {
             let env = *cx.env();
             let note = params.get(params::TEXT).unwrap_or_default();
-            annotations::set_note(env.storage, &book.dir, at, note);
-            book.marks = annotations::marks(env.storage, &book.dir);
+            let now = quireink_sdk::time::unix_seconds(&env).unwrap_or(0);
+            annotations::set_note(env.storage, &book.path, at, note, now);
+            book.marks = annotations::marks(env.storage, &book.path);
+            cx.command(annotations::changed(&book.path));
             cx.request_redraw();
             return;
         }

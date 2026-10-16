@@ -29,6 +29,7 @@
 extern crate alloc;
 
 mod action;
+pub mod annotations;
 pub mod builtin;
 pub mod collections;
 mod command;

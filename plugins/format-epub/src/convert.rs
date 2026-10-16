@@ -17,6 +17,14 @@
 //! - `<n>.pos`: `offset<TAB>path` lines: the element each record comes
 //!   from, as a path below `<body>` such as `div[2]/p[22]`, for positions
 //!   other readers understand (KOReader's XPointers).
+//! - `<n>.xpt`: `offset<TAB>node<TAB>char` lines: where the text of each
+//!   text node of the chapter begins in `<n>.txt` (and goes on, where
+//!   what QuireInk shows leaves out characters the node has), as the node
+//!   below `<body>` such as `div[2]/p[22]/em[1]/text()[1]` and the
+//!   character in it, for exact positions in KOReader's XPointers. Nodes
+//!   and characters are counted as KOReader's engine (crengine) keeps
+//!   them: white space folded into one space, white space alone at the
+//!   start of a block dropped.
 //! - `<n>.end`: the length of `<n>.txt` as u32. Written last, so its
 //!   presence marks a complete conversion.
 //!
@@ -28,6 +36,7 @@
 //! browsers do (see [`Source::Html`]), and FictionBooks, their elements
 //! read as the HTML ones they look like (see [`Source::Fb2`]).
 
+use alloc::rc::Rc;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
@@ -106,6 +115,7 @@ pub(crate) struct CachePaths {
     pub anchors: String,
     pub links: String,
     pub positions: String,
+    pub xpointers: String,
     pub end: String,
 }
 
@@ -177,6 +187,36 @@ struct Frame {
     focus: bool,
     /// How many children of each name it has had so far.
     children: Vec<(String, u32)>,
+    /// Its children so far, elements and text nodes as crengine keeps
+    /// them, and of these the text nodes.
+    nodes: u32,
+    texts: u32,
+    /// It is a block, in which white space alone before anything else is
+    /// no text node for crengine.
+    block: bool,
+}
+
+/// The text node being read, counted as crengine keeps it.
+struct TextNode {
+    /// Below `<body>`, e.g. `div[2]/p[3]/text()[1]`.
+    path: Rc<str>,
+    /// Characters so far.
+    chars: u32,
+    /// The last of them is a (folded) space.
+    space: bool,
+    /// Only white space so far.
+    blank: bool,
+    /// Its parent had no children before it.
+    first: bool,
+}
+
+/// Where a character of the block being collected comes from: its byte
+/// in the block's text, the text node and the character in it. Only the
+/// first of characters that follow each other in a node is kept.
+struct Origin {
+    at: u32,
+    node: Rc<str>,
+    char: u32,
 }
 
 /// What an element sets: defaults for its name, then the stylesheet
@@ -255,6 +295,18 @@ struct Converter<'a> {
     fb2: Option<Fb2State>,
     /// Pending `<n>.pos` lines.
     positions: String,
+    /// Pending `<n>.xpt` lines.
+    xpointers: String,
+    /// The text node being read, if any.
+    node: Option<TextNode>,
+    /// Where the characters of `text` come from.
+    origins: Vec<Origin>,
+    /// Characters of `text` since the last origin.
+    since_origin: u32,
+    /// Where the next character pushed comes from, if from a text node.
+    origin: Option<(Rc<str>, u32)>,
+    /// Where the pending space comes from.
+    space_origin: Option<(Rc<str>, u32)>,
     /// The element path of the block being collected.
     block_path: String,
     text: String,
@@ -317,6 +369,21 @@ impl Converter<'_> {
             self.block_path = self.element_path();
         }
         let start = self.text.len() as u32;
+        if let Some((node, char)) = self.origin.take() {
+            let follows = self
+                .origins
+                .last()
+                .is_some_and(|o| o.node == node && o.char + self.since_origin == char);
+            if !follows {
+                self.origins.push(Origin {
+                    at: start,
+                    node,
+                    char,
+                });
+                self.since_origin = 0;
+            }
+        }
+        self.since_origin += 1;
         self.text.push(c);
         let end = self.text.len() as u32;
         if style == TextStyle::REGULAR {
@@ -360,14 +427,40 @@ impl Converter<'_> {
         self.write_record(BlockKind::Image, len);
         self.text.clear();
         self.runs.clear();
+        self.origins.clear();
         self.kind = BlockKind::Paragraph;
         if !self.images.iter().any(|(p, _)| *p == path) {
             self.images.push((path, cache));
         }
     }
 
-    /// Removes the first `n` bytes of the text, keeping the runs in step.
+    /// Removes the first `n` bytes of the text, keeping the runs and the
+    /// origins in step.
     fn drop_front(&mut self, n: usize) {
+        let gone = self.origins.partition_point(|o| (o.at as usize) < n);
+        // The rest goes on in the node of the last origin removed.
+        let carry = (gone > 0
+            && n < self.text.len()
+            && self.origins.get(gone).is_none_or(|o| o.at as usize != n))
+        .then(|| {
+            let last = &self.origins[gone - 1];
+            Origin {
+                at: n as u32,
+                node: last.node.clone(),
+                char: last.char + self.text[last.at as usize..n].chars().count() as u32,
+            }
+        });
+        let last_gone = gone == self.origins.len();
+        self.origins.drain(..gone);
+        if let Some(carry) = carry {
+            if last_gone {
+                self.since_origin = self.text[n..].chars().count() as u32;
+            }
+            self.origins.insert(0, carry);
+        }
+        for origin in &mut self.origins {
+            origin.at -= n as u32;
+        }
         self.text.replace_range(..n, "");
         let n = n as u32;
         self.runs.retain_mut(|run| {
@@ -480,6 +573,7 @@ impl Converter<'_> {
 
     fn start(&mut self, name: &str, attrs: quireink_sdk::xml::Attrs<'_>, self_closing: bool) {
         let _ = self_closing;
+        self.end_node();
         let tag = local_name(name).to_ascii_lowercase();
         let tag = if self.fb2.is_some() {
             self.fb2_enter(&tag, &attrs)
@@ -545,6 +639,9 @@ impl Converter<'_> {
             None => parent_size,
         };
         // Its number among its parent's children of the same name.
+        if let Some(parent) = self.stack.last_mut() {
+            parent.nodes += 1;
+        }
         let index = match self.stack.last_mut() {
             Some(parent) => match parent.children.iter_mut().find(|(t, _)| *t == tag) {
                 Some((_, count)) => {
@@ -583,6 +680,10 @@ impl Converter<'_> {
             link,
             focus,
             children: Vec::new(),
+            nodes: 0,
+            texts: 0,
+            block: is_block(&tag)
+                || matches!(tag.as_str(), "li" | "pre" | "td" | "th" | "thead" | "tbody"),
             tag: tag.clone(),
             style: styled(style, &props),
             align: props.align.unwrap_or(align),
@@ -624,7 +725,10 @@ impl Converter<'_> {
             "li" => {
                 self.push_str("• ");
             }
-            "td" | "th" => self.space = true,
+            "td" | "th" => {
+                self.space = true;
+                self.space_origin = None;
+            }
             "pre" => {
                 self.kind = BlockKind::Preformatted;
                 self.pre += 1;
@@ -639,6 +743,7 @@ impl Converter<'_> {
     }
 
     fn end(&mut self, name: &str) {
+        self.end_node();
         let tag = local_name(name).to_ascii_lowercase();
         let tag = if self.fb2.is_some() {
             self.fb2_leave(&tag)
@@ -691,29 +796,113 @@ impl Converter<'_> {
         if self.hidden > 0 {
             return;
         }
+        if self.node.is_none() {
+            self.start_node();
+        }
         for c in decode(text).chars() {
+            let origin = self.node_char(c);
             if self.pre > 0 {
                 match c {
                     '\r' => {}
-                    '\t' => self.push(' '),
-                    c => self.push(c),
+                    '\t' => {
+                        self.origin = origin;
+                        self.push(' ');
+                    }
+                    c => {
+                        self.origin = origin;
+                        self.push(c);
+                    }
                 }
             } else if c == '\u{ad}' {
                 // Soft hyphens: dropped until hyphenation uses them.
             } else if c.is_whitespace() && c != '\u{a0}' {
+                if !self.space {
+                    self.space_origin = origin;
+                }
                 self.space = true;
                 self.space_style = self.frame().0;
             } else {
                 if self.space && !self.text.is_empty() && !self.text.ends_with(['\n', ' ']) {
+                    self.origin = self.space_origin.take();
                     self.push_styled(' ', self.space_style);
                 }
                 self.space = false;
+                self.origin = origin;
                 self.push(c);
             }
             if self.text.len() >= LIMIT {
                 self.split();
             }
         }
+    }
+
+    /// A text node begins: counted as crengine counts it (see
+    /// [`Converter::end_node`]).
+    fn start_node(&mut self) {
+        let mut path = self.element_path();
+        let Some(parent) = self.stack.last_mut() else {
+            return;
+        };
+        parent.texts += 1;
+        if !path.is_empty() {
+            path.push('/');
+        }
+        path.push_str(&alloc::format!("text()[{}]", parent.texts));
+        let first = parent.nodes == 0;
+        parent.nodes += 1;
+        self.node = Some(TextNode {
+            path: Rc::from(path),
+            chars: 0,
+            space: false,
+            blank: true,
+            first,
+        });
+    }
+
+    /// The text node ends (an element begins or ends): white space alone
+    /// as the first child of a block is none for crengine.
+    fn end_node(&mut self) {
+        let Some(node) = self.node.take() else {
+            return;
+        };
+        if node.blank
+            && node.first
+            && self.pre == 0
+            && let Some(parent) = self.stack.last_mut()
+            && parent.block
+        {
+            parent.texts -= 1;
+            parent.nodes -= 1;
+        }
+    }
+
+    /// Counts `c` in the text node as crengine keeps it: tabs and line
+    /// breaks become spaces, and spaces that follow each other one.
+    /// Where `c` is in it.
+    fn node_char(&mut self, c: char) -> Option<(Rc<str>, u32)> {
+        let pre = self.pre > 0;
+        let node = self.node.as_mut()?;
+        let char = if pre {
+            if c == '\r' {
+                return None;
+            }
+            node.chars += 1;
+            node.chars - 1
+        } else if matches!(c, ' ' | '\t' | '\r' | '\n') {
+            if !node.space {
+                node.chars += 1;
+                node.space = true;
+            }
+            node.chars - 1
+        } else {
+            node.chars += 1;
+            node.space = false;
+            node.chars - 1
+        };
+        if !matches!(c, ' ' | '\t' | '\r' | '\n') {
+            node.blank = false;
+        }
+        Some((node.path.clone(), char))
     }
 
     /// Emits the first part of an overlong block at a space.
@@ -745,6 +934,8 @@ impl Converter<'_> {
         }
         self.text.clear();
         self.runs.clear();
+        self.origins.clear();
+        self.since_origin = 0;
         self.align = None;
         self.indent = None;
         self.size = None;
@@ -765,6 +956,17 @@ impl Converter<'_> {
         ));
         if self.positions.len() >= FLUSH_SMALL {
             self.write_positions();
+        }
+        for origin in self.origins.iter().take_while(|o| (o.at as usize) < len) {
+            self.xpointers.push_str(&alloc::format!(
+                "{}\t{}\t{}\n",
+                self.length + HEADER + origin.at,
+                origin.node,
+                origin.char
+            ));
+        }
+        if self.xpointers.len() >= FLUSH_SMALL {
+            self.write_xpointers();
         }
         let indent = self.indent.unwrap_or(NO_INDENT);
         let space = if self.continues {
@@ -855,6 +1057,12 @@ impl Converter<'_> {
         let failed = self.append(&self.paths.positions, self.positions.as_bytes());
         self.failed = self.failed.take().or(failed);
         self.positions.clear();
+    }
+
+    fn write_xpointers(&mut self) {
+        let failed = self.append(&self.paths.xpointers, self.xpointers.as_bytes());
+        self.failed = self.failed.take().or(failed);
+        self.xpointers.clear();
     }
 
     fn write_anchors(&mut self) {
@@ -1035,6 +1243,7 @@ pub(crate) fn convert(
         &paths.anchors,
         &paths.links,
         &paths.positions,
+        &paths.xpointers,
     ] {
         storage.write(path, &[])?;
     }
@@ -1048,6 +1257,12 @@ pub(crate) fn convert(
         links: String::new(),
         chapter: String::from(name),
         positions: String::new(),
+        xpointers: String::new(),
+        node: None,
+        origins: Vec::new(),
+        since_origin: 0,
+        origin: None,
+        space_origin: None,
         block_path: String::new(),
         // Blocks are split before they outgrow this, so it never grows.
         text: String::with_capacity(LIMIT + 4),
@@ -1124,6 +1339,7 @@ pub(crate) fn convert(
     converter.write_anchors();
     converter.write_links();
     converter.write_positions();
+    converter.write_xpointers();
     if let Some(e) = converter.failed {
         return Err(e);
     }
