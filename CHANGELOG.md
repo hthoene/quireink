@@ -6,6 +6,11 @@ change the plugin SDK.
 
 ## [Unreleased]
 
+- Rules can have a condition: only between two times of day, only while
+  reading or while not, only on battery or while charging, only while a
+  switch is on or off (hold a rule, *Only if …*). They can also set a
+  number (e.g. the light to 20) and show a message.
+
 - Rules know many more moments: at a time of day on chosen days (every
   day, Monday to Friday, at weekends, one day), every so many minutes,
   when a book is closed or read to its end, when the device goes to
