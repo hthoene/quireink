@@ -1,5 +1,6 @@
 use alloc::borrow::Cow;
 use alloc::boxed::Box;
+use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
 
@@ -14,18 +15,23 @@ pub type FormatOpener =
     Box<dyn Fn(&dyn Storage, &str, &OpenOptions) -> Result<Box<dyn Document>, DocumentError>>;
 
 /// How a document is opened.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct OpenOptions {
     /// Apply the book's own styles (e.g. the CSS of an EPUB). Without
     /// them the text keeps only its markup: emphasis, headings, lists.
     pub publisher_styles: bool,
+    /// Stylesheets to apply after the book's own, e.g. the plugins'
+    /// ([`Env::stylesheets`](crate::Env)); with the publisher's styles
+    /// only.
+    pub css: String,
 }
 
 impl Default for OpenOptions {
     fn default() -> Self {
         Self {
             publisher_styles: true,
+            css: String::new(),
         }
     }
 }
@@ -33,6 +39,12 @@ impl Default for OpenOptions {
 impl OpenOptions {
     pub fn publisher_styles(mut self, on: bool) -> Self {
         self.publisher_styles = on;
+        self
+    }
+
+    /// With `css` applied after the book's own styles.
+    pub fn css(mut self, css: String) -> Self {
+        self.css = css;
         self
     }
 }

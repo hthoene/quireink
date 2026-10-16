@@ -1405,7 +1405,9 @@ impl Book {
         let styles = env
             .settings
             .bool(crate::settings::PUBLISHER_STYLES.as_str());
-        let options = quireink_sdk::OpenOptions::default().publisher_styles(styles);
+        let options = quireink_sdk::OpenOptions::default()
+            .publisher_styles(styles)
+            .css(env.stylesheets.join("\n"));
         let document = env
             .formats
             .open_with(env.storage, path, &options)

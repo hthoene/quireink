@@ -389,6 +389,7 @@ impl KernelBuilder {
                 status_items: StatusItems::new(),
                 widgets: quireink_sdk::widgets::Widgets::new(),
                 text_filters: quireink_sdk::filters::TextFilters::new(),
+                stylesheets: Vec::new(),
                 network: self.network,
                 clipboard: String::new(),
                 system_clipboard: false,
@@ -890,6 +891,7 @@ impl Kernel {
         shared.status_items.shrink_to_fit();
         shared.widgets.shrink_to_fit();
         shared.text_filters.shrink_to_fit();
+        shared.stylesheets.shrink_to_fit();
         shared.translator.shrink_to_fit();
     }
 
@@ -1757,6 +1759,7 @@ impl Kernel {
         for widget in staging.widgets.drain(..) {
             self.shared.widgets.add(widget);
         }
+        self.shared.stylesheets.append(&mut staging.stylesheets);
         for filter in staging.text_filters.drain(..) {
             self.shared.text_filters.add(filter);
         }
@@ -2806,6 +2809,8 @@ struct Shared {
     status_items: StatusItems,
     widgets: quireink_sdk::widgets::Widgets,
     text_filters: quireink_sdk::filters::TextFilters,
+    /// Plugins' stylesheets for books.
+    stylesheets: Vec<Cow<'static, str>>,
     network: bool,
     /// Text copied here.
     clipboard: String,
@@ -2844,6 +2849,7 @@ impl Shared {
             status_items: &self.status_items,
             widgets: &self.widgets,
             text_filters: &self.text_filters,
+            stylesheets: &self.stylesheets,
             network: self.network,
             clipboard: self.system_clipboard || !self.clipboard.is_empty(),
             speech: self.speech,

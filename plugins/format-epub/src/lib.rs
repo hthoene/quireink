@@ -83,7 +83,7 @@ impl Plugin for EpubFormat {
             title: Cow::Borrowed("format-epub.title"),
             extensions: vec![Cow::Borrowed("epub")],
             open: Box::new(|storage, path, options| {
-                EpubDocument::open_with(storage, path, options.publisher_styles)
+                EpubDocument::open_options(storage, path, options)
                     .map(|d| Box::new(d) as Box<dyn Document>)
             }),
         })?;
@@ -694,6 +694,35 @@ mod tests {
         storage.remove("books/styles.css").unwrap();
         storage.remove("books/test.css").unwrap();
         assert_eq!(align(&storage), Align::Center);
+    }
+
+    #[test]
+    fn plugins_stylesheets_apply_before_ones_own() {
+        let ch2 = String::from(
+            "<html><head><style>p.c { text-align: center }</style></head><body>\
+             <p class=\"c\">Mitte</p></body></html>",
+        );
+        let storage = epub(ch2);
+        use quireink_sdk::{OpenOptions, Storage};
+        let align = |storage: &MemoryStorage, options: &OpenOptions| {
+            let doc = EpubDocument::open_options(storage, "books/test.epub", options).unwrap();
+            doc.block_at(storage, Locator::new(1, 0))
+                .unwrap()
+                .unwrap()
+                .align
+        };
+        let themed = OpenOptions::default().css(String::from("p.c { text-align: right }"));
+        assert_eq!(align(&storage, &themed), Align::End);
+        // One's own stylesheet comes after the plugins' and wins.
+        storage
+            .write("books/styles.css", b"p.c { text-align: left }")
+            .unwrap();
+        assert_eq!(align(&storage, &themed), Align::Start);
+        storage.remove("books/styles.css").unwrap();
+        // Without the publisher's styles, none of them.
+        let plain = themed.clone().publisher_styles(false);
+        assert_eq!(align(&storage, &plain), Align::Auto);
+        assert_eq!(align(&storage, &OpenOptions::default()), Align::Center);
     }
 
     #[test]

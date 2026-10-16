@@ -37,6 +37,9 @@ pub struct Env<'a> {
     pub status_items: &'a StatusItems,
     /// Filters of book text before it is laid out, from every plugin.
     pub text_filters: &'a crate::filters::TextFilters,
+    /// Plugins' stylesheets for books, in the order of the plugins (see
+    /// [`Registrar::add_stylesheet`](crate::Registrar::add_stylesheet)).
+    pub stylesheets: &'a [alloc::borrow::Cow<'static, str>],
     /// Widgets for screens that show them, from every plugin.
     pub widgets: &'a crate::widgets::Widgets,
     /// What buttons, taps and swipes do (see [`keys`](crate::keys)).
