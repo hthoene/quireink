@@ -178,7 +178,7 @@ jobs:
           mkdir -p fuzz/corpus/image
           cp crates/quireink-image/tests/data/*.jpg crates/quireink-image/tests/data/*.png fuzz/corpus/image/
           # `+nightly` overrides rust-toolchain.toml, which pins stable.
-          for target in epub txt xml hyphen image; do
+          for target in epub txt xml hyphen image lua; do
             cargo +nightly fuzz run "$target" -- -max_total_time=60 -rss_limit_mb=1024
           done
       - uses: actions/upload-artifact@v7
