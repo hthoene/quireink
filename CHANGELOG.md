@@ -11,6 +11,10 @@ change the plugin SDK.
 - Dictionary: the page of a long entry no longer covers *Online*.
 - Text and paper colours on Android (Appearance): eight of each, or
   one's own colour code (e.g. #5b4636); night mode swaps them.
+- Room between widgets: *Space*, a gap (small, medium or large), and
+  *Free space*, which takes the room the others leave, e.g. to put the
+  clock in the middle or the tools at the bottom. Both may be added more
+  than once, on the home screen and the sleep screen.
 - The folder chooser says when it is still opening a folder (slow SD
   cards) and ignores taps until it shows it.
 - Widgets have settings of their own, from the home screen's editor:

@@ -248,6 +248,12 @@ the alignment there is a ready setting: register
 `widgets::align_setting(&id, Align::Left)` and place each text with
 `widgets::align(env, id).x(area, width)`.
 
+Screens that place widgets one below the other should know the kernel's
+two widgets for room between them: `widgets::SPACE` is an ordinary
+widget, a gap; `widgets::FILL` has no height of its own and takes its
+share of the room the others leave (`widgets::fill_height`). Both may
+be in a list more than once (`widgets::repeatable`).
+
 ### Passwords and keys
 
 Plugins keep passwords, API keys and tokens with
