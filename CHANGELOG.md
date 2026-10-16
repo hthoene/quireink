@@ -9,9 +9,12 @@ change the plugin SDK.
 - Gestures as on phones: up from the bottom edge goes home, down from the
   top edge opens the quick panel, in from a side goes back (while reading
   it turns the page). The quick panel holds night mode, the light,
-  turning the screen, a screenshot, sleep and the settings, with the
-  time, date and battery above; plugins and the menu editor change what
-  it holds. Swipes in from the edges come before the screen sees them.
+  turning the screen, refreshing the screen, a screenshot, sleep and the
+  settings, with the time, date and battery above (what shows there and
+  how large is set under Appearance); plugins and the menu editor change
+  what it holds. *Refresh the screen* (`core.refresh-screen`) clears
+  e-ink ghosting with a full refresh, from the quick panel or any button
+  or gesture it is bound to. Swipes in from the edges come before the screen sees them.
 - Gestures per tool: as standard, the tool's own (gestures go to it, a
   swipe in from an edge needs a second one: for games and drawing) or
   off. A tool sets its default (`gestures.policy` in its key map); the

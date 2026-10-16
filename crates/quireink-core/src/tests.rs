@@ -512,6 +512,27 @@ impl Plugin for EdgeHolderPlugin {
 }
 
 #[test]
+fn the_screen_is_refreshed_whole_on_request() {
+    let log = log();
+    let mut kernel = Kernel::builder(DEVICE)
+        .plugin(TestPlugin::new("a", &log))
+        .user_config(
+            "[keymap.global]
+button.menu = core.refresh-screen
+",
+        )
+        .build()
+        .unwrap();
+    kernel.start(Instant(0));
+    render(&mut kernel);
+    let effects = press(&mut kernel, 100, "menu");
+    assert_eq!(
+        effects.refresh,
+        Some((Rect::new(0, 0, 90, 90), RefreshMode::Full))
+    );
+}
+
+#[test]
 fn screens_may_hold_the_edges() {
     let log = log();
     let mut kernel = Kernel::builder(DEVICE)

@@ -2443,6 +2443,11 @@ impl Kernel {
             },
             Command::Redraw(mode) => {
                 self.output.redraw = true;
+                if mode == RefreshMode::Full {
+                    // Everything, also beneath an overlay.
+                    let bounds = self.framebuffer.bounds();
+                    self.invalidate(bounds);
+                }
                 self.output.request_refresh(mode);
             }
             Command::SetMenu(menu, entries) => self.set_menu(menu, entries),

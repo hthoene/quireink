@@ -52,6 +52,9 @@ pub mod actions {
     /// light, turning the screen, …). A swipe down from the top edge
     /// opens it.
     pub const QUICK_PANEL: Id = Id::new_static("core.quick-panel");
+    /// Refreshes the whole screen with a flash, clearing what e-ink left
+    /// of earlier pictures (ghosting).
+    pub const REFRESH_SCREEN: Id = Id::new_static("core.refresh-screen");
 }
 
 /// Standard slots.

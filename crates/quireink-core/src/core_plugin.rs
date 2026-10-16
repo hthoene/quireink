@@ -78,7 +78,14 @@ impl Plugin for CorePlugin {
                 handler: None,
             })?;
         }
-        let handled: [(Id, &'static str, ActionHandler); 13] = [
+        let handled: [(Id, &'static str, ActionHandler); 14] = [
+            (
+                actions::REFRESH_SCREEN,
+                "core.action.refresh-screen",
+                Box::new(|_: &Env<'_>, out: &mut Vec<Command>| {
+                    out.push(Command::Redraw(quireink_sdk::RefreshMode::Full));
+                }),
+            ),
             (
                 actions::QUICK_PANEL,
                 "core.action.quick-panel",
@@ -272,6 +279,7 @@ impl Plugin for CorePlugin {
         for (item, order) in [
             (settings::NIGHT_MODE, 10),
             (settings::ROTATION, 40),
+            (actions::REFRESH_SCREEN, 50),
             (actions::SCREENSHOT, 60),
             (actions::SLEEP, 70),
             (actions::SETTINGS, 90),
@@ -283,6 +291,7 @@ impl Plugin for CorePlugin {
             })?;
         }
         r.add_icon(actions::QUICK_PANEL, Cow::Borrowed("adjustments"))?;
+        r.add_icon(actions::REFRESH_SCREEN, Cow::Borrowed("refresh"))?;
 
         // The settings' main page: reading, the device, customising.
         for (id, title, order) in [
