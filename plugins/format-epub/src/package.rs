@@ -32,7 +32,7 @@ use crate::css;
 use crate::obfuscation::Method;
 
 /// Bump when the cache format or the conversion changes.
-pub(crate) const CACHE_VERSION: u32 = 19;
+pub(crate) const CACHE_VERSION: u32 = 20;
 
 /// A chapter: where it is in the archive and its uncompressed size.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

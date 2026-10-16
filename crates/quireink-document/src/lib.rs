@@ -85,19 +85,26 @@ pub struct ImageRef {
     pub height: u32,
 }
 
-/// The character style of a run of text: bold, italic and the font
-/// family embedded in the document, if any (see [`Document::fonts`]).
+/// The character style of a run of text: bold, italic, small capitals
+/// and the font family embedded in the document, if any (see
+/// [`Document::fonts`]).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TextStyle(u8);
 
 /// Most embedded font families a document can use.
-pub const MAX_FAMILIES: u8 = 63;
+pub const MAX_FAMILIES: u8 = 31;
+
+/// The bits of bold, italic and small capitals; the family is in the
+/// others.
+const FLAGS: u8 = 0b1000_0011;
 
 impl TextStyle {
     pub const REGULAR: TextStyle = TextStyle(0);
     pub const BOLD: TextStyle = TextStyle(1);
     pub const ITALIC: TextStyle = TextStyle(2);
     pub const BOLD_ITALIC: TextStyle = TextStyle(3);
+    /// Small capitals: lower case letters set as smaller capitals.
+    pub const SMALL_CAPS: TextStyle = TextStyle(0b1000_0000);
 
     pub const fn bold(self) -> bool {
         self.0 & 1 != 0
@@ -107,16 +114,20 @@ impl TextStyle {
         self.0 & 2 != 0
     }
 
+    pub const fn small_caps(self) -> bool {
+        self.0 & Self::SMALL_CAPS.0 != 0
+    }
+
     /// The embedded font family (1 to [`MAX_FAMILIES`]); 0 for the
     /// reader's font.
     pub const fn family(self) -> u8 {
-        self.0 >> 2
+        (self.0 >> 2) & MAX_FAMILIES
     }
 
     /// This style in embedded family `family` (0: the reader's font).
     pub const fn with_family(self, family: u8) -> TextStyle {
         let family = if family > MAX_FAMILIES { 0 } else { family };
-        TextStyle((self.0 & 3) | (family << 2))
+        TextStyle((self.0 & FLAGS) | (family << 2))
     }
 
     /// Both styles combined, e.g. bold text in an italic paragraph; the
@@ -127,7 +138,7 @@ impl TextStyle {
         } else {
             self.family()
         };
-        TextStyle((self.0 | other.0) & 3).with_family(family)
+        TextStyle((self.0 | other.0) & FLAGS).with_family(family)
     }
 
     /// For storing styles compactly.
@@ -583,6 +594,21 @@ mod tests {
         assert_eq!(block.source_offset(block.text.len() - 1), 117);
     }
     use super::*;
+
+    #[test]
+    fn small_caps_keep_bold_italic_and_family() {
+        let style = TextStyle::SMALL_CAPS
+            .union(TextStyle::BOLD)
+            .with_family(MAX_FAMILIES);
+        assert!(style.small_caps() && style.bold() && !style.italic());
+        assert_eq!(style.family(), MAX_FAMILIES);
+        assert_eq!(TextStyle::from_bits(style.bits()), style);
+        // Too many families: the reader's font, the flags kept.
+        let other = TextStyle::SMALL_CAPS.with_family(MAX_FAMILIES + 1);
+        assert!(other.small_caps());
+        assert_eq!(other.family(), 0);
+        assert!(!TextStyle::ITALIC.with_family(5).small_caps());
+    }
 
     fn block(text: &str, start: u32, end: u32, map: OffsetMap) -> Block {
         Block {

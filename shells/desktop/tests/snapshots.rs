@@ -4,7 +4,9 @@
 //! widget out of place) then show as a failing test.
 //!
 //! The emulator's clock and battery are fixed, and every run starts from
-//! a fresh library with the sample books, so the pictures repeat. A few
+//! a fresh library with the sample books and the pages of
+//! `tests/fixtures` (for what the samples do not show, such as small
+//! capitals), so the pictures repeat. A few
 //! pixels may differ between computers where glyph edges round
 //! differently; more than that fails.
 //!
@@ -95,6 +97,13 @@ const CASES: &[Case] = &[
         script: "",
     },
     Case {
+        name: "boox-small-caps",
+        profile: "boox-go-7",
+        book: Some("books/small-caps.html"),
+        sets: &[],
+        script: "",
+    },
+    Case {
         name: "boox-settings",
         profile: "boox-go-7",
         book: None,
@@ -136,9 +145,12 @@ fn library(case: &Case) -> PathBuf {
     let _ = fs::remove_dir_all(&dir);
     let books = dir.join("books");
     fs::create_dir_all(&books).unwrap();
-    for entry in fs::read_dir(root().join("samples/library/books")).unwrap() {
-        let entry = entry.unwrap();
-        fs::copy(entry.path(), books.join(entry.file_name())).unwrap();
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    for dir in [root().join("samples/library/books"), fixtures] {
+        for entry in fs::read_dir(dir).unwrap() {
+            let entry = entry.unwrap();
+            fs::copy(entry.path(), books.join(entry.file_name())).unwrap();
+        }
     }
     if let Some(book) = case.book {
         let state = dir.join(".quireink/plugins/reader");

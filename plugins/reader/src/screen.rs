@@ -169,7 +169,24 @@ impl<'a> Faces<'a> {
     }
 }
 
+/// Small capitals are this much of the text size.
+const SMALL_CAPS: f32 = 0.78;
+
 impl Faces<'_> {
+    /// The width of `text` in `face`, small capitals included.
+    fn measure(&self, face: Face, text: &str) -> f32 {
+        let (font, size) = (self.font(face), self.size(face));
+        if !face.style.small_caps() {
+            return font.measure(size, text);
+        }
+        small_caps_parts(text)
+            .map(|(part, lower)| match lower {
+                true => font.measure(size * SMALL_CAPS, &part.to_uppercase()),
+                false => font.measure(size, part),
+            })
+            .sum()
+    }
+
     /// A space between words in `face`.
     fn space(&self, face: Face) -> f32 {
         self.font(face).advance(self.size(face), ' ') * self.word_spacing
@@ -183,15 +200,62 @@ impl Faces<'_> {
             0 => 0,
             w => (f32::from(w) * size / 48.0 + 0.5).max(1.0) as u16,
         };
-        self.font(face)
-            .draw_bolder(canvas, size, x, baseline, text, Color::BLACK, extra)
+        let font = self.font(face);
+        if !face.style.small_caps() {
+            return font.draw_bolder(canvas, size, x, baseline, text, Color::BLACK, extra);
+        }
+        // Lower case letters as smaller capitals.
+        let mut width = 0.0;
+        for (part, lower) in small_caps_parts(text) {
+            width += match lower {
+                true => {
+                    let upper = part.to_uppercase();
+                    let small = size * SMALL_CAPS;
+                    font.draw_bolder(
+                        canvas,
+                        small,
+                        x + width,
+                        baseline,
+                        &upper,
+                        Color::BLACK,
+                        extra,
+                    )
+                }
+                false => {
+                    font.draw_bolder(canvas, size, x + width, baseline, part, Color::BLACK, extra)
+                }
+            };
+        }
+        width
     }
+}
+
+/// `text` in parts of lower case letters and of the rest, each with
+/// whether it is lower case.
+fn small_caps_parts(text: &str) -> impl Iterator<Item = (&str, bool)> {
+    let mut rest = text;
+    core::iter::from_fn(move || {
+        let first = rest.chars().next()?;
+        let lower = first.is_lowercase();
+        let end = rest
+            .char_indices()
+            .find(|(_, c)| c.is_lowercase() != lower)
+            .map_or(rest.len(), |(i, _)| i);
+        let (part, tail) = rest.split_at(end);
+        rest = tail;
+        Some((part, lower))
+    })
 }
 
 impl Typesetter for Faces<'_> {
     fn advance(&self, face: Face, c: char) -> f32 {
         if c == ' ' {
             return self.space(face);
+        }
+        if face.style.small_caps() && c.is_lowercase() {
+            let small = self.size(face) * SMALL_CAPS;
+            let font = self.font(face);
+            return c.to_uppercase().map(|u| font.advance(small, u)).sum();
         }
         self.font(face).advance(self.size(face), c)
     }
@@ -1792,8 +1856,6 @@ impl Book {
             // The next of the line's words.
             let mut ordinal = 0;
             for run in &line.runs {
-                let font = faces.font(run.face);
-                let size = faces.size(run.face);
                 let (ascent, height) = faces.line(run.face);
                 let top = t.y + line.baseline - ascent;
                 let space = faces.space(run.face) + line.word_spacing;
@@ -1805,7 +1867,7 @@ impl Book {
                     if part.is_empty() {
                         continue;
                     }
-                    let width = font.measure(size, part);
+                    let width = faces.measure(run.face, part);
                     match words.last_mut() {
                         Some(last) if joined => {
                             last.text.push_str(part);
@@ -2994,4 +3056,30 @@ fn fnv(text: &str) -> u64 {
     text.bytes().fold(0xcbf2_9ce4_8422_2325, |hash, b| {
         (hash ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::vec::Vec;
+
+    #[test]
+    fn small_caps_split_lower_case() {
+        let parts: Vec<(&str, bool)> = super::small_caps_parts("Mr. Gregor Samsa").collect();
+        assert_eq!(
+            parts,
+            [
+                ("M", false),
+                ("r", true),
+                (". G", false),
+                ("regor", true),
+                (" S", false),
+                ("amsa", true)
+            ]
+        );
+        assert_eq!(super::small_caps_parts("").count(), 0);
+        assert_eq!(
+            super::small_caps_parts("straße").collect::<Vec<_>>(),
+            [("straße", true)]
+        );
+    }
 }

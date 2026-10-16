@@ -291,6 +291,29 @@ mod tests {
     }
 
     #[test]
+    fn small_caps_reach_the_runs() {
+        let page = "<html><head><style>.sc { font-variant: small-caps }</style></head><body>\
+            <p>At <span class=\"sc\">noon</span> and <b style=\"font-variant-caps: \
+            all-small-caps\">later</b>.</p></body></html>";
+        let storage = MemoryStorage::new().with("p.html", page.as_bytes().to_vec());
+        let doc = HtmlDocument::open(&storage, "p.html", true).unwrap();
+        let block = doc.block_at(&storage, Locator::START).unwrap().unwrap();
+        assert_eq!(block.text, "At noon and later.");
+        let caps: Vec<(&str, bool)> = block
+            .runs
+            .iter()
+            .filter(|r| r.style.small_caps())
+            .map(|r| {
+                (
+                    &block.text[r.start as usize..r.end as usize],
+                    r.style.bold(),
+                )
+            })
+            .collect();
+        assert_eq!(caps, [("noon", false), ("later", true)]);
+    }
+
+    #[test]
     fn pages_without_marked_reading_matter_lose_their_furniture() {
         let page = "<html><body><header>Seite</header><nav>Menü</nav>\
             <div><p>Text</p></div><footer>Fuß</footer></body></html>";

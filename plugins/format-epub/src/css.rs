@@ -25,6 +25,8 @@ pub(crate) struct Props {
     pub align: Option<Align>,
     pub bold: Option<bool>,
     pub italic: Option<bool>,
+    /// `font-variant: small-caps`.
+    pub small_caps: Option<bool>,
     pub hidden: Option<bool>,
     /// A font family: its number in [`Rules::families`] plus one; 0 for
     /// the reader's font (a generic family such as `serif`).
@@ -76,6 +78,7 @@ impl Props {
         self.align = other.align.or(self.align);
         self.bold = other.bold.or(self.bold);
         self.italic = other.italic.or(self.italic);
+        self.small_caps = other.small_caps.or(self.small_caps);
         self.hidden = other.hidden.or(self.hidden);
         self.family = other.family.or(self.family);
         self.indent = other.indent.or(self.indent);
@@ -114,6 +117,16 @@ impl Props {
                         "normal" => Some(false),
                         _ => props.italic,
                     }
+                }
+                "font-variant" | "font-variant-caps" => {
+                    props.small_caps =
+                        if value.contains("small-caps") || value.contains("petite-caps") {
+                            Some(true)
+                        } else if value == "normal" || value == "none" {
+                            Some(false)
+                        } else {
+                            props.small_caps
+                        }
                 }
                 "display" => {
                     props.hidden = Some(value == "none");
