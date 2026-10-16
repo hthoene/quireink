@@ -24,6 +24,12 @@ change the plugin SDK.
 - GIF pictures in books, comics and the sleep screen's own pictures: the
   first picture of the file (also of an animation, interlaced or with
   transparency), decoded to gray row by row like JPEG and PNG.
+- Calibre's wireless device connection (`calibre` plugin, in the tools):
+  the device finds Calibre in the network (or connects to the address
+  set), and Calibre sends books to the library, lists and deletes them
+  as with a reader on a cable; a password set in Calibre is asked for
+  once. SDK: `sha1`, and `json::raw_member`, `json::unquote`,
+  `json::string_array`.
 - Sockets for plugins (ADR 0014): TCP connections that read text or
   files of any size into storage, and UDP broadcasts to find services,
   in the emulator and on Android (`Command::Connect`, `SocketSend`,

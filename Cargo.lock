@@ -1259,6 +1259,7 @@ dependencies = [
  "quireink-plugin-about",
  "quireink-plugin-aids",
  "quireink-plugin-browser",
+ "quireink-plugin-calibre",
  "quireink-plugin-diagnostics",
  "quireink-plugin-dictionary",
  "quireink-plugin-file-manager",
@@ -1412,6 +1413,16 @@ name = "quireink-plugin-browser"
 version = "0.1.1"
 dependencies = [
  "quireink-i18n",
+ "quireink-sdk",
+]
+
+[[package]]
+name = "quireink-plugin-calibre"
+version = "0.1.1"
+dependencies = [
+ "quireink-core",
+ "quireink-i18n",
+ "quireink-platform",
  "quireink-sdk",
 ]
 
