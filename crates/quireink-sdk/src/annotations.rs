@@ -1,7 +1,7 @@
 //! The bookmarks and highlights of books, shared by plugins: the reader
 //! makes and shows them, others export or sync them (e.g. with KOReader).
 //! Whoever changes those of a book emits
-//! [`events::ANNOTATIONS_CHANGED`](crate::builtin::events::ANNOTATIONS_CHANGED)
+//! [`ANNOTATIONS_CHANGED`](events::ANNOTATIONS_CHANGED)
 //! (see [`changed`]), so readers show them anew and syncs pass them on.
 //!
 //! A book's annotations are kept in `.quireink/annotations/<hash>.txt`
@@ -168,7 +168,7 @@ pub fn save(storage: &dyn Storage, book: &str, annotations: &[Annotation]) {
     }
 }
 
-/// `text` on one line, at most [`MAX_TEXT`] bytes.
+/// `text` on one line, at most 240 bytes.
 pub fn snippet(text: &str) -> String {
     let mut out: String = text
         .chars()
