@@ -44,11 +44,15 @@ fn luma(r: u32, g: u32, b: u32) -> u32 {
     (r * 299 + g * 587 + b * 114 + 500) / 1000
 }
 
-/// Turns PNG rows into gray rows.
+/// Turns PNG rows into gray rows, or RGB rows for a sink that wants
+/// colour.
 struct Rows<'s> {
     header: Header,
     /// Gray of each palette entry, over white.
     palette: [u8; 256],
+    /// Each palette entry over white, for colour.
+    colors: [[u8; 3]; 256],
+    color: bool,
     previous: Vec<u8>,
     current: Vec<u8>,
     filled: usize,
@@ -68,7 +72,11 @@ impl Rows<'_> {
             data = &data[take..];
             if self.filled == row_len {
                 self.unfilter()?;
-                self.convert();
+                if self.color {
+                    self.convert_rgb();
+                } else {
+                    self.convert();
+                }
                 self.scaler.row(&self.gray, self.sink)?;
                 core::mem::swap(&mut self.previous, &mut self.current);
                 self.filled = 0;
@@ -172,6 +180,44 @@ impl Rows<'_> {
     }
 }
 
+impl Rows<'_> {
+    /// The current row as RGB (in `gray`, three bytes a pixel),
+    /// transparency over white.
+    fn convert_rgb(&mut self) {
+        let h = &self.header;
+        let row = &self.current[1..];
+        let channels = h.channels();
+        for x in 0..h.width as usize {
+            let s = |c: usize| Self::sample(row, h.depth, x * channels + c);
+            let over_white = |v: u32, alpha: u32| ((v * alpha + 255 * (255 - alpha)) / 255) as u8;
+            let rgb = match h.color {
+                0 => [s(0) as u8; 3],
+                2 => [s(0) as u8, s(1) as u8, s(2) as u8],
+                3 => {
+                    let index = if h.depth == 8 {
+                        usize::from(row[x])
+                    } else {
+                        let bit = x * usize::from(h.depth);
+                        let shift = 8 - usize::from(h.depth) - bit % 8;
+                        usize::from(row[bit / 8] >> shift) & ((1 << h.depth) - 1)
+                    };
+                    self.colors[index]
+                }
+                4 => [over_white(s(0), s(1)); 3],
+                _ => {
+                    let a = s(3);
+                    [
+                        over_white(s(0), a),
+                        over_white(s(1), a),
+                        over_white(s(2), a),
+                    ]
+                }
+            };
+            self.gray[x * 3..x * 3 + 3].copy_from_slice(&rgb);
+        }
+    }
+}
+
 pub(crate) fn decode(
     reader: &mut Reader<'_>,
     max_side: u32,
@@ -246,22 +292,29 @@ pub(crate) fn decode(
                     let h = header
                         .take()
                         .ok_or(ImageError::Invalid("IDAT before IHDR"))?;
+                    let mut rgb = [[255u8; 3]; 256];
                     for (i, &(r, g, b)) in colors.iter().enumerate() {
                         let a = u32::from(alpha[i]);
+                        let over = |v: u8| ((u32::from(v) * a + 255 * (255 - a)) / 255) as u8;
                         let y = luma(u32::from(r), u32::from(g), u32::from(b));
                         palette[i] = ((y * a + 255 * (255 - a)) / 255) as u8;
+                        rgb[i] = [over(r), over(g), over(b)];
                     }
                     let factor = factor_for(h.width, h.height, max_side);
-                    let scaler = Downscaler::new(h.width, factor)?;
                     let sink = sink.take().ok_or(ImageError::Invalid("state"))?;
+                    let color = sink.wants_color();
+                    let channels = if color { 3 } else { 1 };
+                    let scaler = Downscaler::new(h.width, factor, channels)?;
                     sink.start(scaler.out_width(), h.height.div_ceil(factor))?;
                     let row_len = h.row_bytes() + 1;
                     rows = Some(Rows {
                         palette,
+                        colors: rgb,
+                        color,
                         previous: zeroed(row_len)?,
                         current: zeroed(row_len)?,
                         filled: 0,
-                        gray: zeroed(h.width as usize)?,
+                        gray: zeroed(h.width as usize * channels)?,
                         done: 0,
                         scaler,
                         sink,

@@ -299,3 +299,123 @@ fn damaged_gifs_fail_without_panicking() {
         let _ = decode(Format::Gif, &mut source, 100, &mut out);
     }
 }
+
+/// Collects RGB rows, as a sink for colour screens does.
+#[derive(Default)]
+struct CollectRgb {
+    width: u32,
+    height: u32,
+    pixels: Vec<u8>,
+}
+
+impl ImageSink for CollectRgb {
+    fn start(&mut self, width: u32, height: u32) -> Result<(), ImageError> {
+        self.width = width;
+        self.height = height;
+        Ok(())
+    }
+
+    fn row(&mut self, _: &[u8]) -> Result<(), ImageError> {
+        panic!("gray row for a sink that wants colour");
+    }
+
+    fn wants_color(&self) -> bool {
+        true
+    }
+
+    fn row_rgb(&mut self, rgb: &[u8]) -> Result<(), ImageError> {
+        assert_eq!(rgb.len(), self.width as usize * 3);
+        self.pixels.extend_from_slice(rgb);
+        Ok(())
+    }
+}
+
+fn decoded_rgb(data: &[u8], max_side: u32) -> CollectRgb {
+    let format = Format::detect(data).expect("known format");
+    let mut source = data;
+    let mut out = CollectRgb::default();
+    decode(format, &mut source, max_side, &mut out).expect("decodes");
+    assert_eq!(out.pixels.len(), (out.width * out.height * 3) as usize);
+    out
+}
+
+#[test]
+fn colour_jpeg_matches_reference_in_colour() {
+    let image = decoded_rgb(include_bytes!("data/alice-cover.jpg"), 140);
+    // 800×1104 by 1/8 fits 140.
+    assert_eq!((image.width, image.height), (100, 138));
+    let diff = difference(&image.pixels, include_bytes!("data/alice-cover.rgb8"));
+    assert!(diff < 6.0, "mean difference {diff}");
+}
+
+#[test]
+fn colour_pngs_match_references() {
+    for (png, rgb) in [
+        (
+            &include_bytes!("data/colors-rgb.png")[..],
+            &include_bytes!("data/colors-rgb.rgb")[..],
+        ),
+        (
+            include_bytes!("data/colors-rgba.png"),
+            include_bytes!("data/colors-rgba.rgb"),
+        ),
+        (
+            include_bytes!("data/colors-palette.png"),
+            include_bytes!("data/colors-palette.rgb"),
+        ),
+    ] {
+        let image = decoded_rgb(png, 100);
+        assert_eq!((image.width, image.height), (20, 12));
+        let diff = difference(&image.pixels, rgb);
+        assert!(diff < 1.0, "mean difference {diff}");
+    }
+}
+
+#[test]
+fn colour_gif_matches_reference() {
+    let image = decoded_rgb(include_bytes!("data/alice-cover.gif"), 111);
+    assert_eq!((image.width, image.height), (80, 111));
+    let diff = difference(&image.pixels, include_bytes!("data/alice-cover-gif.rgb2"));
+    assert!(diff < 1.0, "mean difference {diff}");
+}
+
+#[test]
+fn gray_sinks_still_get_gray_from_colour_images() {
+    // The same pictures for e-ink: gray as before.
+    let image = decoded(include_bytes!("data/colors-rgb.png"), 100);
+    assert_eq!(image.pixels.len(), 20 * 12);
+}
+
+/// `image` reduced by averaging `factor`×`factor` blocks, channel by
+/// channel.
+fn reduce_rgb(image: &CollectRgb, factor: u32) -> Vec<u8> {
+    let channels: Vec<Vec<u8>> = (0..3)
+        .map(|c| {
+            let plane = Collect {
+                width: image.width,
+                height: image.height,
+                pixels: image.pixels.iter().skip(c).step_by(3).copied().collect(),
+            };
+            reduce(&plane, factor)
+        })
+        .collect();
+    (0..channels[0].len())
+        .flat_map(|i| channels.iter().map(move |c| c[i]))
+        .collect()
+}
+
+#[test]
+fn progressive_jpeg_matches_reference_in_colour() {
+    let data = include_bytes!("data/alice-progressive.jpg");
+    let reference = include_bytes!("data/alice-progressive.rgb4");
+    // A quarter: the 2×2 lowest frequencies of each block, chroma too.
+    let image = decoded_rgb(data, 300);
+    assert_eq!((image.width, image.height), (200, 276));
+    let diff = difference(&image.pixels, reference);
+    assert!(diff < 5.0, "mean difference {diff}");
+    // Full size: all frequencies.
+    let image = decoded_rgb(data, 2000);
+    assert_eq!((image.width, image.height), (800, 1104));
+    let diff = difference(&reduce_rgb(&image, 4), reference);
+    assert!(diff < 4.0, "mean difference {diff}");
+}

@@ -178,12 +178,14 @@ impl HtmlDocument {
                     focus: self.focus,
                     base: self.base.as_deref(),
                 };
+                // Web pages' pictures are not fetched: no colour to ask for.
                 convert::convert(
                     storage,
                     &source,
                     &self.paths,
                     Default::default(),
                     self.styles,
+                    false,
                 )?
             }
         };
@@ -214,7 +216,7 @@ impl Document for HtmlDocument {
             return Ok(None);
         }
         let (length, blocks) = self.converted(storage)?;
-        cached::block_at(storage, &self.paths, length, blocks, at.offset)
+        cached::block_at(storage, &self.paths, length, blocks, at.offset, false)
     }
 
     fn links(&self, storage: &dyn Storage, section: u32, from: u32, to: u32) -> Vec<Link> {

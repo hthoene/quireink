@@ -35,6 +35,9 @@ struct Case {
     book: Option<&'static str>,
     sets: &'static [&'static str],
     script: &'static str,
+    /// On colour profiles: the share of pixels, in parts per ten thousand,
+    /// that must be in colour (ADR 0015). The reference keeps the grays.
+    colour: usize,
 }
 
 const CASES: &[Case] = &[
@@ -44,6 +47,7 @@ const CASES: &[Case] = &[
         book: None,
         sets: &[],
         script: "",
+        colour: 0,
     },
     Case {
         name: "x4-reader-epub",
@@ -51,6 +55,7 @@ const CASES: &[Case] = &[
         book: Some("books/alice-in-wonderland.epub"),
         sets: &[],
         script: "page-forward,page-forward",
+        colour: 0,
     },
     Case {
         name: "x4-settings-round-strong",
@@ -62,6 +67,7 @@ const CASES: &[Case] = &[
             "core.ui-contrast=core.contrast.strong",
         ],
         script: "right,right",
+        colour: 0,
     },
     Case {
         name: "boox-home",
@@ -69,6 +75,7 @@ const CASES: &[Case] = &[
         book: None,
         sets: &[],
         script: "",
+        colour: 0,
     },
     Case {
         name: "boox-home-arranged",
@@ -81,6 +88,7 @@ const CASES: &[Case] = &[
             "home.status.align=core.align.right",
         ],
         script: "",
+        colour: 0,
     },
     Case {
         name: "boox-reader-epub",
@@ -88,6 +96,7 @@ const CASES: &[Case] = &[
         book: Some("books/die-verwandlung.epub"),
         sets: &[],
         script: "",
+        colour: 0,
     },
     Case {
         name: "boox-reader-txt",
@@ -95,6 +104,7 @@ const CASES: &[Case] = &[
         book: Some("books/alice-in-wonderland.txt"),
         sets: &["core.language=de"],
         script: "",
+        colour: 0,
     },
     Case {
         name: "boox-small-caps",
@@ -102,6 +112,7 @@ const CASES: &[Case] = &[
         book: Some("books/small-caps.html"),
         sets: &[],
         script: "",
+        colour: 0,
     },
     Case {
         name: "boox-settings",
@@ -109,6 +120,7 @@ const CASES: &[Case] = &[
         book: None,
         sets: &["slots.core.home=settings.list"],
         script: "",
+        colour: 0,
     },
     Case {
         name: "boox-widget-editor",
@@ -117,6 +129,15 @@ const CASES: &[Case] = &[
         // The pencil, then the second widget.
         sets: &["home.page-1=home.status, home.clock, home.date"],
         script: "tap:1185:1635,wait:300,tap:600:246,wait:300",
+        colour: 0,
+    },
+    Case {
+        name: "kobo-colour-cover",
+        profile: "kobo-libra-colour",
+        book: Some("books/alice-in-wonderland.epub"),
+        sets: &[],
+        script: "",
+        colour: 1_000,
     },
 ];
 
@@ -166,11 +187,25 @@ fn library(case: &Case) -> PathBuf {
 
 /// The gray of each pixel of a PNG, with its size.
 fn grays(path: &Path) -> (u32, u32, Vec<u8>) {
+    let (width, height, gray, _) = pixels(path);
+    (width, height, gray)
+}
+
+/// The gray of each pixel of a PNG, its size, and how many of its pixels
+/// are in colour.
+fn pixels(path: &Path) -> (u32, u32, Vec<u8>, usize) {
     let decoder = png::Decoder::new(File::open(path).unwrap());
     let mut reader = decoder.read_info().unwrap();
     let mut data = vec![0; reader.output_buffer_size()];
     let info = reader.next_frame(&mut data).unwrap();
     let data = &data[..info.buffer_size()];
+    let colourful = match info.color_type {
+        png::ColorType::Rgb => data
+            .chunks_exact(3)
+            .filter(|p| p.iter().max().unwrap() - p.iter().min().unwrap() > 24)
+            .count(),
+        _ => 0,
+    };
     let gray = match info.color_type {
         png::ColorType::Grayscale => data.to_vec(),
         png::ColorType::Rgb => data
@@ -182,7 +217,7 @@ fn grays(path: &Path) -> (u32, u32, Vec<u8>) {
             .collect(),
         other => panic!("{}: unexpected {other:?}", path.display()),
     };
-    (info.width, info.height, gray)
+    (info.width, info.height, gray, colourful)
 }
 
 fn write_gray(path: &Path, width: u32, height: u32, gray: &[u8]) {
@@ -195,8 +230,9 @@ fn write_gray(path: &Path, width: u32, height: u32, gray: &[u8]) {
     writer.write_image_data(gray).unwrap();
 }
 
-/// Draws `case` and returns its picture in grays.
-fn draw(case: &Case) -> (u32, u32, Vec<u8>) {
+/// Draws `case` and returns its picture in grays, and how many of its
+/// pixels are in colour.
+fn draw(case: &Case) -> (u32, u32, Vec<u8>, usize) {
     let library = library(case);
     let shot = library.join("shot.png");
     let mut command = Command::new(env!("CARGO_BIN_EXE_quireink-emu"));
@@ -221,7 +257,7 @@ fn draw(case: &Case) -> (u32, u32, Vec<u8>) {
         case.name,
         String::from_utf8_lossy(&output.stderr)
     );
-    let picture = grays(&shot);
+    let picture = pixels(&shot);
     let _ = fs::remove_dir_all(&library);
     picture
 }
@@ -233,7 +269,13 @@ fn screens_look_as_before() {
     let failed_dir = root().join("target/snapshots");
     let mut failures = Vec::new();
     for case in CASES {
-        let (width, height, gray) = draw(case);
+        let (width, height, gray, colourful) = draw(case);
+        if colourful < gray.len() * case.colour / 10_000 {
+            failures.push(format!(
+                "{}: {colourful} pixels in colour, too few",
+                case.name
+            ));
+        }
         let reference = references.join(format!("{}.png", case.name));
         if bless || !reference.exists() {
             write_gray(&reference, width, height, &gray);

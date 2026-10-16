@@ -2,17 +2,21 @@
 //! frequencies or bits of precision to every block, so all blocks are
 //! kept until the last scan.
 //!
-//! To stay small, only luma is kept, and only the frequencies the output
-//! needs: an image shown at half its size or less needs the 4×4 lowest
-//! frequencies of each block, at a quarter 2×2, at an eighth only the DC.
-//! Scans of the other components (and, where only the DC is kept, of
-//! the other frequencies) are skipped without decoding. Per block that is 2 bytes (an eighth), 16 (a
-//! quarter), 40 (half) or 136 (full size); if that cannot be had with
-//! some memory left over, the next smaller size is tried.
+//! To stay small, only luma is kept (and chroma for a sink that wants
+//! colour), and only the frequencies the output needs: an image shown at
+//! half its size or less needs the 4×4 lowest frequencies of each block,
+//! at a quarter 2×2, at an eighth only the DC. Scans of the other
+//! components (and, where only the DC is kept, of the other frequencies)
+//! are skipped without decoding. Per block that is 2 bytes (an eighth),
+//! 16 (a quarter), 40 (half) or 136 (full size); if that cannot be had
+//! with some memory left over, the next smaller size is tried, and in
+//! the end gray.
 
 use alloc::vec::Vec;
 
-use crate::jpeg::{Bits, Component, Huffman, ZIGZAG, idct_scaled, read_huffman, read_quant};
+use crate::jpeg::{
+    Bits, Component, Huffman, ZIGZAG, idct_scaled, read_huffman, read_quant, ycbcr_to_rgb,
+};
 use crate::{Downscaler, ImageError, ImageSink, Reader, factor_for, zeroed};
 
 const MISSING: ImageError = ImageError::Invalid("missing Huffman table");
@@ -35,7 +39,7 @@ pub(crate) struct Frame {
     pub restart_interval: u32,
 }
 
-/// The kept coefficients of all luma blocks.
+/// The kept coefficients of all blocks of one component.
 struct Coefficients {
     /// Pixels a block side at the output scale (8, 4, 2 or 1).
     n: usize,
@@ -112,15 +116,24 @@ impl Coefficients {
     }
 }
 
-/// The geometry of the luma blocks.
+/// The geometry of the blocks.
 struct Layout {
     h_max: usize,
     v_max: usize,
     mcus_x: usize,
     mcus_y: usize,
-    /// Luma blocks a row, and rows, as stored (whole MCUs).
-    width: usize,
-    height: usize,
+}
+
+impl Layout {
+    /// Blocks a row of component `c`, as stored (whole MCUs).
+    fn stride(&self, component: &Component) -> usize {
+        self.mcus_x * component.h
+    }
+
+    /// All blocks of component `c`, as stored.
+    fn blocks(&self, component: &Component) -> usize {
+        self.stride(component) * self.mcus_y * component.v
+    }
 }
 
 /// Where the next marker is: read up to it, the marker byte returned.
@@ -153,34 +166,37 @@ pub(crate) fn decode(
     }
     let h_max = frame.components.iter().map(|c| c.h).max().unwrap_or(1);
     let v_max = frame.components.iter().map(|c| c.v).max().unwrap_or(1);
-    let luma = frame.components[0];
-    let mcus_x = width.div_ceil(8 * h_max);
-    let mcus_y = height.div_ceil(8 * v_max);
     let layout = Layout {
         h_max,
         v_max,
-        mcus_x,
-        mcus_y,
-        width: mcus_x * luma.h,
-        height: mcus_y * luma.v,
+        mcus_x: width.div_ceil(8 * h_max),
+        mcus_y: height.div_ceil(8 * v_max),
     };
     // The smallest output scale the requested size allows, else smaller
-    // ones where memory is short.
+    // ones where memory is short; colour where it is wanted, else gray.
     let factor = factor_for(frame.width, frame.height, max_side) as usize;
-    let mut n = match factor {
+    let largest = match factor {
         1 => 8,
         2..=3 => 4,
         4..=7 => 2,
         _ => 1,
     };
-    let blocks = layout.width * layout.height;
-    let mut coefficients = loop {
-        match Coefficients::new(blocks, n) {
-            Ok(c) => break c,
-            Err(_) if n > 1 => n /= 2,
-            Err(e) => return Err(e),
+    let color = sink.wants_color() && frame.components.len() == 3;
+    let mut coefficients = None;
+    for kept in if color { [3, 1] } else { [1, 1] } {
+        let mut n = largest;
+        coefficients = loop {
+            match keep(&frame.components[..kept], &layout, n) {
+                Ok(c) => break Some(c),
+                Err(_) if n > 1 => n /= 2,
+                Err(_) => break None,
+            }
+        };
+        if coefficients.is_some() {
+            break;
         }
-    };
+    }
+    let mut coefficients = coefficients.ok_or(ImageError::OutOfMemory)?;
     // The first scan's header is next (its length already read).
     let mut marker = 0xda;
     let mut first = true;
@@ -221,6 +237,21 @@ pub(crate) fn decode(
     output(&frame, &layout, &coefficients, max_side, sink)
 }
 
+/// The kept coefficients of `components`, `n`×`n` a block.
+fn keep(
+    components: &[Component],
+    layout: &Layout,
+    n: usize,
+) -> Result<Vec<Coefficients>, ImageError> {
+    let mut kept = Vec::new();
+    kept.try_reserve_exact(components.len())
+        .map_err(|_| ImageError::OutOfMemory)?;
+    for component in components {
+        kept.push(Coefficients::new(layout.blocks(component), n)?);
+    }
+    Ok(kept)
+}
+
 /// The kinds of scans.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Kind {
@@ -230,13 +261,13 @@ enum Kind {
     AcRefine,
 }
 
-/// Decodes one scan (its header next) into `coefficients`; the marker
-/// after it.
+/// Decodes one scan (its header next) into `coefficients` (of the first
+/// components, those kept); the marker after it.
 fn scan(
     reader: &mut Reader<'_>,
     frame: &mut Frame,
     layout: &Layout,
-    coefficients: &mut Coefficients,
+    coefficients: &mut [Coefficients],
 ) -> Result<u8, ImageError> {
     let count = usize::from(reader.byte()?);
     if count == 0 || count > 4 {
@@ -268,11 +299,12 @@ fn scan(
         (false, true) => Kind::AcFirst,
         (false, false) => Kind::AcRefine,
     };
-    let luma_in = members.contains(&0);
-    // Nothing kept in this scan: skipped without decoding. (A luma band
-    // without kept frequencies is still decoded where others are kept:
-    // later refining scans may span it and need to know what it set.)
-    if !luma_in || start > 0 && (count != 1 || coefficients.n == 1) {
+    let kept_in = members.iter().any(|&c| c < coefficients.len());
+    let n = coefficients.first().map_or(1, |c| c.n);
+    // Nothing kept in this scan: skipped without decoding. (A band without
+    // kept frequencies is still decoded where others are kept: later
+    // refining scans may span it and need to know what it set.)
+    if !kept_in || start > 0 && (count != 1 || n == 1) {
         return next_marker(reader);
     }
     for &c in &members {
@@ -325,7 +357,7 @@ fn scan(
         for by in 0..blocks_y {
             for bx in 0..blocks_x {
                 before_mcu(&mut bits, &mut frame.components, &mut eob_run)?;
-                let block = by * layout.width + bx;
+                let block = by * layout.stride(&component) + bx;
                 let dc = frame.dc_tables[component.dc].as_ref();
                 let ac = frame.ac_tables[component.ac].as_ref();
                 decode_block(
@@ -335,8 +367,7 @@ fn scan(
                     (dc, ac),
                     &mut frame.components[c].prediction,
                     &mut eob_run,
-                    coefficients,
-                    Some(block),
+                    coefficients.get_mut(c).map(|kept| (kept, block)),
                 )?;
             }
         }
@@ -349,9 +380,9 @@ fn scan(
                     let component = frame.components[c];
                     for by in 0..component.v {
                         for bx in 0..component.h {
-                            let block = (c == 0).then(|| {
-                                (my * component.v + by) * layout.width + mx * component.h + bx
-                            });
+                            let block = (my * component.v + by) * layout.stride(&component)
+                                + mx * component.h
+                                + bx;
                             let dc = frame.dc_tables[component.dc].as_ref();
                             decode_block(
                                 &mut bits,
@@ -360,8 +391,7 @@ fn scan(
                                 (dc, None),
                                 &mut frame.components[c].prediction,
                                 &mut eob_run,
-                                coefficients,
-                                block,
+                                coefficients.get_mut(c).map(|kept| (kept, block)),
                             )?;
                         }
                     }
@@ -384,9 +414,9 @@ fn height_of(frame: &Frame, layout: &Layout, c: usize) -> usize {
     (frame.height as usize * frame.components[c].v).div_ceil(layout.v_max)
 }
 
-/// Decodes one block of a scan; `block` is where a luma block is kept
-/// (`None` for the other components, decoded only to go on).
-#[allow(clippy::too_many_arguments)]
+/// Decodes one block of a scan into `kept`, its component's coefficients
+/// and the block's place among them (`None` for components not kept,
+/// decoded only to go on).
 fn decode_block(
     bits: &mut Bits<'_, '_>,
     kind: Kind,
@@ -394,8 +424,7 @@ fn decode_block(
     (dc, ac): (Option<&Huffman>, Option<&Huffman>),
     prediction: &mut i32,
     eob_run: &mut u32,
-    coefficients: &mut Coefficients,
-    block: Option<usize>,
+    kept: Option<(&mut Coefficients, usize)>,
 ) -> Result<(), ImageError> {
     match kind {
         Kind::DcFirst => {
@@ -405,19 +434,19 @@ fn decode_block(
             }
             let diff = Bits::extend(bits.receive(u32::from(t))?, u32::from(t));
             *prediction = prediction.wrapping_add(diff);
-            if let Some(block) = block {
+            if let Some((coefficients, block)) = kept {
                 coefficients.set(block, 0, prediction.wrapping_shl(u32::from(low)));
             }
         }
         Kind::DcRefine => {
             if bits.bit()? == 1
-                && let Some(v) = block.and_then(|b| coefficients.value(b, 0))
+                && let Some(v) = kept.and_then(|(c, block)| c.value(block, 0))
             {
                 *v |= 1 << low;
             }
         }
         Kind::AcFirst => {
-            let block = block.ok_or(ImageError::Invalid("bad scan"))?;
+            let (coefficients, block) = kept.ok_or(ImageError::Invalid("bad scan"))?;
             if *eob_run > 0 {
                 *eob_run -= 1;
                 return Ok(());
@@ -449,7 +478,7 @@ fn decode_block(
             }
         }
         Kind::AcRefine => {
-            let block = block.ok_or(ImageError::Invalid("bad scan"))?;
+            let (coefficients, block) = kept.ok_or(ImageError::Invalid("bad scan"))?;
             let ac = ac.ok_or(MISSING)?;
             let p1 = 1i32 << low;
             let mut k = start;
@@ -503,68 +532,87 @@ fn decode_block(
     Ok(())
 }
 
-/// Turns the kept coefficients into rows of gray, scaled down to fit
-/// `max_side`.
+/// Turns the kept coefficients into rows of gray (or colour, where
+/// chroma is kept), scaled down to fit `max_side`.
 fn output(
     frame: &Frame,
     layout: &Layout,
-    coefficients: &Coefficients,
+    coefficients: &[Coefficients],
     max_side: u32,
     sink: &mut dyn ImageSink,
 ) -> Result<(), ImageError> {
-    let n = coefficients.n;
-    let luma = frame.components[0];
-    // Luma at less than full resolution is rare; it is stretched.
-    let (sx, sy) = (layout.h_max / luma.h, layout.v_max / luma.v);
+    let n = coefficients.first().map_or(1, |c| c.n);
+    let color = coefficients.len() == 3;
     let scale = 8 / n;
     let out_width = (frame.width as usize).div_ceil(scale);
     let out_height = (frame.height as usize).div_ceil(scale);
     let factor = factor_for(out_width as u32, out_height as u32, max_side);
-    let mut scaler = Downscaler::new(out_width as u32, factor)?;
+    let mut scaler = Downscaler::new(out_width as u32, factor, if color { 3 } else { 1 })?;
     sink.start(scaler.out_width(), (out_height as u32).div_ceil(factor))?;
 
-    let quant = &frame.quant[luma.quant];
-    // The zig-zag index of each kept coefficient.
-    let mut zigzag_of = [0usize; 64];
-    for (z, slot) in coefficients.slot.iter().enumerate() {
-        if let Some(slot) = slot {
-            zigzag_of[usize::from(*slot)] = z;
-        }
+    // One row of MCUs of each kept component at the output scale, each
+    // stretched where it has less resolution than the largest.
+    let plane_width = layout.mcus_x * layout.h_max * n;
+    let plane_height = layout.v_max * n;
+    let mut planes: Vec<Vec<u8>> = Vec::new();
+    planes
+        .try_reserve_exact(coefficients.len())
+        .map_err(|_| ImageError::OutOfMemory)?;
+    for _ in coefficients {
+        planes.push(zeroed(plane_width * plane_height)?);
     }
-    let band_width = layout.width * n;
-    let mut band: Vec<u8> = zeroed(band_width * n)?;
-    let mut row: Vec<u8> = zeroed(out_width)?;
+    let mut row: Vec<u8> = zeroed(out_width * if color { 3 } else { 1 })?;
     let mut emitted = 0usize;
     let mut pixels = [0u8; 64];
-    'rows: for by in 0..layout.height {
-        for bx in 0..layout.width {
-            let block = by * layout.width + bx;
-            let mut coef = [0i32; 64];
-            let kept =
-                &coefficients.values[block * coefficients.kept..(block + 1) * coefficients.kept];
-            for (&z, &value) in zigzag_of.iter().zip(kept) {
-                let value = i32::from(value);
-                let pos = usize::from(ZIGZAG[z]);
-                coef[pos] = value.saturating_mul(i32::from(quant[z]));
+    for my in 0..layout.mcus_y {
+        for ((component, kept), plane) in frame.components.iter().zip(coefficients).zip(&mut planes)
+        {
+            let quant = &frame.quant[component.quant];
+            let (sx, sy) = (layout.h_max / component.h, layout.v_max / component.v);
+            // The zig-zag index of each kept coefficient.
+            let mut zigzag_of = [0usize; 64];
+            for (z, slot) in kept.slot.iter().enumerate() {
+                if let Some(slot) = slot {
+                    zigzag_of[usize::from(*slot)] = z;
+                }
             }
-            idct_scaled(&coef, n, &mut pixels, n);
-            for y in 0..n {
-                let at = y * band_width + bx * n;
-                band[at..at + n].copy_from_slice(&pixels[y * n..y * n + n]);
+            let stride = layout.stride(component);
+            for by in 0..component.v {
+                for bx in 0..stride {
+                    let block = (my * component.v + by) * stride + bx;
+                    let mut coef = [0i32; 64];
+                    let values = &kept.values[block * kept.kept..(block + 1) * kept.kept];
+                    for (&z, &value) in zigzag_of.iter().zip(values) {
+                        coef[usize::from(ZIGZAG[z])] =
+                            i32::from(value).saturating_mul(i32::from(quant[z]));
+                    }
+                    idct_scaled(&coef, n, &mut pixels, n);
+                    let (x0, y0) = (bx * sx * n, by * sy * n);
+                    for y in 0..n * sy {
+                        let at = (y0 + y) * plane_width + x0;
+                        for x in 0..n * sx {
+                            plane[at + x] = pixels[(y / sy) * n + x / sx];
+                        }
+                    }
+                }
             }
         }
-        for y in 0..n {
-            let line = &band[y * band_width..(y + 1) * band_width];
-            for (x, out) in row.iter_mut().enumerate() {
-                *out = line.get(x / sx).copied().unwrap_or(255);
+        for y in 0..plane_height {
+            if emitted == out_height {
+                break;
             }
-            for _ in 0..sy {
-                if emitted == out_height {
-                    break 'rows;
+            let at = y * plane_width;
+            if color {
+                for x in 0..out_width {
+                    let pixel =
+                        ycbcr_to_rgb(planes[0][at + x], planes[1][at + x], planes[2][at + x]);
+                    row[x * 3..x * 3 + 3].copy_from_slice(&pixel);
                 }
-                scaler.row(&row, sink)?;
-                emitted += 1;
+            } else {
+                row.copy_from_slice(&planes[0][at..at + out_width]);
             }
+            scaler.row(&row, sink)?;
+            emitted += 1;
         }
     }
     scaler.finish(sink)

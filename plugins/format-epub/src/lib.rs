@@ -31,6 +31,7 @@ mod html;
 mod markdown;
 mod obfuscation;
 mod package;
+mod pictures;
 mod woff;
 
 use alloc::borrow::Cow;
@@ -105,7 +106,7 @@ impl Plugin for EpubFormat {
             title: Cow::Borrowed("format-epub.fb2"),
             extensions: vec![Cow::Borrowed("fb2"), Cow::Borrowed("fb2.zip")],
             open: Box::new(|storage, path, options| {
-                Fb2Document::open(storage, path, options.publisher_styles)
+                Fb2Document::open_options(storage, path, options)
                     .map(|d| Box::new(d) as Box<dyn Document>)
             }),
         })?;
@@ -122,8 +123,9 @@ impl Plugin for EpubFormat {
             id: CBZ,
             title: Cow::Borrowed("format-epub.cbz"),
             extensions: vec![Cow::Borrowed("cbz")],
-            open: Box::new(|storage, path, _| {
-                CbzDocument::open(storage, path).map(|d| Box::new(d) as Box<dyn Document>)
+            open: Box::new(|storage, path, options| {
+                CbzDocument::open_options(storage, path, options)
+                    .map(|d| Box::new(d) as Box<dyn Document>)
             }),
         })?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/en.ini")))?;

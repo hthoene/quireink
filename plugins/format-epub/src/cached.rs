@@ -5,9 +5,8 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use quireink_sdk::document::{
-    Align, Block, BlockKind, DocumentError, ImageRef, Link, OffsetMap, Run, TextStyle,
+    Align, Block, BlockKind, DocumentError, Link, OffsetMap, Run, TextStyle,
 };
-use quireink_sdk::image::GrayFile;
 use quireink_sdk::{Storage, StorageError};
 
 use crate::convert::{self, CachePaths, HEADER, INDEX};
@@ -27,6 +26,7 @@ pub(crate) fn read_block(
     length: u32,
     blocks: u32,
     i: u32,
+    color: bool,
 ) -> Result<Block, DocumentError> {
     let mut entry = [0u8; INDEX as usize];
     storage.read_at(&paths.index, u64::from(i * INDEX), &mut entry)?;
@@ -77,13 +77,9 @@ pub(crate) fn read_block(
     let mut text = String::from_utf8_lossy(&text).into_owned();
     let mut image = None;
     if kind == BlockKind::Image {
-        // `cache path<TAB>alternative text`
+        // `cache name<TAB>alternative text`, the picture in either kind.
         let (path, alt) = text.split_once('\t').unwrap_or((&text, ""));
-        image = GrayFile::open(storage, path).map(|file| ImageRef {
-            path: file.path,
-            width: file.width,
-            height: file.height,
-        });
+        image = crate::pictures::open(storage, path, color);
         let alt = String::from(alt);
         if image.is_none() {
             // Not decodable: its alternative text instead.
@@ -115,6 +111,7 @@ pub(crate) fn block_at(
     length: u32,
     blocks: u32,
     offset: u32,
+    color: bool,
 ) -> Result<Option<Block>, DocumentError> {
     if blocks == 0 || offset >= length {
         return Ok(None);
@@ -129,7 +126,7 @@ pub(crate) fn block_at(
             high = mid;
         }
     }
-    read_block(storage, paths, length, blocks, low.saturating_sub(1)).map(Some)
+    read_block(storage, paths, length, blocks, low.saturating_sub(1), color).map(Some)
 }
 
 /// Calls `visit` with each line of a cache file until it returns

@@ -159,6 +159,21 @@ impl<'a> Canvas<'a> {
         self.framebuffer.mark_dirty(rect);
     }
 
+    /// Draws a row of RGB pixels (an image row, three bytes a pixel)
+    /// starting at `(x, y)`: as they are on colour frames, as gray
+    /// (dithered like gray rows) on gray ones.
+    pub fn draw_rgb_row(&mut self, x: i32, y: i32, rgb: &[u8]) {
+        let Some(rect) = self.clip_signed(x, y, (rgb.len() / 3) as u32, 1) else {
+            return;
+        };
+        for px in rect.x..rect.right() as u16 {
+            let at = (i32::from(px) - x) as usize * 3;
+            self.framebuffer
+                .put_rgb(px, rect.y, [rgb[at], rgb[at + 1], rgb[at + 2]]);
+        }
+        self.framebuffer.mark_dirty(rect);
+    }
+
     /// Blends `color` over a `width`×`height` area at `(x, y)` using
     /// `coverage(dx, dy)` (0 = transparent, 255 = opaque), used for
     /// anti-aliased glyphs and icons.

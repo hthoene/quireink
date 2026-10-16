@@ -1402,11 +1402,15 @@ pub fn next_value(env: &Env<'_>, spec: &SettingSpec, step: i64) -> Option<Settin
 
 // ---- Images ------------------------------------------------------------
 
-/// Draws a decoded gray image (e.g. a book's cover or an illustration)
-/// scaled into `area`: each screen row reads one source row from storage,
-/// columns are averaged when the image is reduced, and only rows inside
-/// the canvas clip are read. Grays are dithered on two-level panels.
+/// Draws a decoded image (e.g. a book's cover or an illustration), gray
+/// or in colour, scaled into `area`: each screen row reads one source row
+/// from storage, columns are averaged when the image is reduced, and only
+/// rows inside the canvas clip are read. Grays are dithered on two-level
+/// panels; colour shows as colour on colour screens, as gray elsewhere.
 pub fn draw_image(canvas: &mut Canvas<'_>, storage: &dyn Storage, image: &ImageRef, area: Rect) {
+    if let Some(file) = crate::image::ColorFile::open(storage, &image.path) {
+        return draw_color_image(canvas, storage, &file, area);
+    }
     let file = GrayFile {
         path: image.path.clone(),
         width: image.width,
@@ -1442,6 +1446,48 @@ pub fn draw_image(canvas: &mut Canvas<'_>, storage: &dyn Storage, image: &ImageR
             }
         }
         canvas.draw_gray_row(left, y, &row);
+    }
+}
+
+/// [`draw_image`] for a colour image.
+fn draw_color_image(
+    canvas: &mut Canvas<'_>,
+    storage: &dyn Storage,
+    file: &crate::image::ColorFile,
+    area: Rect,
+) {
+    let (left, top) = (i32::from(area.x), i32::from(area.y));
+    let (w, h) = (i32::from(area.width), i32::from(area.height));
+    if w <= 0 || h <= 0 {
+        return;
+    }
+    let clip = canvas.clip();
+    let first = top.max(i32::from(clip.y));
+    let last = (top + h).min(clip.bottom() as i32);
+    if first >= last {
+        return;
+    }
+    let sw = file.width as usize;
+    let mut source = alloc::vec![0u8; sw * 3];
+    let mut row = alloc::vec![0u8; w as usize * 3];
+    let mut loaded = None;
+    for y in first..last {
+        let sy = ((y - top) as u64 * u64::from(file.height) / h as u64) as u32;
+        if loaded != Some(sy) {
+            if !file.read_row(storage, sy, &mut source) {
+                return;
+            }
+            loaded = Some(sy);
+            for x in 0..w as usize {
+                let from = x * sw / w as usize;
+                let to = ((x + 1) * sw / w as usize).max(from + 1).min(sw);
+                for c in 0..3 {
+                    let sum: u32 = (from..to).map(|i| u32::from(source[i * 3 + c])).sum();
+                    row[x * 3 + c] = (sum / (to - from) as u32) as u8;
+                }
+            }
+        }
+        canvas.draw_rgb_row(left, y, &row);
     }
 }
 
