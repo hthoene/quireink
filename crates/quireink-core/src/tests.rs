@@ -2005,7 +2005,6 @@ fn speech_goes_to_the_shell_and_stops_with_its_screen() {
     assert!(!log.borrow().contains(&String::from("event ov.reply c")));
 }
 
-<<<<<<< HEAD
 /// Publishes a service and a point (`provider`), or uses them (`user`).
 struct ServicePlugin {
     id: &'static str,
@@ -2017,17 +2016,6 @@ impl Plugin for ServicePlugin {
         Manifest {
             id: Id::parse(self.id).unwrap(),
             name: Cow::Borrowed("Services"),
-=======
-/// Turns the `menu` button into the next page, swallows `confirm`, and
-/// refreshes everything in full.
-struct FilterPlugin;
-
-impl Plugin for FilterPlugin {
-    fn manifest(&self) -> Manifest {
-        Manifest {
-            id: Id::new_static("filter"),
-            name: Cow::Borrowed("Filters"),
->>>>>>> input-filters
             description: Cow::Borrowed(""),
             version: Version::new(1, 0, 0),
             sdk: SDK_VERSION,
@@ -2035,7 +2023,6 @@ impl Plugin for FilterPlugin {
     }
 
     fn register(&self, r: &mut dyn Registrar) -> Result<(), RegisterError> {
-<<<<<<< HEAD
         if self.id == "provider" {
             r.add_service(Id::new_static("provider.greeting"), Box::new("hello"))?;
             // Not in its namespace: refused.
@@ -2057,7 +2044,47 @@ impl Plugin for FilterPlugin {
                 },
             ),
         )
-=======
+    }
+}
+
+#[test]
+fn plugins_offer_each_other_services() {
+    let log = log();
+    let mut kernel = Kernel::builder(DEVICE)
+        .plugin(TestPlugin::new("a", &log))
+        .plugin(ServicePlugin {
+            id: "user",
+            log: log.clone(),
+        })
+        .plugin(ServicePlugin {
+            id: "provider",
+            log: log.clone(),
+        })
+        .build()
+        .unwrap();
+    kernel.start(Instant(0));
+    assert_eq!(
+        *log.borrow(),
+        ["Some(\"hello\")", "user:square", "provider:circle"]
+    );
+}
+
+/// Turns the `menu` button into the next page, swallows `confirm`, and
+/// refreshes everything in full.
+struct FilterPlugin;
+
+impl Plugin for FilterPlugin {
+    fn manifest(&self) -> Manifest {
+        Manifest {
+            id: Id::new_static("filter"),
+            name: Cow::Borrowed("Filters"),
+            description: Cow::Borrowed(""),
+            version: Version::new(1, 0, 0),
+            sdk: SDK_VERSION,
+        }
+    }
+
+    fn register(&self, r: &mut dyn Registrar) -> Result<(), RegisterError> {
         use quireink_sdk::filters::{InputFilterSpec, InputVerdict, RefreshFilterSpec};
         r.add_input_filter(InputFilterSpec {
             id: Id::new_static("filter.input"),
@@ -2082,32 +2109,10 @@ impl Plugin for FilterPlugin {
                     .then_some(RefreshMode::Full)
             }),
         })
->>>>>>> input-filters
     }
 }
 
 #[test]
-<<<<<<< HEAD
-fn plugins_offer_each_other_services() {
-    let log = log();
-    let mut kernel = Kernel::builder(DEVICE)
-        .plugin(TestPlugin::new("a", &log))
-        .plugin(ServicePlugin {
-            id: "user",
-            log: log.clone(),
-        })
-        .plugin(ServicePlugin {
-            id: "provider",
-            log: log.clone(),
-        })
-        .build()
-        .unwrap();
-    kernel.start(Instant(0));
-    assert_eq!(
-        *log.borrow(),
-        ["Some(\"hello\")", "user:square", "provider:circle"]
-    );
-=======
 fn filters_see_inputs_and_refreshes_first() {
     let log = log();
     let mut kernel = Kernel::builder(DEVICE)
@@ -2128,5 +2133,4 @@ fn filters_see_inputs_and_refreshes_first() {
     );
     press(&mut kernel, 300, "confirm");
     assert_eq!(log.borrow().len(), 1, "confirm was taken");
->>>>>>> input-filters
 }
