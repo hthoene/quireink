@@ -213,6 +213,7 @@ pub struct KernelBuilder {
     speech: bool,
     sleep: bool,
     rotation: bool,
+    colors: bool,
     frame_rows: Option<u16>,
     row_align: u16,
     storage: Option<Box<dyn Storage>>,
@@ -332,6 +333,15 @@ impl KernelBuilder {
         self
     }
 
+    /// The shell shows black and white in the colours of the settings
+    /// [`settings::TEXT_COLOR`](quireink_sdk::builtin::settings::TEXT_COLOR)
+    /// and [`settings::PAPER_COLOR`](quireink_sdk::builtin::settings::PAPER_COLOR)
+    /// (see [`Kernel::colors`]); without, they are not offered.
+    pub fn colors(mut self, available: bool) -> Self {
+        self.colors = available;
+        self
+    }
+
     /// Memory for glyphs rasterized at runtime (default 32 KiB). Bitmap font
     /// packs do not use it.
     pub fn glyph_cache(mut self, bytes: usize) -> Self {
@@ -432,6 +442,7 @@ impl KernelBuilder {
         kernel.shared.menus.set_device(touch, speech);
         kernel.shared.menus.set_sleep(kernel.shared.sleep);
         kernel.shared.menus.set_rotation(self.rotation);
+        kernel.shared.menus.set_colors(self.colors);
 
         // Passwords and keys.
         if let Ok(data) = quireink_sdk::read_file(
@@ -698,6 +709,7 @@ impl Kernel {
             speech: false,
             sleep: false,
             rotation: false,
+            colors: false,
             frame_rows: None,
             row_align: 1,
             storage: None,
@@ -722,6 +734,41 @@ impl Kernel {
             Some(3) => Rotation::Deg270,
             _ => Rotation::Deg0,
         }
+    }
+
+    /// The colours black and white are shown in, by the settings
+    /// [`settings::TEXT_COLOR`](quireink_sdk::builtin::settings::TEXT_COLOR)
+    /// and [`settings::PAPER_COLOR`](quireink_sdk::builtin::settings::PAPER_COLOR),
+    /// as red, green and blue; the grays between lie between them. Shells
+    /// that tint the screen (see [`KernelBuilder::colors`]) show each gray
+    /// of the frame so; the frame does not change when they do.
+    pub fn colors(&self) -> [[u8; 3]; 2] {
+        use quireink_sdk::builtin::settings;
+        let text = |id: &Id| self.shared.settings.text(id.as_str());
+        // A preset, or one's own colour code; black and white otherwise.
+        let rgb = |id: &Id, own: &str, code: &Id, fallback: [u8; 3]| {
+            let value = text(id);
+            if value == own {
+                settings::parse_rgb(text(code))
+            } else {
+                settings::rgb(value)
+            }
+            .unwrap_or(fallback)
+        };
+        [
+            rgb(
+                &settings::TEXT_COLOR,
+                settings::OWN_TEXT,
+                &settings::TEXT_COLOR_OWN,
+                [0, 0, 0],
+            ),
+            rgb(
+                &settings::PAPER_COLOR,
+                settings::OWN_PAPER,
+                &settings::PAPER_COLOR_OWN,
+                [255, 255, 255],
+            ),
+        ]
     }
 
     /// Opens the home slot and emits [`events::STARTED`]. Call once after
@@ -2659,7 +2706,13 @@ impl Kernel {
         if *id == core_settings::READING_FONT {
             self.apply_reading_font();
         }
-        if *id == core_settings::LANGUAGE || *id == core_settings::NIGHT_MODE {
+        if *id == core_settings::LANGUAGE
+            || *id == core_settings::NIGHT_MODE
+            || *id == core_settings::TEXT_COLOR
+            || *id == core_settings::PAPER_COLOR
+            || *id == core_settings::TEXT_COLOR_OWN
+            || *id == core_settings::PAPER_COLOR_OWN
+        {
             let bounds = self.framebuffer.bounds();
             self.invalidate(bounds);
             self.output.request_refresh(RefreshMode::Full);

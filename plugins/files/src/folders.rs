@@ -5,6 +5,10 @@
 //! *New folder* makes one in it; then come its subfolders. Like the
 //! library, only one page of folders is held in memory.
 //!
+//! Reading a folder can take a while (SD cards on Android): the new
+//! folder's name and "Opening the folder" show first, the folder is read
+//! right after, and taps meanwhile are ignored.
+//!
 //! Bound to `core.choose-folder`: a setting gets the folder, or the event
 //! the caller names comes back with it.
 
@@ -37,6 +41,15 @@ enum Row<'a> {
     Folder(&'a Entry),
 }
 
+/// A folder still to be read.
+#[derive(Debug)]
+enum Pending {
+    /// Show `dir` from its first row.
+    Open,
+    /// Show `dir`, focused on its subfolder `child` (going up).
+    Up(Entry),
+}
+
 #[derive(Debug)]
 pub(crate) struct FolderChooser {
     /// The setting to change.
@@ -53,6 +66,8 @@ pub(crate) struct FolderChooser {
     style: UiStyle,
     header: ui::Header,
     list: ListView,
+    /// The shown folder is still to be read.
+    pending: Option<Pending>,
 }
 
 impl FolderChooser {
@@ -68,7 +83,7 @@ impl FolderChooser {
             (Some(id), None) => env.settings.text(id.as_str()).trim_matches('/').to_string(),
             (None, None) => String::new(),
         };
-        let dir = if !current.is_empty() && env.storage.list(&current, &mut |_| {}).is_ok() {
+        let dir = if !current.is_empty() && env.storage.exists(&current) {
             current
         } else {
             String::new()
@@ -78,7 +93,7 @@ impl FolderChooser {
         let header = ui::Header::new(env, &style, true);
         let top = header.area.height + style.gap as u16;
         let area = Rect::new(0, top, display.width, display.height.saturating_sub(top));
-        let mut chooser = Self {
+        Self {
             setting,
             reply,
             dir,
@@ -88,9 +103,21 @@ impl FolderChooser {
             list: ListView::new(area, style.row).focus_on_keys(env),
             style,
             header,
-        };
-        chooser.load(env);
-        chooser
+            // Read once the screen shows.
+            pending: Some(Pending::Open),
+        }
+    }
+
+    /// Shows `self.dir` as being opened and reads it right after.
+    fn open_later(&mut self, pending: Pending, cx: &mut Cx<'_, '_>) {
+        self.pending = Some(pending);
+        self.len = 0;
+        self.page.clear();
+        self.list.focus = 0;
+        cx.request_redraw();
+        cx.request_refresh(RefreshMode::Fast);
+        let now = cx.env().now;
+        cx.wake_at(now);
     }
 
     fn listing<'a>(&'a self, env: &'a Env<'_>) -> Listing<'a> {
@@ -167,8 +194,7 @@ impl FolderChooser {
                 ));
             }
             Some(Row::Up) => {
-                self.up(&env);
-                cx.request_redraw();
+                self.up(cx);
             }
             Some(Row::Folder(entry)) => {
                 self.dir = if self.dir.is_empty() {
@@ -176,16 +202,15 @@ impl FolderChooser {
                 } else {
                     format!("{}/{}", self.dir, entry.name)
                 };
-                self.load(&env);
-                cx.request_redraw();
+                self.open_later(Pending::Open, cx);
             }
             None => {}
         }
     }
 
-    /// Goes to the parent folder, focusing the folder it came from;
+    /// Goes to the parent folder, to focus the folder it came from;
     /// `false` at the top.
-    fn up(&mut self, env: &Env<'_>) -> bool {
+    fn up(&mut self, cx: &mut Cx<'_, '_>) -> bool {
         if self.dir.is_empty() {
             return false;
         }
@@ -194,14 +219,25 @@ impl FolderChooser {
             .dir
             .rsplit_once('/')
             .map_or(String::new(), |(parent, _)| parent.to_string());
-        let (len, rank) = {
-            let listing = self.listing(env);
-            (listing.count(), listing.rank(&child))
-        };
-        self.len = len;
-        self.list.focus = (self.fixed() + rank).min(self.len().saturating_sub(1));
-        self.load_page(env);
+        self.open_later(Pending::Up(child), cx);
         true
+    }
+
+    /// Reads the folder still to be read.
+    fn read(&mut self, env: &Env<'_>) {
+        match self.pending.take() {
+            Some(Pending::Open) => self.load(env),
+            Some(Pending::Up(child)) => {
+                let (len, rank) = {
+                    let listing = self.listing(env);
+                    (listing.count(), listing.rank(&child))
+                };
+                self.len = len;
+                self.list.focus = (self.fixed() + rank).min(self.len().saturating_sub(1));
+                self.load_page(env);
+            }
+            None => {}
+        }
     }
 
     fn moved(&mut self, change: ListChange, cx: &mut Cx<'_, '_>) {
@@ -243,6 +279,12 @@ impl Screen for FolderChooser {
             }
             None => title,
         };
+        if self.pending.is_some() {
+            self.header.draw(canvas, env, &style, &title, None, None);
+            let text = env.i18n.tr("files.choose.opening");
+            ui::draw_message(canvas, env, &style, self.list.area, text);
+            return;
+        }
         self.header
             .draw(canvas, env, &style, &title, None, self.list.paging(len));
         let this = &*self;
@@ -265,6 +307,23 @@ impl Screen for FolderChooser {
                     ui::draw_value_row(canvas, env, &style, rect, focused, title, value);
                 }
             });
+    }
+
+    fn on_show(&mut self, cx: &mut Cx<'_, '_>) {
+        if self.pending.is_some() {
+            let now = cx.env().now;
+            cx.wake_at(now);
+        }
+    }
+
+    fn on_timer(&mut self, cx: &mut Cx<'_, '_>) {
+        if self.pending.is_none() {
+            return;
+        }
+        let env = *cx.env();
+        self.read(&env);
+        cx.request_redraw();
+        cx.request_refresh(RefreshMode::Partial);
     }
 
     fn on_event(&mut self, event: &Id, params: &Params, cx: &mut Cx<'_, '_>) {
@@ -291,6 +350,10 @@ impl Screen for FolderChooser {
     }
 
     fn on_action(&mut self, action: &Id, cx: &mut Cx<'_, '_>) -> Handled {
+        // While a folder is read, buttons wait (back still leaves).
+        if self.pending.is_some() && *action != actions::BACK {
+            return Handled::Yes;
+        }
         let len = self.len();
         let rows = self.list.rows() as isize;
         let a = action;
@@ -312,11 +375,9 @@ impl Screen for FolderChooser {
             self.activate(self.list.focus, cx);
         } else if *a == actions::BACK {
             // Back goes up first; at the top it closes the chooser.
-            let env = *cx.env();
-            if !self.up(&env) {
+            if !self.up(cx) {
                 return Handled::No;
             }
-            cx.request_redraw();
         } else {
             return Handled::No;
         }
@@ -326,6 +387,10 @@ impl Screen for FolderChooser {
     fn on_gesture(&mut self, gesture: Gesture, cx: &mut Cx<'_, '_>) -> Handled {
         if gesture.kind != GestureKind::Tap {
             return Handled::No;
+        }
+        // Taps while a folder is read would land on rows not shown yet.
+        if self.pending.is_some() {
+            return Handled::Yes;
         }
         let paging = self.list.paging(self.len());
         let tapped = self

@@ -112,7 +112,7 @@ fn android_main(app: AndroidApp) {
                             if let Some(epd) = epd.as_mut() {
                                 epd.set(RefreshMode::Full);
                             }
-                            present(window, &running.frame);
+                            present(window, &running.frame, running.kernel.colors());
                         }
                     }
                 }
@@ -138,7 +138,7 @@ fn android_main(app: AndroidApp) {
                                 epd.set(RefreshMode::Full);
                             }
                         }
-                        present(window, &running.frame);
+                        present(window, &running.frame, running.kernel.colors());
                     }
                 }
                 MainEvent::Resume { .. } => {
@@ -232,6 +232,12 @@ fn android_main(app: AndroidApp) {
             changed |= apply(state, effects);
         }
         if state.wake_at.is_some_and(|at| at <= now()) {
+            // What changed shows before the timer runs: it may take a
+            // while (e.g. reading a folder on an SD card) and say so first.
+            if changed && let Some(window) = &window {
+                show(window, epd.as_mut(), state);
+                changed = false;
+            }
             let effects = state.kernel.tick(now());
             changed |= apply(state, effects);
         }
@@ -251,10 +257,7 @@ fn android_main(app: AndroidApp) {
             }
         }
         if changed && let Some(window) = &window {
-            if let (Some(epd), Some(mode)) = (epd.as_mut(), state.refresh.take()) {
-                epd.set(mode);
-            }
-            present(window, &state.frame);
+            show(window, epd.as_mut(), state);
         }
         for warning in state.kernel.take_warnings() {
             log::warn!("{warning}");
@@ -271,7 +274,7 @@ fn android_main(app: AndroidApp) {
                 if let Some(epd) = epd.as_mut() {
                     epd.set(RefreshMode::Full);
                 }
-                present(window, &running.frame);
+                present(window, &running.frame, running.kernel.colors());
             }
         }
     }
@@ -376,7 +379,8 @@ fn start_kernel(
         .network(true)
         .system_clipboard(true)
         .speech(true)
-        .rotation(true);
+        .rotation(true)
+        .colors(true);
     builder = match shared {
         Some(shared) => builder
             .storage(removable.into_iter().fold(
@@ -539,8 +543,17 @@ fn turn(app: &AndroidApp, rotation: Rotation) {
     }
 }
 
-/// Copies the whole frame into the window.
-fn present(window: &NativeWindow, frame: &Framebuffer) {
+/// Shows the frame, with the e-ink refresh the kernel asked for.
+fn show(window: &NativeWindow, epd: Option<&mut Epd>, state: &mut Running) {
+    if let (Some(epd), Some(mode)) = (epd, state.refresh.take()) {
+        epd.set(mode);
+    }
+    present(window, &state.frame, state.kernel.colors());
+}
+
+/// Copies the whole frame into the window, in the colours of the
+/// settings.
+fn present(window: &NativeWindow, frame: &Framebuffer, colors: [[u8; 3]; 2]) {
     let (width, height) = (i32::from(frame.width()), i32::from(frame.height()));
     if let Err(e) =
         window.set_buffers_geometry(width, height, Some(HardwareBufferFormat::R8G8B8A8_UNORM))
@@ -555,7 +568,8 @@ fn present(window: &NativeWindow, frame: &Framebuffer) {
     let Some(bytes) = buffer.bytes() else {
         return;
     };
-    pixels::to_rgba(&frame.view(), 0, stride, |at, rgba| {
+    let tint = pixels::tint(colors);
+    pixels::to_rgba(&frame.view(), 0, stride, &tint, |at, rgba| {
         if let Some(pixel) = bytes.get_mut(at..at + 4) {
             for (slot, value) in pixel.iter_mut().zip(rgba) {
                 slot.write(value);

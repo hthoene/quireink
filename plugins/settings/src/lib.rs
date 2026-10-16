@@ -81,7 +81,13 @@ impl Plugin for SettingsPlugin {
         r.add_screen(ScreenSpec {
             id: SCREEN,
             title: Cow::Borrowed("settings.title"),
-            factory: Box::new(|env, _| Box::new(GroupList::new(env))),
+            // With a group, e.g. a widget's own settings: that group.
+            factory: Box::new(|env, params| {
+                match params.get(ID).and_then(|id| Id::parse(id).ok()) {
+                    Some(group) => Box::new(GroupPage::new(env, group)) as Box<dyn Screen>,
+                    None => Box::new(GroupList::new(env)),
+                }
+            }),
         })?;
         r.add_screen(ScreenSpec {
             id: GROUP_SCREEN,
@@ -327,6 +333,8 @@ impl GroupList {
         placed.extend(
             env.settings
                 .groups()
+                // A widget's own settings are opened where it is edited.
+                .filter(|group| !env.widgets.has(group.id.as_str()))
                 .filter(|group| {
                     env.settings
                         .specs()

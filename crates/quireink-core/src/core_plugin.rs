@@ -380,6 +380,50 @@ impl Plugin for CorePlugin {
             .description("core.setting.rotation.help"),
         )?;
         r.set_menu_need(settings::ROTATION, quireink_sdk::MenuNeed::Rotation)?;
+        // Each colour, then its own colour code.
+        for (id, title, values, own, own_title, own_default) in [
+            (
+                settings::TEXT_COLOR,
+                "core.setting.text-color",
+                &settings::TEXT_COLORS,
+                settings::TEXT_COLOR_OWN,
+                "core.setting.text-color-own",
+                "#5b4636",
+            ),
+            (
+                settings::PAPER_COLOR,
+                "core.setting.paper-color",
+                &settings::PAPER_COLORS,
+                settings::PAPER_COLOR_OWN,
+                "core.setting.paper-color-own",
+                "#f4ecd8",
+            ),
+        ] {
+            r.add_setting(
+                SettingSpec::new(
+                    id.clone(),
+                    title,
+                    SettingKind::Choice(values.iter().map(|v| Cow::Borrowed(*v)).collect()),
+                    SettingValue::Text(Cow::Borrowed(values[0])),
+                )
+                .group(groups::LOOK)
+                .section("core.section.colors")
+                .description("core.setting.colors.help"),
+            )?;
+            r.set_menu_need(id, quireink_sdk::MenuNeed::Colors)?;
+            r.add_setting(
+                SettingSpec::new(
+                    own.clone(),
+                    own_title,
+                    SettingKind::Text,
+                    SettingValue::Text(Cow::Borrowed(own_default)),
+                )
+                .group(groups::LOOK)
+                .section("core.section.colors")
+                .description("core.setting.color-own.help"),
+            )?;
+            r.set_menu_need(own, quireink_sdk::MenuNeed::Colors)?;
+        }
         r.add_setting(
             SettingSpec::new(
                 settings::NOTICE_SECONDS,

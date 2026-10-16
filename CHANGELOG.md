@@ -9,6 +9,15 @@ change the plugin SDK.
 - Smaller text by default: menus 9 pt (was 11), status lines 6 pt
   (was 8). Both stay adjustable in the settings.
 - Dictionary: the page of a long entry no longer covers *Online*.
+- Text and paper colours on Android (Appearance): eight of each, or
+  one's own colour code (e.g. #5b4636); night mode swaps them.
+- The folder chooser says when it is still opening a folder (slow SD
+  cards) and ignores taps until it shows it.
+- Widgets have settings of their own, from the home screen's editor:
+  where the status line, date, clock, today's reading and the word of
+  the day sit (left, centre, right), and whether the clock shows the
+  date. Plugins give their widgets settings the same way
+  (`widgets::settings_group`, `widgets::align_setting`).
 
 ## [0.1.1] - 2026-10-15
 
