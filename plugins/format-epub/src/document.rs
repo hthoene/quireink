@@ -429,6 +429,10 @@ impl Document for EpubDocument {
             })
             .map_err(package::error)?;
         obfuscation::reveal(&mut data, font.method, &identifier);
+        if data.starts_with(crate::woff::SIGNATURE) {
+            return crate::woff::to_font(&data, MAX_FONT as usize)
+                .ok_or(DocumentError::Malformed(Cow::Borrowed("WOFF font")));
+        }
         Ok(data)
     }
 

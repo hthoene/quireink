@@ -24,6 +24,7 @@ change the plugin SDK.
 - GIF pictures in books, comics and the sleep screen's own pictures: the
   first picture of the file (also of an animation, interlaced or with
   transparency), decoded to gray row by row like JPEG and PNG.
+- Books' embedded fonts in WOFF are used too (WOFF 2 is not read).
 - Calibre's wireless device connection (`calibre` plugin, in the tools):
   the device finds Calibre in the network (or connects to the address
   set), and Calibre sends books to the library, lists and deletes them
