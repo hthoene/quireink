@@ -6,6 +6,12 @@ change the plugin SDK.
 
 ## [Unreleased]
 
+- Plugin SDK: input filters (`Registrar::add_input_filter`) see every
+  button and finger before screens and key maps do, and may take it or
+  run an action instead; refresh filters (`Registrar::add_refresh_filter`)
+  change how the panel is refreshed. `InputEvent` and `ButtonState` are
+  part of the SDK.
+
 - Plugin SDK: services, what one plugin offers others
   (`Registrar::add_service`, `Env::services`), and points plugins define
   for others to contribute to (`Registrar::contribute`); the event

@@ -157,6 +157,20 @@ pub trait Registrar {
         filter: crate::filters::TextFilterSpec,
     ) -> Result<(), RegisterError>;
 
+    /// Adds a filter of every input, before screens and key maps see it
+    /// (see [`filters`](crate::filters)).
+    fn add_input_filter(
+        &mut self,
+        filter: crate::filters::InputFilterSpec,
+    ) -> Result<(), RegisterError>;
+
+    /// Adds a filter of how the panel is refreshed (see
+    /// [`filters`](crate::filters)).
+    fn add_refresh_filter(
+        &mut self,
+        filter: crate::filters::RefreshFilterSpec,
+    ) -> Result<(), RegisterError>;
+
     /// Adds a widget, e.g. for the home screen (see
     /// [`widgets`](crate::widgets)).
     fn add_widget(&mut self, widget: crate::widgets::WidgetSpec) -> Result<(), RegisterError>;
