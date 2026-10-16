@@ -436,6 +436,7 @@ impl KernelBuilder {
             reads_clipboard: self.system_clipboard,
             speech_calls: Vec::new(),
             speaking: Vec::new(),
+            spoken_focus: None,
             next_speech: 0,
             awaiting: Vec::new(),
             next_request: 0,
@@ -686,6 +687,8 @@ pub struct Kernel {
     /// and parameters, and how many screens were open when it started
     /// (speech stops once fewer are).
     speaking: Vec<(u32, Id, Params, usize)>,
+    /// What was said last of the focus ([`core_settings::SPEAK_FOCUS`]).
+    spoken_focus: Option<String>,
     next_speech: u32,
     /// Requests made and not answered yet: id, reply event, parameters
     /// and where to save the body.
@@ -811,7 +814,80 @@ impl Kernel {
             InputEvent::Pointer(pointer) => self.pointer(pointer),
             _ => {}
         }
+        // The screens as the input left them, to say where the focus is.
+        self.run_commands();
+        self.speak_focus();
         self.finish()
+    }
+
+    /// What the screens shown are, part by part (rows, buttons, headings
+    /// with their text), as their drawing tells (see
+    /// [`quireink_sdk::semantics`]): for reading the screen aloud,
+    /// automation and tests. Draws them once, aside.
+    pub fn describe(&mut self) -> Vec<quireink_sdk::semantics::Part> {
+        let bounds = self.framebuffer.bounds();
+        let Ok(mut aside) = Framebuffer::new(
+            bounds.width,
+            bounds.height,
+            quireink_platform::PixelFormat::Mono1,
+        ) else {
+            return Vec::new();
+        };
+        let env = self.shared.env(self.now);
+        let regions: Vec<Option<Rect>> = self.stack.iter().map(|s| s.screen.region(&env)).collect();
+        let base = regions.iter().rposition(Option::is_none).unwrap_or(0);
+        let mut described = Vec::new();
+        {
+            let mut canvas = aside.canvas().describing(&mut described);
+            for (active, own) in self.stack[base..].iter_mut().zip(&regions[base..]) {
+                let area = own.unwrap_or(bounds);
+                active.screen.draw(&mut canvas.clipped(area), &env);
+            }
+        }
+        quireink_sdk::semantics::parts(described)
+    }
+
+    /// Says what has the focus now, if it changed and the user asked for
+    /// it ([`core_settings::SPEAK_FOCUS`]); not while something is read
+    /// aloud.
+    fn speak_focus(&mut self) {
+        if !self.shared.speech
+            || !self
+                .shared
+                .settings
+                .bool(core_settings::SPEAK_FOCUS.as_str())
+            || !self.speaking.is_empty()
+        {
+            return;
+        }
+        let parts = self.describe();
+        let said = quireink_sdk::semantics::focused(&parts).map(|part| {
+            let state = match part.on {
+                Some(true) => self.shared.translator.tr("core.state.on"),
+                Some(false) => self.shared.translator.tr("core.state.off"),
+                None => "",
+            };
+            if state.is_empty() {
+                part.label.clone()
+            } else {
+                alloc::format!("{}, {state}", part.label)
+            }
+        });
+        if said == self.spoken_focus {
+            return;
+        }
+        if let Some(text) = &said {
+            let language = self.shared.translator.language().to_string();
+            self.speak(quireink_sdk::Speech {
+                text: text.clone(),
+                language,
+                rate: 100,
+                reply: Id::new_static("core.focus-spoken"),
+                params: Params::new(),
+                queue: false,
+            });
+        }
+        self.spoken_focus = said;
     }
 
     /// Tells the kernel the time of day and the battery's charge. Shells

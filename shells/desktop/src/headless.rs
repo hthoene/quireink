@@ -7,6 +7,8 @@
 //! | `page-forward` | short press of a button |
 //! | `long:confirm` | long press of a button |
 //! | `tap:240:400` | tap at logical coordinates |
+//! | `tap-on:Night mode` | tap the row, button or heading with this text (or beginning so) |
+//! | `describe` | print what the screen shows, part by part |
 //! | `long-tap:240:400` | long press on the touch screen |
 //! | `swipe:400:400:100:400` | swipe from one point to another |
 //! | `wait:500` | let 500 ms pass |
@@ -39,7 +41,10 @@ pub fn run_script(device: &mut Device, script: &str) -> Result<(), String> {
 
 fn run_step(device: &mut Device, step: &str) -> Result<(), String> {
     let parts: Vec<&str> = step.split(':').collect();
-    let touch_step = matches!(parts.first(), Some(&("tap" | "long-tap" | "swipe")));
+    let touch_step = matches!(
+        parts.first(),
+        Some(&("tap" | "tap-on" | "long-tap" | "swipe"))
+    );
     if touch_step && !device.profile.device.input.touch {
         return Err(format!(
             "`{}` has no touch screen",
@@ -72,6 +77,36 @@ fn run_step(device: &mut Device, step: &str) -> Result<(), String> {
         }
         ["long", name] => press(device, button(device, name)?, LONG_MS),
         ["tap", x, y] => touch(device, Point::new(number(x)?, number(y)?), None, 60),
+        ["tap-on", label @ ..] if !label.is_empty() => {
+            let label = label.join(":");
+            let parts = device.kernel.describe();
+            let part = quireink_core::sdk::semantics::find(&parts, &label)
+                .ok_or_else(|| format!("nothing on the screen says `{label}`"))?;
+            let a = part.area;
+            let center = Point::new(
+                i32::from(a.x) + i32::from(a.width) / 2,
+                i32::from(a.y) + i32::from(a.height) / 2,
+            );
+            touch(device, center, None, 60);
+        }
+        ["describe"] => {
+            for part in device.kernel.describe() {
+                let mut state = String::new();
+                if part.focused {
+                    state.push_str(" (focused)");
+                }
+                match part.on {
+                    Some(true) => state.push_str(" (on)"),
+                    Some(false) => state.push_str(" (off)"),
+                    None => {}
+                }
+                let a = part.area;
+                println!(
+                    "{:?} \"{}\"{state} at {},{} {}x{}",
+                    part.role, part.label, a.x, a.y, a.width, a.height
+                );
+            }
+        }
         ["long-tap", x, y] => touch(device, Point::new(number(x)?, number(y)?), None, LONG_MS),
         ["swipe", x1, y1, x2, y2] => touch(
             device,

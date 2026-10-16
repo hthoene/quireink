@@ -49,6 +49,7 @@ pub mod library;
 pub mod md5;
 pub mod qr;
 pub mod secrets;
+pub mod semantics;
 pub mod sha1;
 /// Reading and writing SQLite database files.
 pub mod sqlite {

@@ -1,3 +1,6 @@
+use alloc::string::String;
+use alloc::vec::Vec;
+
 use quireink_platform::{Color, Point, Rect};
 
 use crate::framebuffer::Framebuffer;
@@ -10,6 +13,38 @@ use crate::framebuffer::Framebuffer;
 pub struct Canvas<'a> {
     framebuffer: &'a mut Framebuffer,
     clip: Rect,
+    /// Where what is drawn is described, if anyone asks (see
+    /// [`Canvas::describing`]).
+    described: Option<&'a mut Vec<Described>>,
+}
+
+/// What a part of a screen is, as its drawing tells: for reading the
+/// screen aloud, automation and tests. Drawing helpers describe what
+/// they draw; most of the time nobody asks and it costs nothing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Described {
+    pub role: Role,
+    /// Its text, if it has one of its own.
+    pub label: String,
+    pub area: Rect,
+    /// It has the focus (buttons move it).
+    pub focused: bool,
+    /// Switched on or off, for switches and buttons that are either.
+    pub on: Option<bool>,
+}
+
+/// What a described part is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Role {
+    /// A title over what follows (a header, a section's heading).
+    Heading,
+    /// A row of a list; its text is that drawn inside it.
+    Row,
+    Button,
+    /// A switch in a row.
+    Switch,
+    /// Text.
+    Text,
 }
 
 /// How far row `row` of a shape `height` rows high with corners of
@@ -29,7 +64,42 @@ fn corner_inset(radius: u32, row: u32, height: u32) -> u32 {
 impl<'a> Canvas<'a> {
     pub(crate) fn new(framebuffer: &'a mut Framebuffer, clip: Rect) -> Self {
         let clip = clip.intersection(&framebuffer.band()).unwrap_or_default();
-        Self { framebuffer, clip }
+        Self {
+            framebuffer,
+            clip,
+            described: None,
+        }
+    }
+
+    /// This canvas, describing what is drawn into `sink`.
+    pub fn describing(mut self, sink: &'a mut Vec<Described>) -> Self {
+        self.described = Some(sink);
+        self
+    }
+
+    /// Whether anyone asks what is drawn (see [`Canvas::describe`]).
+    pub fn is_describing(&self) -> bool {
+        self.described.is_some()
+    }
+
+    /// Tells what is drawn at `area`, for those who ask.
+    pub fn describe(
+        &mut self,
+        role: Role,
+        label: &str,
+        area: Rect,
+        focused: bool,
+        on: Option<bool>,
+    ) {
+        if let Some(sink) = self.described.as_deref_mut() {
+            sink.push(Described {
+                role,
+                label: String::from(label),
+                area,
+                focused,
+                on,
+            });
+        }
     }
 
     /// The visible region of this canvas.
@@ -43,6 +113,7 @@ impl<'a> Canvas<'a> {
         Canvas {
             framebuffer: self.framebuffer,
             clip,
+            described: self.described.as_deref_mut(),
         }
     }
 

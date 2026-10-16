@@ -311,3 +311,37 @@ fn screens_look_as_before() {
         failures.join("\n")
     );
 }
+
+#[test]
+fn screens_say_what_they_show() {
+    let case = Case {
+        name: "describe",
+        profile: "boox-go-7",
+        book: None,
+        sets: &["slots.core.home=settings.list"],
+        script: "",
+        colour: 0,
+    };
+    let library = library(&case);
+    let output = Command::new(env!("CARGO_BIN_EXE_quireink-emu"))
+        .args(["--profile", case.profile, "--headless", "--library"])
+        .arg(&library)
+        .args(["--set", "reader.open-last=false"])
+        .args(["--set", case.sets[0]])
+        .args(["--script", "tap-on:Display,wait:300,describe"])
+        .output()
+        .unwrap();
+    let _ = fs::remove_dir_all(&library);
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    // The page tapped by its name, its rows with their text and state.
+    assert!(text.contains("Heading \"Display\""), "{text}");
+    assert!(
+        text.contains("Row \"Night mode, White text on black.\" (off)"),
+        "{text}"
+    );
+}

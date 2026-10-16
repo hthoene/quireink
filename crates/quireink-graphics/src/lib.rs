@@ -12,7 +12,7 @@ extern crate alloc;
 mod canvas;
 mod framebuffer;
 
-pub use canvas::Canvas;
+pub use canvas::{Canvas, Described, Role};
 pub use framebuffer::Framebuffer;
 
 use core::fmt;

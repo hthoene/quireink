@@ -269,6 +269,9 @@ pub mod settings {
     pub const LANGUAGE: Id = Id::new_static("core.language");
     /// Draw everything inverted.
     pub const NIGHT_MODE: Id = Id::new_static("core.night-mode");
+    /// Say what the buttons move to (a row, a button), where the device
+    /// speaks: for using QuireInk without seeing the screen.
+    pub const SPEAK_FOCUS: Id = Id::new_static("core.speak-focus");
     /// Partial refreshes between two full refreshes; `0` disables full
     /// refreshes for ghosting removal.
     pub const FULL_REFRESH_INTERVAL: Id = Id::new_static("core.full-refresh-interval");
