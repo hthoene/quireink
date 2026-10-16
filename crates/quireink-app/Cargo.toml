@@ -39,6 +39,7 @@ quireink-plugin-transfer.workspace = true
 quireink-plugin-browser.workspace = true
 quireink-plugin-opds.workspace = true
 quireink-plugin-rules.workspace = true
+quireink-plugin-lock.workspace = true
 quireink-plugin-profiles.workspace = true
 quireink-plugin-keys.workspace = true
 quireink-plugin-wikipedia.workspace = true

@@ -6,6 +6,13 @@ change the plugin SDK.
 
 ## [Unreleased]
 
+- Screen lock (off by default): a PIN, a pattern or a password asked for
+  when QuireInk starts and when the device wakes up, set under System ›
+  *Screen lock*. The code is kept only as a salted hash. Locked, nothing
+  else can be used; after five wrong tries the next one waits half a
+  minute. *Lock now* locks at once from any button, gesture or rule.
+- `Canvas::draw_line`.
+
 - Plugin SDK: services, what one plugin offers others
   (`Registrar::add_service`, `Env::services`), and points plugins define
   for others to contribute to (`Registrar::contribute`); the event

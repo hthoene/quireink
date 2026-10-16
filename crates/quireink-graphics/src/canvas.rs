@@ -213,6 +213,19 @@ impl<'a> Canvas<'a> {
         }
     }
 
+    /// Draws a straight line from `from` to `to`, `width` pixels thick
+    /// (a square pen moved along it).
+    pub fn draw_line(&mut self, from: Point, to: Point, width: u32, color: Color) {
+        let (dx, dy) = (to.x - from.x, to.y - from.y);
+        let steps = dx.abs().max(dy.abs()).max(1);
+        let half = (width / 2) as i32;
+        for step in 0..=steps {
+            let x = from.x + dx * step / steps;
+            let y = from.y + dy * step / steps;
+            self.fill_rect(x - half, y - half, width.max(1), width.max(1), color);
+        }
+    }
+
     pub fn set_pixel(&mut self, point: Point, color: Color) {
         self.fill_rect(point.x, point.y, 1, 1, color);
     }
