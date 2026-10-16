@@ -6,6 +6,8 @@ change the plugin SDK.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-16
+
 - *Say what is chosen* (System, where the device speaks): says the row
   or button the buttons move to, with a switch's state, for using
   QuireInk without looking at the screen.
@@ -151,5 +153,6 @@ Xteink X4 is built but has not run on a device yet.
 - The Xteink X4's firmware, its display, buttons, battery and SD card
   tested against simulated hardware ([ADR 0013](docs/adr/0013-x4-firmware.md)).
 
+[0.2.0]: https://github.com/hthoene/quireink/releases/tag/v0.2.0
 [0.1.1]: https://github.com/hthoene/quireink/releases/tag/v0.1.1
 [0.1.0]: https://github.com/hthoene/quireink/releases/tag/v0.1.0
