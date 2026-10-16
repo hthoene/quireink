@@ -305,6 +305,7 @@ impl CalibreScreen {
                                 provided(&coming.metadata),
                             );
                             self.received += 1;
+                            cx.command(quireink_sdk::library::changed());
                         }
                     }
                     // A book dropped (its path led out of the library).
@@ -417,6 +418,7 @@ impl CalibreScreen {
                     let reply = format!("{{\"uuid\": {}}}", quireink_sdk::json::string(&uuid));
                     self.send(op::OK, &reply, cx);
                 }
+                cx.command(quireink_sdk::library::changed());
             }
             op::NOOP => {
                 if protocol::member(args, "ejecting").is_some() {

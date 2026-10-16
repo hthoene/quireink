@@ -6,6 +6,13 @@ change the plugin SDK.
 
 ## [Unreleased]
 
+- Plugin SDK: services, what one plugin offers others
+  (`Registrar::add_service`, `Env::services`), and points plugins define
+  for others to contribute to (`Registrar::contribute`); the event
+  `core.library-changed` (`library::changed`), emitted when books come
+  into the library or leave it (Wi-Fi transfer, catalogs, Calibre, the
+  file manager), and the library shows them at once.
+
 - Rules know many more moments: at a time of day on chosen days (every
   day, Monday to Friday, at weekends, one day), every so many minutes,
   when a book is closed or read to its end, when the device goes to

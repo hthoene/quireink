@@ -388,6 +388,7 @@ impl KernelBuilder {
                 status: SystemStatus::default(),
                 status_items: StatusItems::new(),
                 widgets: quireink_sdk::widgets::Widgets::new(),
+                services: quireink_sdk::services::Services::new(),
                 text_filters: quireink_sdk::filters::TextFilters::new(),
                 stylesheets: Vec::new(),
                 network: self.network,
@@ -998,6 +999,7 @@ impl Kernel {
         shared.hyphenation.shrink_to_fit();
         shared.status_items.shrink_to_fit();
         shared.widgets.shrink_to_fit();
+        shared.services.shrink_to_fit();
         shared.text_filters.shrink_to_fit();
         shared.stylesheets.shrink_to_fit();
         shared.translator.shrink_to_fit();
@@ -1869,6 +1871,14 @@ impl Kernel {
             self.shared.widgets.add(widget);
         }
         self.shared.stylesheets.append(&mut staging.stylesheets);
+        for (id, service) in staging.services.drain(..) {
+            self.shared.services.add(id, service);
+        }
+        for (point, contribution) in staging.contributions.drain(..) {
+            self.shared
+                .services
+                .contribute(point, plugin.clone(), contribution);
+        }
         for filter in staging.text_filters.drain(..) {
             self.shared.text_filters.add(filter);
         }
@@ -3057,6 +3067,7 @@ struct Shared {
     status: SystemStatus,
     status_items: StatusItems,
     widgets: quireink_sdk::widgets::Widgets,
+    services: quireink_sdk::services::Services,
     text_filters: quireink_sdk::filters::TextFilters,
     /// Plugins' stylesheets for books.
     stylesheets: Vec<Cow<'static, str>>,
@@ -3099,6 +3110,7 @@ impl Shared {
             status: &self.status,
             status_items: &self.status_items,
             widgets: &self.widgets,
+            services: &self.services,
             text_filters: &self.text_filters,
             stylesheets: &self.stylesheets,
             network: self.network,

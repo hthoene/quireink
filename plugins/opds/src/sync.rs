@@ -313,6 +313,7 @@ impl Sync {
         };
         let report = self.report.get_or_insert_with(Report::default);
         if stored {
+            out.push(quireink_sdk::library::changed());
             run.count += 1;
             run.synced.push(item.id.clone());
             let _ = env.storage.append(

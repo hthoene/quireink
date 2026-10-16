@@ -613,7 +613,7 @@ architecture (G1 to G12 below).
 | G9 | Plugins could not be managed at runtime | **Plugin management service** (list, enable, disable, install, update) and config write-back. | Config write-back ✅ M2 / list, enable, disable, restart ✅ M5 / install, update M5 |
 | G10 | Fixed library schema | Library service with **plugin-defined metadata fields** and metadata providers; the library service itself is replaceable. | M2 to M5 |
 | G11 | Widgets were pixels only | **Widget semantics** (role, label, state) for accessibility, automation and tests. ✅ told by the drawing helpers (`semantics`) | M2 |
-| G12 | Only the kernel could define extension points | **Plugin-defined extension points**: a plugin publishes a service through which others contribute; a second init phase (`activate`) runs after all plugins registered. | M5 |
+| G12 | Only the kernel could define extension points | **Plugin-defined extension points**: a plugin publishes a service through which others contribute; a second init phase (`activate`) runs after all plugins registered. ✅ `services` (`add_service`, `contribute`, `Env::services`); no second phase needed, as services and contributions are read at run time | M5 |
 
 **Rule derived from this check:** before a feature is added to a first-party
 plugin, ask whether a community plugin could build the same feature with the
