@@ -287,6 +287,17 @@ impl Plugin for CorePlugin {
         )?;
         r.add_setting(
             SettingSpec::new(
+                settings::SPEAK_FOCUS,
+                "core.setting.speak-focus",
+                SettingKind::Bool,
+                SettingValue::Bool(false),
+            )
+            .group(groups::SYSTEM)
+            .description("core.setting.speak-focus.help"),
+        )?;
+        r.set_menu_need(settings::SPEAK_FOCUS, quireink_sdk::MenuNeed::Speech)?;
+        r.add_setting(
+            SettingSpec::new(
                 settings::UI_SIZE,
                 "core.setting.ui-size",
                 SettingKind::Int { min: 7, max: 24 },

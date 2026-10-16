@@ -6,6 +6,14 @@ change the plugin SDK.
 
 ## [Unreleased]
 
+- *Say what is chosen* (System, where the device speaks): says the row
+  or button the buttons move to, with a switch's state, for using
+  QuireInk without looking at the screen.
+- Screens say what they show (PLANNING G11): rows with their text and
+  focus, buttons, switches and headings, told by the drawing helpers as
+  they draw (`Canvas::describe`, `semantics::parts`,
+  `Kernel::describe`). The emulator's scripts tap by name
+  (`tap-on:Display`) and print a screen's parts (`describe`).
 - The library is a service (`library` in the plugin SDK): what is known
   of books (title, author, series, tags, cover, progress, and fields
   plugins add), the books read last and the favourites, kept by the

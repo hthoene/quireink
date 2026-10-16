@@ -139,6 +139,12 @@ Some rules every screen should follow:
   switches, numbers with − and +, messages, icons. They follow the user's
   appearance settings and line up with the rest of QuireInk.
 
+Screens say what they show, for reading the interface aloud,
+automation and tests: the `ui` helpers (list rows, buttons, switches,
+headers, labels) tell what they draw by themselves. A screen that draws
+in its own way tells it with `canvas.describe(role, text, area,
+focused, on)`.
+
 ### Settings
 
 ```rust

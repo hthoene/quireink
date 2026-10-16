@@ -11,6 +11,8 @@ mod rows;
 
 pub use rows::Rows;
 
+use crate::semantics::Role;
+
 use alloc::borrow::Cow;
 use alloc::format;
 use alloc::string::{String, ToString};
@@ -172,7 +174,7 @@ pub fn draw_icon(
     };
     let mut text = [0u8; 4];
     let text = ch.encode_utf8(&mut text);
-    draw_label(canvas, &font, size, x, area, text, color)
+    draw_text(canvas, &font, size, x, area, text, color)
 }
 
 /// The width of icon `name` at `size` pixels, 0 if it cannot be drawn.
@@ -215,6 +217,7 @@ pub fn draw_heading(
         line,
     );
     let x = f32::from(rect.x) + style.margin as f32;
+    canvas.describe(Role::Heading, text, area, false, None);
     draw_label(canvas, &font, style.small, x, area, text, style.faint(90));
 }
 
@@ -235,6 +238,7 @@ pub fn switch_rect(style: &UiStyle, row: Rect) -> Rect {
 /// for a focused (black) row.
 pub fn draw_switch(canvas: &mut Canvas<'_>, style: &UiStyle, row: Rect, on: bool, inverted: bool) {
     let r = switch_rect(style, row);
+    canvas.describe(Role::Switch, "", r, false, Some(on));
     let (ink, paper) = if inverted {
         (Color::WHITE, Color::BLACK)
     } else {
@@ -346,6 +350,22 @@ pub fn has_icons(env: &Env<'_>) -> bool {
 /// longer than the rest of the area is shortened with "…", so a label
 /// never runs into what is next to it.
 pub fn draw_label(
+    canvas: &mut Canvas<'_>,
+    font: &FontHandle<'_>,
+    size: f32,
+    x: f32,
+    area: Rect,
+    text: &str,
+    color: Color,
+) -> f32 {
+    let room = f32::from(area.x) + f32::from(area.width) - x;
+    let at = Rect::new(x.max(0.0) as u16, area.y, room.max(0.0) as u16, area.height);
+    canvas.describe(Role::Text, text, at, false, None);
+    draw_text(canvas, font, size, x, area, text, color)
+}
+
+/// [`draw_label`] without telling what it draws (icons say nothing).
+fn draw_text(
     canvas: &mut Canvas<'_>,
     font: &FontHandle<'_>,
     size: f32,
@@ -516,6 +536,7 @@ impl Header {
         page: Option<(usize, usize)>,
     ) {
         let parts = self.layout(env, style, page);
+        canvas.describe(Role::Heading, title, self.area, false, None);
         style.header_background(canvas, self.area);
         let ink = style.header_colors().1;
         let Some(font) = style.font(env) else {
@@ -733,6 +754,7 @@ pub fn draw_message(
     let Some(font) = style.font(env) else {
         return;
     };
+    canvas.describe(Role::Text, text, area, false, None);
     let width = f32::from(area.width) - 2.0 * style.margin as f32;
     let line_height = font.line_metrics(style.text).line_height;
     let mut lines = font.wrap(style.text, text, width);
@@ -961,6 +983,7 @@ impl ListView {
         for (slot, index) in (first..len).take(self.rows()).enumerate() {
             let rect = self.row_rect(slot);
             let focused = self.active && self.shown && index == self.focus;
+            canvas.describe(Role::Row, "", rect, focused, None);
             if focused {
                 fill_round(canvas, style, rect, Color::BLACK);
             } else if self.columns == 1 {
@@ -1023,6 +1046,14 @@ pub fn draw_note(
         return;
     };
     let band = title_area(style, rect);
+    let below = band.y + band.height;
+    let at = Rect::new(
+        rect.x,
+        below,
+        rect.width,
+        rect.bottom().saturating_sub(u32::from(below)) as u16,
+    );
+    canvas.describe(Role::Text, note, at, false, None);
     let margin = style.margin as f32;
     let width = f32::from(rect.width) - 2.0 * margin;
     let color = if focused {
@@ -1161,6 +1192,7 @@ pub fn draw_button(
     on: bool,
     focused: bool,
 ) {
+    canvas.describe(Role::Button, label, rect, focused, on.then_some(true));
     let (back, ink) = if on {
         (Color::BLACK, Color::WHITE)
     } else {
