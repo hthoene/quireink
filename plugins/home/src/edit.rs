@@ -1,7 +1,9 @@
 //! Editing a list of widgets, as a list that buttons work as well as
-//! taps: the widgets (choosing one offers to move it up or down, its own
-//! settings where it has some, or to remove it), then *Add a widget*; for a page of the home screen also
-//! *Add a page* and *Remove this page*. Every change is kept at once.
+//! taps: the widgets (choosing one offers to move it up or down, to put
+//! it beside the one above or in a row of its own, its width in a row,
+//! its own settings where it has some, or to remove it), then *Add a
+//! widget*; for a page of the home screen also *Add a page* and *Remove
+//! this page*. Every change is kept at once.
 //!
 //! It edits a page of the home screen (parameter `page`, or `id` with the
 //! page's setting) or any other setting that is a list of widgets
@@ -14,10 +16,9 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use quireink_sdk::builtin::{actions, events, params, slots};
-use quireink_sdk::status::item_ids;
 use quireink_sdk::ui::choice;
 use quireink_sdk::ui::{self, ListChange, ListView, UiStyle};
-use quireink_sdk::widgets;
+use quireink_sdk::widgets::{self, Placement, WIDTHS, Width};
 use quireink_sdk::{
     Arg, Canvas, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Params, Rect, RefreshMode,
     Screen, SettingValue,
@@ -28,6 +29,11 @@ use crate::{ADD_SCREEN, CHOICE};
 
 /// A widget's options were chosen.
 const CHOSEN: Id = Id::new_static("home.edit-chosen");
+/// A widget's width in its row was chosen.
+const WIDTH_CHOSEN: Id = Id::new_static("home.edit-width-chosen");
+const WIDTH_LABELS: &str = "home.edit.width.";
+/// The options of [`WIDTHS`], in their order.
+const WIDTH_OPTIONS: [&str; 6] = ["auto", "1-4", "1-3", "1-2", "2-3", "3-4"];
 /// Parameter: the page edited (0 the first).
 pub(crate) const PAGE: &str = "page";
 const OPTION_LABELS: &str = "home.edit.";
@@ -56,30 +62,30 @@ pub(crate) fn target_of(params: &Params) -> Target {
 }
 
 impl Target {
-    /// Its widgets.
-    fn widgets(&self, env: &Env<'_>) -> Vec<String> {
+    /// Its widgets, row by row.
+    fn rows(&self, env: &Env<'_>) -> Vec<Vec<Placement>> {
         match self {
             Target::Page(page) => pages::pages(env).get(*page).cloned().unwrap_or_default(),
-            Target::Setting(id) => item_ids(env.settings.text(id))
-                .map(ToString::to_string)
-                .collect(),
+            Target::Setting(id) => widgets::rows(env.settings.text(id)),
         }
     }
 
-    /// The commands that keep `widgets` as its list.
-    fn store(&self, env: &Env<'_>, widgets: Vec<String>) -> Vec<Command> {
+    /// The commands that keep `rows` as its list.
+    fn store(&self, env: &Env<'_>, rows: Vec<Vec<Placement>>) -> Vec<Command> {
+        let rows: Vec<Vec<Placement>> = rows.into_iter().filter(|r| !r.is_empty()).collect();
         match self {
             Target::Page(page) => {
                 let mut pages = pages::pages(env);
                 if let Some(list) = pages.get_mut(*page) {
-                    *list = widgets;
+                    *list = rows;
                 }
                 pages::store(&pages)
             }
             Target::Setting(id) => Id::parse(id)
                 .ok()
                 .map(|id| {
-                    Command::SetSetting(id, SettingValue::Text(Cow::Owned(widgets.join(", "))))
+                    let text = widgets::write_rows(&rows);
+                    Command::SetSetting(id, SettingValue::Text(Cow::Owned(text)))
                 })
                 .into_iter()
                 .collect(),
@@ -106,6 +112,19 @@ impl Target {
                 .map_or(id.clone(), |s| env.i18n.tr(&s.title).to_string()),
         }
     }
+}
+
+/// Where each widget of `rows` is, in list order: its row and column.
+fn slots(rows: &[Vec<Placement>]) -> Vec<(usize, usize)> {
+    rows.iter()
+        .enumerate()
+        .flat_map(|(r, row)| (0..row.len()).map(move |c| (r, c)))
+        .collect()
+}
+
+/// The place in list order of the widget at row `r`, column `c`.
+fn index_of(rows: &[Vec<Placement>], r: usize, c: usize) -> usize {
+    rows[..r].iter().map(Vec::len).sum::<usize>() + c
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -139,7 +158,7 @@ impl EditScreen {
     }
 
     fn rows(&self, env: &Env<'_>) -> Vec<Row> {
-        let count = self.target.widgets(env).len();
+        let count = slots(&self.target.rows(env)).len();
         let mut rows: Vec<Row> = (0..count).map(Row::Widget).collect();
         rows.push(Row::Add);
         if let Target::Page(_) = self.target {
@@ -172,16 +191,27 @@ impl EditScreen {
         };
         match row {
             Row::Widget(at) => {
-                let list = self.target.widgets(&env);
-                let Some(id) = list.get(at) else {
+                let rows = self.target.rows(&env);
+                let slots = slots(&rows);
+                let Some(&(r, c)) = slots.get(at) else {
                     return;
                 };
+                let id = &rows[r][c].id;
                 let mut options = Vec::new();
                 if at > 0 {
                     options.push("up");
                 }
-                if at + 1 < list.len() {
+                if at + 1 < slots.len() {
                     options.push("down");
+                }
+                if c == 0 && r > 0 {
+                    options.push("beside");
+                }
+                if c > 0 {
+                    options.push("own-row");
+                }
+                if rows[r].len() > 1 {
+                    options.push("width");
                 }
                 if has_settings(&env, id) {
                     options.push("settings");
@@ -203,7 +233,7 @@ impl EditScreen {
             Row::Add => cx.command(Command::OpenScreen(ADD_SCREEN, self.target.params())),
             Row::AddPage => {
                 let mut pages = pages::pages(&env);
-                pages.push(alloc::vec![String::from(STATUS)]);
+                pages.push(alloc::vec![alloc::vec![Placement::new(STATUS)]]);
                 self.target = Target::Page(pages.len() - 1);
                 Self::run(cx, pages::store(&pages));
                 self.list.focus = 0;
@@ -225,30 +255,79 @@ impl EditScreen {
 
     fn chosen(&mut self, option: &str, at: usize, cx: &mut Cx<'_, '_>) {
         let env = *cx.env();
-        let mut list = self.target.widgets(&env);
-        if at >= list.len() {
+        let mut rows = self.target.rows(&env);
+        let places = slots(&rows);
+        let Some(&(r, c)) = places.get(at) else {
             return;
-        }
+        };
+        // Moving swaps two places: the rows keep their shapes.
+        let mut swap = |a: (usize, usize), b: (usize, usize)| {
+            let first = rows[a.0][a.1].clone();
+            rows[a.0][a.1] = core::mem::replace(&mut rows[b.0][b.1], first);
+        };
         match option {
             "up" if at > 0 => {
-                list.swap(at, at - 1);
+                swap((r, c), places[at - 1]);
                 self.list.focus = at - 1;
             }
-            "down" if at + 1 < list.len() => {
-                list.swap(at, at + 1);
+            "down" if at + 1 < places.len() => {
+                swap((r, c), places[at + 1]);
                 self.list.focus = at + 1;
             }
+            "beside" if c == 0 && r > 0 => {
+                let placed = rows[r].remove(0);
+                rows[r - 1].push(placed);
+                self.list.focus = index_of(&rows, r - 1, rows[r - 1].len() - 1);
+            }
+            "own-row" if c > 0 => {
+                let mut placed = rows[r].remove(c);
+                placed.width = Width::Auto;
+                rows.insert(r + 1, alloc::vec![placed]);
+                self.list.focus = index_of(&rows, r + 1, 0);
+            }
+            "width" => {
+                let id = &rows[r][c].id;
+                let title = env
+                    .widgets
+                    .title(id)
+                    .map_or(id.as_str(), |t| env.i18n.tr(t));
+                cx.command(choice::open(
+                    CHOICE,
+                    WIDTH_CHOSEN,
+                    title,
+                    &format!("{at}"),
+                    WIDTH_LABELS,
+                    &WIDTH_OPTIONS,
+                ));
+                return;
+            }
             "remove" => {
-                list.remove(at);
+                rows[r].remove(c);
             }
             "settings" => {
-                let params = Params::new().with(params::ID, list[at].clone());
+                let params = Params::new().with(params::ID, rows[r][c].id.clone());
                 cx.command(Command::OpenSlot(slots::SETTINGS, params));
                 return;
             }
             _ => return,
         }
-        let commands = self.target.store(&env, list);
+        let commands = self.target.store(&env, rows);
+        Self::run(cx, commands);
+        self.redraw(cx);
+    }
+
+    /// Gives the widget at `at` the width `option` names.
+    fn width_chosen(&mut self, option: &str, at: usize, cx: &mut Cx<'_, '_>) {
+        let env = *cx.env();
+        let mut rows = self.target.rows(&env);
+        let (Some(&(r, c)), Some(i)) = (
+            slots(&rows).get(at),
+            WIDTH_OPTIONS.iter().position(|o| *o == option),
+        ) else {
+            return;
+        };
+        rows[r][c].width = WIDTHS[i];
+        let commands = self.target.store(&env, rows);
         Self::run(cx, commands);
         self.redraw(cx);
     }
@@ -277,7 +356,8 @@ impl Screen for EditScreen {
             None,
             self.list.paging(rows.len()),
         );
-        let list = self.target.widgets(env);
+        let list = self.target.rows(env);
+        let places = slots(&list);
         let room = ui::icon_room(env, &style, true);
         self.list.draw(
             canvas,
@@ -291,24 +371,39 @@ impl Screen for EditScreen {
                 };
                 let (icon, title, value) = match rows[index] {
                     Row::Widget(at) => {
-                        let id = list.get(at).map_or("", String::as_str);
+                        let (r, c) = places.get(at).copied().unwrap_or_default();
+                        let placed = list.get(r).and_then(|row| row.get(c));
+                        let id = placed.map_or("", |p| p.id.as_str());
                         let name = env.widgets.title(id).map_or(id, |t| env.i18n.tr(t));
-                        (None, name.to_string(), "›")
+                        // Beside the one above: in its row.
+                        let icon = (c > 0).then_some("columns");
+                        let width = placed
+                            .filter(|_| list[r].len() > 1)
+                            .and_then(|p| p.width.text());
+                        (
+                            icon,
+                            name.to_string(),
+                            width.map_or(Cow::Borrowed("›"), Cow::Owned),
+                        )
                     }
-                    Row::Add => (Some("plus"), env.i18n.tr("home.edit.add").to_string(), "›"),
+                    Row::Add => (
+                        Some("plus"),
+                        env.i18n.tr("home.edit.add").to_string(),
+                        Cow::Borrowed("›"),
+                    ),
                     Row::AddPage => (
                         Some("plus"),
                         env.i18n.tr("home.edit.add-page").to_string(),
-                        "",
+                        Cow::Borrowed(""),
                     ),
                     Row::RemovePage => (
                         Some("trash"),
                         env.i18n.tr("home.edit.remove-page").to_string(),
-                        "",
+                        Cow::Borrowed(""),
                     ),
                 };
                 let rect = ui::draw_row_icon(canvas, env, &style, rect, room, icon, ink);
-                ui::draw_value_row(canvas, env, &style, rect, focused, &title, value);
+                ui::draw_value_row(canvas, env, &style, rect, focused, &title, &value);
             },
         );
     }
@@ -362,10 +457,14 @@ impl Screen for EditScreen {
     }
 
     fn on_event(&mut self, event: &Id, params: &Params, cx: &mut Cx<'_, '_>) {
-        if *event == CHOSEN {
+        if *event == CHOSEN || *event == WIDTH_CHOSEN {
             let option = params.get(choice::OPTION).unwrap_or_default().to_string();
             if let Some(at) = params.get(params::PATH).and_then(|p| p.parse().ok()) {
-                self.chosen(&option, at, cx);
+                if *event == CHOSEN {
+                    self.chosen(&option, at, cx);
+                } else {
+                    self.width_chosen(&option, at, cx);
+                }
             }
         } else if *event == events::SETTING_CHANGED {
             self.redraw(cx);
@@ -392,7 +491,12 @@ impl AddScreen {
         let top = header.area.height + style.gap as u16;
         let area = Rect::new(0, top, display.width, display.height.saturating_sub(top));
         let target = target_of(params);
-        let shown = target.widgets(env);
+        let shown: Vec<String> = target
+            .rows(env)
+            .into_iter()
+            .flatten()
+            .map(|p| p.id)
+            .collect();
         let mut offered: Vec<(Id, String)> = env
             .widgets
             .iter()
@@ -417,9 +521,9 @@ impl AddScreen {
         let Some((id, _)) = self.widgets.get(index) else {
             return;
         };
-        let mut list = self.target.widgets(&env);
-        list.push(id.as_str().to_string());
-        for command in self.target.store(&env, list) {
+        let mut rows = self.target.rows(&env);
+        rows.push(alloc::vec![Placement::new(id.as_str())]);
+        for command in self.target.store(&env, rows) {
             cx.command(command);
         }
         cx.command(Command::Back);

@@ -91,6 +91,19 @@ const CASES: &[Case] = &[
         colour: 0,
     },
     Case {
+        name: "boox-home-row",
+        profile: "boox-go-7",
+        book: None,
+        // Widgets side by side: the clock a third of the row, the date
+        // the rest, at its right end.
+        sets: &[
+            "home.page-1=home.status, home.clock (1/3) | home.date, core.space, home.tools",
+            "home.date.align=core.align.right",
+        ],
+        script: "",
+        colour: 0,
+    },
+    Case {
         name: "boox-reader-epub",
         profile: "boox-go-7",
         book: Some("books/die-verwandlung.epub"),

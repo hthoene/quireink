@@ -1,14 +1,14 @@
-//! The home screen's pages: each a list of widgets (ids separated by
-//! commas) in a setting of its own, `home.page-1` to `home.page-4`. The
+//! The home screen's pages: each a list of widgets in a setting of its
+//! own, `home.page-1` to `home.page-4`: rows separated by commas, widgets
+//! side by side in a row by `|` (see `quireink_sdk::widgets::rows`). The
 //! first page always shows; the others where they have widgets.
 
 use alloc::borrow::Cow;
 use alloc::format;
-use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use quireink_sdk::builtin::groups;
-use quireink_sdk::status::item_ids;
+use quireink_sdk::widgets::{self, Placement};
 use quireink_sdk::{
     Command, Env, Id, RegisterError, Registrar, SettingKind, SettingSpec, SettingValue,
 };
@@ -60,14 +60,13 @@ pub(crate) fn register(r: &mut dyn Registrar) -> Result<(), RegisterError> {
     Ok(())
 }
 
-/// The pages shown: their widgets' ids, the first page always.
-pub(crate) fn pages(env: &Env<'_>) -> Vec<Vec<String>> {
-    let mut pages: Vec<Vec<String>> = (0..MAX_PAGES)
-        .map(|index| {
-            item_ids(env.settings.text(setting(index).as_str()))
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-        })
+/// A page: rows of widgets.
+pub(crate) type Page = Vec<Vec<Placement>>;
+
+/// The pages shown, the first page always.
+pub(crate) fn pages(env: &Env<'_>) -> Vec<Page> {
+    let mut pages: Vec<Page> = (0..MAX_PAGES)
+        .map(|index| widgets::rows(env.settings.text(setting(index).as_str())))
         .enumerate()
         .filter(|(index, page)| *index == 0 || !page.is_empty())
         .map(|(_, page)| page)
@@ -79,10 +78,13 @@ pub(crate) fn pages(env: &Env<'_>) -> Vec<Vec<String>> {
 }
 
 /// The commands that store `pages` (the rest emptied).
-pub(crate) fn store(pages: &[Vec<String>]) -> Vec<Command> {
+pub(crate) fn store(pages: &[Page]) -> Vec<Command> {
     (0..MAX_PAGES)
         .map(|index| {
-            let text = pages.get(index).map(|p| p.join(", ")).unwrap_or_default();
+            let text = pages
+                .get(index)
+                .map(|p| widgets::write_rows(p))
+                .unwrap_or_default();
             Command::SetSetting(setting(index), SettingValue::Text(Cow::Owned(text)))
         })
         .collect()
@@ -94,7 +96,7 @@ mod tests {
 
     #[test]
     fn every_page_is_stored() {
-        let pages = alloc::vec![alloc::vec![String::from("a"), String::from("b")]];
+        let pages = alloc::vec![alloc::vec![alloc::vec![Placement::new("a")]]];
         assert_eq!(store(&pages).len(), MAX_PAGES);
     }
 }

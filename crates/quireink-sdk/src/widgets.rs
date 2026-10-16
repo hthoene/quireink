@@ -19,6 +19,10 @@
 //! height, and [`FILL`], the room the others leave. Screens that place
 //! widgets one below the other give each fill its share of that room
 //! ([`fill_height`]); elsewhere it is not there.
+//!
+//! Lists of widgets may put several side by side in a row ([`rows`]):
+//! equally wide unless one is given a part of the row ([`Width`]); a space
+//! is then a gap across, a free space shares the room across.
 
 use alloc::borrow::Cow;
 use alloc::boxed::Box;
@@ -225,6 +229,175 @@ pub fn align(env: &Env<'_>, widget: &str) -> Align {
     Align::of(env.settings.text(&alloc::format!("{widget}.align")))
 }
 
+// ---- Rows: widgets side by side ----------------------------------------------
+
+/// How wide a widget is in a row of several.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Width {
+    /// A share of what the others leave, as much as each other automatic
+    /// one: widgets of a row are equally wide unless told otherwise.
+    Auto,
+    /// A part of the row, e.g. 1/3.
+    Part(u8, u8),
+}
+
+/// The widths a widget in a row may be given, in this order.
+pub const WIDTHS: [Width; 6] = [
+    Width::Auto,
+    Width::Part(1, 4),
+    Width::Part(1, 3),
+    Width::Part(1, 2),
+    Width::Part(2, 3),
+    Width::Part(3, 4),
+];
+
+impl Width {
+    /// As written after a widget's id: `1/3`; nothing for automatic.
+    pub fn text(self) -> Option<String> {
+        match self {
+            Width::Auto => None,
+            Width::Part(n, d) => Some(alloc::format!("{n}/{d}")),
+        }
+    }
+
+    fn parse(text: &str) -> Option<Width> {
+        let (n, d) = text.trim().split_once('/')?;
+        let (n, d) = (n.trim().parse::<u8>().ok()?, d.trim().parse::<u8>().ok()?);
+        (n > 0 && d > 0 && n <= d).then_some(Width::Part(n, d))
+    }
+}
+
+/// A widget in a list: its id, and how wide it is in its row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Placement {
+    pub id: String,
+    pub width: Width,
+}
+
+impl Placement {
+    pub fn new(id: &str) -> Self {
+        Self {
+            id: String::from(id),
+            width: Width::Auto,
+        }
+    }
+}
+
+/// The rows of a list of widgets as settings keep it: rows separated by
+/// commas, widgets side by side by `|`, a width in parentheses, e.g.
+/// `home.status, home.clock (1/3) | home.date, home.continue`. Lists
+/// without `|` are a widget a row, as before rows existed.
+pub fn rows(list: &str) -> Vec<Vec<Placement>> {
+    list.split(',')
+        .map(|row| {
+            row.split('|')
+                .filter_map(|item| {
+                    let item = item.trim();
+                    let (id, width) = match item.split_once('(') {
+                        Some((id, rest)) => (
+                            id.trim(),
+                            Width::parse(rest.trim_end_matches(')')).unwrap_or(Width::Auto),
+                        ),
+                        None => (item, Width::Auto),
+                    };
+                    (!id.is_empty()).then(|| Placement {
+                        id: String::from(id),
+                        width,
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .filter(|row| !row.is_empty())
+        .collect()
+}
+
+/// `rows` as settings keep them (see [`rows`]).
+pub fn write_rows(rows: &[Vec<Placement>]) -> String {
+    let mut out = String::new();
+    for (r, row) in rows.iter().enumerate() {
+        if r > 0 {
+            out.push_str(", ");
+        }
+        for (i, p) in row.iter().enumerate() {
+            if i > 0 {
+                out.push_str(" | ");
+            }
+            out.push_str(&p.id);
+            if let Some(width) = p.width.text() {
+                out.push_str(&alloc::format!(" ({width})"));
+            }
+        }
+    }
+    out
+}
+
+/// Every widget id of a list, row after row.
+pub fn ids(list: &str) -> Vec<String> {
+    rows(list).into_iter().flatten().map(|p| p.id).collect()
+}
+
+/// Where the widgets of a row go across `width` pixels starting at `x`,
+/// with `gap` between them: each one's x and width, in order. Parts take
+/// their part of the row, [`SPACE`] its size, and automatic widgets and
+/// [`FILL`] share the rest equally.
+pub fn columns(env: &Env<'_>, row: &[Placement], x: u16, width: u16, gap: u16) -> Vec<(u16, u16)> {
+    let n = row.len().max(1) as u32;
+    let room = u32::from(width).saturating_sub(u32::from(gap) * (n - 1));
+    let fixed = |p: &Placement| -> Option<u32> {
+        match p.width {
+            Width::Part(a, b) => Some(room * u32::from(a) / u32::from(b)),
+            Width::Auto if p.id == SPACE => Some(u32::from(
+                env.widgets.height(SPACE, env, width).unwrap_or(0),
+            )),
+            Width::Auto => None,
+        }
+    };
+    let taken: u32 = row.iter().filter_map(fixed).sum();
+    let autos = row.iter().filter(|p| fixed(p).is_none()).count() as u32;
+    let share = room.saturating_sub(taken).checked_div(autos).unwrap_or(0);
+    let mut at = u32::from(x);
+    row.iter()
+        .map(|p| {
+            let w = fixed(p).unwrap_or(share).min(u32::from(u16::MAX));
+            let column = (at.min(u32::from(u16::MAX)) as u16, w as u16);
+            at += w + u32::from(gap);
+            column
+        })
+        .collect()
+}
+
+/// What a row is in a list placed one row below the other.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RowKind {
+    /// Widgets `height` pixels high, at their columns (see [`columns`]).
+    Widgets {
+        height: u16,
+        columns: Vec<(u16, u16)>,
+    },
+    /// A free space alone: a share of the room the rows leave.
+    Fill,
+}
+
+/// The kind and height of `row` placed across `width` pixels from `x`;
+/// `None` if it shows nothing.
+pub fn row_kind(env: &Env<'_>, row: &[Placement], x: u16, width: u16, gap: u16) -> Option<RowKind> {
+    if row.iter().all(|p| p.id == FILL) {
+        return Some(RowKind::Fill);
+    }
+    let columns = columns(env, row, x, width, gap);
+    // A space alone is as high as its size; in a row, only as wide.
+    let height = if row.len() == 1 {
+        env.widgets.height(&row[0].id, env, width)?
+    } else {
+        row.iter()
+            .zip(&columns)
+            .filter(|(p, _)| p.id != SPACE && p.id != FILL)
+            .filter_map(|(p, (_, w))| env.widgets.height(&p.id, env, *w))
+            .max()?
+    };
+    (height > 0).then_some(RowKind::Widgets { height, columns })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -253,6 +426,33 @@ mod tests {
         assert_eq!(fill_height(1000, 1200, 1), 0);
         assert_eq!(fill_height(1000, 400, 0), 0);
         assert!(repeatable(FILL) && repeatable(SPACE) && !repeatable("home.clock"));
+    }
+
+    #[test]
+    fn rows_are_read_and_written() {
+        let list = "home.status, home.clock (1/3) | core.fill | home.date,home.continue";
+        let read = rows(list);
+        assert_eq!(read.len(), 3);
+        assert_eq!(read[1].len(), 3);
+        assert_eq!(read[1][0].width, Width::Part(1, 3));
+        assert_eq!(read[1][2], Placement::new("home.date"));
+        assert_eq!(
+            write_rows(&read),
+            "home.status, home.clock (1/3) | core.fill | home.date, home.continue"
+        );
+        assert_eq!(
+            ids(list),
+            [
+                "home.status",
+                "home.clock",
+                "core.fill",
+                "home.date",
+                "home.continue"
+            ]
+        );
+        // Nonsense widths are automatic; empty items are none.
+        assert_eq!(rows("a (7/2) | , ,b")[0][0].width, Width::Auto);
+        assert_eq!(rows("a (7/2) | , ,b").len(), 2);
     }
 
     #[test]

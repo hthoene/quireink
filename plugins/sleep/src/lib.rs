@@ -30,6 +30,7 @@ use quireink_sdk::builtin::{events, groups, slots};
 use quireink_sdk::document::ImageRef;
 use quireink_sdk::library;
 use quireink_sdk::ui::{self, UiStyle};
+use quireink_sdk::widgets;
 use quireink_sdk::{
     Canvas, Color, Command, Cx, Env, Handled, Id, Manifest, MenuNeed, Params, Plugin, Priority,
     Rect, RefreshMode, RegisterError, Registrar, SDK_VERSION, Screen, ScreenSpec, SettingKind,
@@ -197,48 +198,51 @@ fn draw_widgets(canvas: &mut Canvas<'_>, env: &Env<'_>) -> bool {
     let margin = style.margin as u16;
     let gap = style.gap as u16;
     let width = display.width.saturating_sub(2 * margin);
-    // Free spaces (`None`) share the room the others leave.
-    let mut placed: Vec<(&str, Option<u16>)> = Vec::new();
+    // Rows of widgets; free spaces alone share the room the others leave.
+    let list = env.settings.text(WIDGET_LIST.as_str());
+    let mut placed: Vec<(Vec<widgets::Placement>, widgets::RowKind)> = Vec::new();
     let mut total = 0u16;
     let mut shown = 0;
-    for id in quireink_sdk::status::item_ids(env.settings.text(WIDGET_LIST.as_str())) {
-        if id == quireink_sdk::widgets::FILL {
-            placed.push((id, None));
-            continue;
-        }
-        let Some(height) = env.widgets.height(id, env, width).filter(|h| *h > 0) else {
+    for row in widgets::rows(list) {
+        let Some(kind) = widgets::row_kind(env, &row, margin, width, gap) else {
             continue;
         };
-        let added = height + if shown == 0 { 0 } else { gap * 2 };
-        if total + added > display.height {
-            break;
+        if let widgets::RowKind::Widgets { height, .. } = &kind {
+            let added = *height + if shown == 0 { 0 } else { gap * 2 };
+            if total + added > display.height {
+                break;
+            }
+            total += added;
+            shown += 1;
         }
-        total += added;
-        shown += 1;
-        placed.push((id, Some(height)));
+        placed.push((row, kind));
     }
     if shown == 0 {
         return false;
     }
-    let fills = placed.iter().filter(|(_, h)| h.is_none()).count();
-    let fill =
-        quireink_sdk::widgets::fill_height(u32::from(display.height), u32::from(total), fills);
+    let fills = placed
+        .iter()
+        .filter(|(_, kind)| *kind == widgets::RowKind::Fill)
+        .count();
+    let fill = widgets::fill_height(u32::from(display.height), u32::from(total), fills);
     let mut y = if fills == 0 {
         (display.height - total) / 2
     } else {
         0
     };
     let mut drawn = 0;
-    for (id, height) in placed {
-        let Some(height) = height else {
+    for (row, kind) in placed {
+        let widgets::RowKind::Widgets { height, columns } = kind else {
             y += fill;
             continue;
         };
         if drawn > 0 {
             y += gap * 2;
         }
-        let area = Rect::new(margin, y, width, height);
-        env.widgets.draw(id, canvas, env, area);
+        for (placement, (x, w)) in row.iter().zip(columns) {
+            let area = Rect::new(x, y, w, height);
+            env.widgets.draw(&placement.id, canvas, env, area);
+        }
         y += height;
         drawn += 1;
     }

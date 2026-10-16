@@ -143,22 +143,22 @@ pub(crate) fn register(r: &mut dyn Registrar) -> Result<(), RegisterError> {
             }
             let pages: [&str; 4] = ["home.page-1", "home.page-2", "home.page-3", "home.page-4"];
             let shown = pages.iter().any(|page| {
-                quireink_sdk::status::item_ids(env.settings.text(page))
+                widgets::ids(env.settings.text(page))
+                    .iter()
                     .any(|id| id == TODAY.as_str())
             });
             if let Some(SettingValue::Text(list)) = env.settings.get(pages[0])
                 && !shown
             {
-                let mut ids: alloc::vec::Vec<&str> = quireink_sdk::status::item_ids(list).collect();
-                let at = ids
+                let mut rows = widgets::rows(list);
+                let at = rows
                     .iter()
-                    .position(|id| *id == "home.continue")
-                    .map_or(ids.len(), |i| i + 1);
-                let today = TODAY;
-                ids.insert(at, today.as_str());
+                    .position(|row| row.iter().any(|p| p.id == "home.continue"))
+                    .map_or(rows.len(), |i| i + 1);
+                rows.insert(at, alloc::vec![widgets::Placement::new(TODAY.as_str())]);
                 out.push(quireink_sdk::Command::SetSetting(
                     Id::new_static("home.page-1"),
-                    SettingValue::Text(Cow::Owned(ids.join(", "))),
+                    SettingValue::Text(Cow::Owned(widgets::write_rows(&rows))),
                 ));
             }
         }),

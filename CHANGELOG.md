@@ -6,6 +6,14 @@ change the plugin SDK.
 
 ## [Unreleased]
 
+- Widgets side by side on the home screen and the sleep screen: in the
+  editor, *Beside the one above* puts a widget in the row above, *In a
+  row of its own* takes it out again, and *Width in the row* gives it a
+  quarter, a third, half, two thirds or three quarters of the row
+  (automatic: the row is shared equally). Spaces and free spaces work
+  across a row too. Lists keep rows as `a | b (1/3)`; plugin SDK:
+  `widgets::rows`, `write_rows`, `columns`, `row_kind`, `Width`.
+
 ## [0.2.0] - 2026-10-16
 
 - Books from a catalog (OPDS) or from Calibre keep the title, author,

@@ -1385,7 +1385,10 @@ pub fn option_name(env: &Env<'_>, spec: &SettingSpec, value: &str) -> String {
         // Choices are ids; their translation is their display name.
         SettingKind::Choice(_) => env.i18n.tr(value).to_string(),
         SettingKind::List => {
-            let names: Vec<&str> = crate::status::item_ids(value)
+            // Status items, or widgets (also side by side in rows).
+            let ids = crate::widgets::ids(value);
+            let names: Vec<&str> = ids
+                .iter()
                 .map(|id| {
                     let title = env.status_items.title(id).or_else(|| env.widgets.title(id));
                     env.i18n.tr(title.unwrap_or(id))

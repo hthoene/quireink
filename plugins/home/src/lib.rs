@@ -170,45 +170,50 @@ impl Dashboard {
             display.width,
             footer_height,
         );
-        // The heights first: free spaces (`None`) take what is left.
-        let column: Vec<(&String, Option<u16>)> = pages[self.page]
+        // The rows' heights first: free spaces alone take what is left.
+        let rows: Vec<(&Vec<widgets::Placement>, widgets::RowKind)> = pages[self.page]
             .iter()
-            .filter_map(|id| {
-                if id == widgets::FILL {
-                    return Some((id, None));
-                }
-                let height = env.widgets.height(id, env, width)?;
-                (height > 0).then_some((id, Some(height)))
-            })
+            .filter_map(|row| Some((row, widgets::row_kind(env, row, margin, width, gap)?)))
             .collect();
-        let used: u32 = column
+        let used: u32 = rows
             .iter()
-            .filter_map(|(_, h)| *h)
-            .map(|h| u32::from(h + gap))
+            .map(|(_, kind)| match kind {
+                widgets::RowKind::Widgets { height, .. } => u32::from(*height + gap),
+                widgets::RowKind::Fill => 0,
+            })
             .sum::<u32>()
             + u32::from(gap);
-        let fills = column.iter().filter(|(_, h)| h.is_none()).count();
+        let fills = rows
+            .iter()
+            .filter(|(_, kind)| *kind == widgets::RowKind::Fill)
+            .count();
         let fill = widgets::fill_height(u32::from(footer.y), used, fills);
         let mut y = gap;
         self.widgets.clear();
         self.targets.clear();
-        for (id, height) in column {
-            let Some(height) = height else {
+        for (row, kind) in rows {
+            let widgets::RowKind::Widgets { height, columns } = kind else {
                 y += fill;
                 continue;
             };
             if y + height > footer.y {
                 break;
             }
-            let area = Rect::new(margin, y, width, height);
-            for target in env.widgets.targets(id, env, area) {
-                self.targets.push((target.area, target.command));
+            for (placement, (x, w)) in row.iter().zip(columns) {
+                if placement.id == widgets::SPACE || placement.id == widgets::FILL {
+                    continue;
+                }
+                let area = Rect::new(x, y, w, height);
+                let id = &placement.id;
+                for target in env.widgets.targets(id, env, area) {
+                    self.targets.push((target.area, target.command));
+                }
+                self.widgets.push(Placed {
+                    id: id.clone(),
+                    area,
+                    shown: env.widgets.signature(id, env),
+                });
             }
-            self.widgets.push(Placed {
-                id: id.clone(),
-                area,
-                shown: env.widgets.signature(id, env),
-            });
             y += height + gap;
         }
         // The pencil, at the right end of the footer.
