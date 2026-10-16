@@ -1,6 +1,7 @@
 //! Serving HTTP for plugins, for shells with the standard library (the
 //! emulator, Android): a small HTTP/1.1 server per plugin server, each
-//! connection on a thread of its own, one request per connection.
+//! connection on a thread of its own, one request per connection. Also
+//! plugins' sockets ([`Sockets`]).
 //!
 //! The shell starts and stops servers as the kernel asks
 //! (`ServerCall`), passes requests on (`ServerEvent`) and the answers
@@ -22,6 +23,10 @@ use std::thread;
 use std::time::Duration;
 
 use quireink_core::{ServedFile, ServerCall, ServerEvent};
+
+mod sockets;
+
+pub use sockets::Sockets;
 
 /// Size of the parts bodies go in.
 const PART: usize = 64 * 1024;

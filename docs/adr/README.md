@@ -19,6 +19,7 @@ superseded by a new record that links back.
 | [0011](0011-epub-streaming-conversion.md) | EPUB: streaming conversion into a block cache | Accepted |
 | [0012](0012-banded-rendering.md) | Rendering in bands | Accepted |
 | [0013](0013-x4-firmware.md) | The Xteink X4's firmware | Accepted |
+| [0014](0014-sockets-for-plugins.md) | Sockets for plugins | Accepted |
 
 ## Template
 

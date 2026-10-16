@@ -24,6 +24,10 @@ change the plugin SDK.
 - GIF pictures in books, comics and the sleep screen's own pictures: the
   first picture of the file (also of an animation, interlaced or with
   transparency), decoded to gray row by row like JPEG and PNG.
+- Sockets for plugins (ADR 0014): TCP connections that read text or
+  files of any size into storage, and UDP broadcasts to find services,
+  in the emulator and on Android (`Command::Connect`, `SocketSend`,
+  `SocketRead`, `Disconnect`, `Broadcast`).
 - Small capitals (CSS `font-variant: small-caps`, `font-variant-caps`)
   in EPUB, HTML and the other converted formats: lower case letters as
   smaller capitals, the text itself unchanged (search, selection and

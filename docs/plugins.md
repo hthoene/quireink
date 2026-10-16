@@ -310,3 +310,14 @@ large print and an airy theme.
 [`Env`]: ../crates/quireink-sdk/src/env.rs
 [`Command`]: ../crates/quireink-sdk/src/command.rs
 [`Screen`]: ../crates/quireink-sdk/src/screen.rs
+
+Other protocols go over sockets ([ADR 0014](adr/0014-sockets-for-plugins.md)):
+`Command::Connect` opens a TCP connection, `Command::SocketSend` sends,
+and `Command::SocketRead` asks for what comes next, as text
+(`SocketRead::Text`) or as a file of a known length written to storage as
+it comes (`SocketRead::File`), so files of any size never need to fit in
+memory. `Command::Broadcast` finds services in the local network by a
+UDP datagram and their answers. Everything comes back as events
+(`socket_params`); a socket closes when the screen showing as it was
+opened is closed.
+

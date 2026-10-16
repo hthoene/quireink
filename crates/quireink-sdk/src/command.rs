@@ -87,6 +87,46 @@ pub mod server_params {
     pub const BODY_FILE: &str = "body-file";
 }
 
+/// What a socket is to read next (see [`Command::SocketRead`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SocketRead {
+    /// What has come, up to `max` bytes, as text (UTF-8; invalid bytes
+    /// replaced): the event [`socket_params::RECEIVED`] with it.
+    Text { max: u32 },
+    /// Exactly `len` bytes, written to `path` in storage as they come (a
+    /// file there is replaced): the event [`socket_params::SAVED`] once
+    /// they all came, so files of any size never need to fit in memory.
+    File {
+        path: alloc::string::String,
+        len: u64,
+    },
+}
+
+/// Parameters of a socket's events (see [`Command::Connect`]) and of a
+/// broadcast's (see [`Command::Broadcast`]).
+pub mod socket_params {
+    /// What happened: [`CONNECTED`], [`RECEIVED`], [`SAVED`], [`CLOSED`]
+    /// or [`FAILED`]; for broadcasts [`ANSWER`] and [`DONE`].
+    pub const KIND: &str = "kind";
+    pub const CONNECTED: &str = "connected";
+    /// Text came, in [`TEXT`]; empty when the other side closed.
+    pub const RECEIVED: &str = "received";
+    /// A file read is complete; its [`PATH`].
+    pub const SAVED: &str = "saved";
+    pub const CLOSED: &str = "closed";
+    pub const FAILED: &str = "failed";
+    /// An answer to a broadcast: its [`TEXT`] and where it came [`FROM`].
+    pub const ANSWER: &str = "answer";
+    /// No more answers to a broadcast will come.
+    pub const DONE: &str = "done";
+    pub const TEXT: &str = "text";
+    pub const PATH: &str = "path";
+    /// The address an answer came from, e.g. `192.168.1.20`.
+    pub const FROM: &str = "from";
+    /// Why it failed or closed.
+    pub const REASON: &str = "reason";
+}
+
 /// Parameters of an HTTP reply event (see [`HttpRequest`]).
 pub mod http_params {
     pub const STATUS: &str = "status";
@@ -225,6 +265,39 @@ pub enum Command {
     Serve { server: Id, port: u16, events: Id },
     /// Stops serving.
     StopServing(Id),
+    /// Opens a TCP connection to `host` and `port` (see
+    /// [ADR 0014](https://github.com/hthoene/quireink/blob/main/docs/adr/0014-sockets-for-plugins.md)).
+    /// Everything about it comes as the event `events`, with `id` the
+    /// socket ([`params::ID`](crate::builtin::params::ID)) and what
+    /// happened ([`socket_params`]): connected, received, saved, closed,
+    /// failed. Nothing is read unasked ([`Command::SocketRead`]). A socket
+    /// also closes when the screen showing as it was opened is closed.
+    Connect {
+        socket: Id,
+        host: alloc::string::String,
+        port: u16,
+        events: Id,
+    },
+    /// Sends bytes on a socket.
+    SocketSend {
+        socket: Id,
+        data: alloc::vec::Vec<u8>,
+    },
+    /// Asks a socket for what comes next (one read at a time).
+    SocketRead { socket: Id, read: SocketRead },
+    /// Closes a socket.
+    Disconnect(Id),
+    /// Sends `data` as a UDP datagram to the local network on each of
+    /// `ports`, e.g. to find a service. Each answer within `wait_ms` comes
+    /// as the event `events` ([`socket_params::ANSWER`], with `id`), then
+    /// [`socket_params::DONE`].
+    Broadcast {
+        id: Id,
+        ports: alloc::vec::Vec<u16>,
+        data: alloc::vec::Vec<u8>,
+        wait_ms: u32,
+        events: Id,
+    },
     /// Answers a request of a server.
     Respond(ServerResponse),
     /// Asks for the text on the clipboard (see
