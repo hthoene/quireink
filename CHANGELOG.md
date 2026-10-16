@@ -12,6 +12,11 @@ change the plugin SDK.
   else can be used; after five wrong tries the next one waits half a
   minute. *Lock now* locks at once from any button, gesture or rule.
 - `Canvas::draw_line`.
+- Plugin SDK: input filters (`Registrar::add_input_filter`) see every
+  button and finger before screens and key maps do, and may take it or
+  run an action instead; refresh filters (`Registrar::add_refresh_filter`)
+  change how the panel is refreshed. `InputEvent` and `ButtonState` are
+  part of the SDK.
 
 - Plugin SDK: services, what one plugin offers others
   (`Registrar::add_service`, `Env::services`), and points plugins define
@@ -23,11 +28,6 @@ change the plugin SDK.
   reading or while not, only on battery or while charging, only while a
   switch is on or off (hold a rule, *Only if …*). They can also set a
   number (e.g. the light to 20) and show a message.
-- Plugin SDK: input filters (`Registrar::add_input_filter`) see every
-  button and finger before screens and key maps do, and may take it or
-  run an action instead; refresh filters (`Registrar::add_refresh_filter`)
-  change how the panel is refreshed. `InputEvent` and `ButtonState` are
-  part of the SDK.
 
 - Drag and drop in lists, as on phones: entries of menus (*Customise
   menus*), the widgets of the sleep screen and the items of status lines
