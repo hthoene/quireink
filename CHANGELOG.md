@@ -11,6 +11,8 @@ change the plugin SDK.
   *Screen lock*. The code is kept only as a salted hash. Locked, nothing
   else can be used; after five wrong tries the next one waits half a
   minute. *Lock now* locks at once from any button, gesture or rule.
+  It looks like a phone's: the time and the date above, round keys
+  below, rings for the digits still to come.
 - `Canvas::draw_line`.
 - Plugin SDK: input filters (`Registrar::add_input_filter`) see every
   button and finger before screens and key maps do, and may take it or

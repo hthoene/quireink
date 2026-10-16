@@ -12,10 +12,11 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use quireink_sdk::builtin::{actions, params, slots};
+use quireink_sdk::semantics::Role;
 use quireink_sdk::ui::{self, UiStyle};
 use quireink_sdk::{
-    Arg, Canvas, Color, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Instant, Params,
-    Point, PointerEvent, PointerPhase, Rect, RefreshMode, Screen, SettingValue,
+    Arg, Canvas, Color, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Instant, Metrics,
+    Params, Point, PointerEvent, PointerPhase, Rect, RefreshMode, Screen, SettingValue,
 };
 
 use crate::{KIND, KIND_PREFIX, KINDS, Locked, SCREEN, code};
@@ -74,11 +75,20 @@ pub(crate) struct LockScreen {
     layout: Layout,
 }
 
-/// Where things are.
+/// Where things are: as on a phone, the clock (when unlocking) or the
+/// header (when setting up) at the top, then what is asked for, the
+/// code's dots and a message, and the keypad or pattern below.
 struct Layout {
-    message: Rect,
+    /// The clock and the date, when unlocking.
+    clock: Rect,
+    clock_size: f32,
+    /// What is asked for, when there is no header to say it.
+    title: Rect,
     /// The dots that stand for a PIN's digits.
     dots: Rect,
+    message: Rect,
+    /// Where the kinds are listed.
+    list_top: u16,
     keys: [Rect; 12],
     /// The centres of the pattern's dots, their radius, its *OK*.
     points: [Point; 9],
@@ -88,35 +98,74 @@ struct Layout {
     password: Rect,
 }
 
+/// The height of a line of text at `size`.
+fn line(env: &Env<'_>, style: &UiStyle, size: f32) -> u16 {
+    style
+        .font(env)
+        .map_or(size * 1.3, |f| f.line_metrics(size).line_height) as u16
+}
+
 impl Layout {
-    fn new(env: &Env<'_>, style: &UiStyle) -> Self {
+    fn new(env: &Env<'_>, style: &UiStyle, header: bool) -> Self {
         let display = env.device.display;
         let (w, h) = (display.width, display.height);
+        let metrics = Metrics::new(display.dpi);
         let row = style.row as u16;
-        let top = style.header as u16 + style.gap as u16;
-        let message = Rect::new(0, top, w, row);
-        let dots = Rect::new(0, top + row, w, row);
-        // The keypad below: three columns, four rows, square keys.
-        let pad_top = dots.y + row + style.gap as u16;
-        let room_h = h.saturating_sub(pad_top + style.margin as u16 * 2);
-        let room_w = w.saturating_sub(style.margin as u16 * 4);
-        let cell = (room_w / 3).min(room_h / 4).max(1);
-        let key = cell * 4 / 5;
-        let left = (w - cell * 3) / 2;
+        let gap = style.gap as u16;
+        let mut y = if header {
+            style.header as u16 + gap * 2
+        } else {
+            h / 12
+        };
+        let list_top = y;
+        let clock_size = style.title * 2.6;
+        let clock = if header {
+            Rect::new(0, y, w, 0)
+        } else {
+            let height = line(env, style, clock_size) + line(env, style, style.small);
+            Rect::new(0, y, w, height)
+        };
+        y += clock.height + if header { 0 } else { gap * 3 };
+        let title = Rect::new(0, y, w, if header { 0 } else { row });
+        y += title.height;
+        let dots = Rect::new(0, y, w, row);
+        y += row;
+        let message = Rect::new(0, y, w, row);
+        y += row + gap;
+        // The keypad at the bottom: round keys, at most 15 mm across,
+        // three a row with room between them.
+        let bottom = h.saturating_sub((h / 14).max(style.margin as u16 * 2));
+        let room = bottom.saturating_sub(y);
+        let width = w.saturating_sub(style.margin as u16 * 4);
+        let d = (metrics.mm(15) as u16)
+            .min(room * 4 / 19)
+            .min(width / 4)
+            .max(8);
+        let (across, down) = (d * 3 / 2, d * 5 / 4);
+        let pad_top = bottom.saturating_sub(down * 3 + d);
         let keys = core::array::from_fn(|i| {
             let (col, line) = ((i % 3) as u16, (i / 3) as u16);
             Rect::new(
-                left + col * cell + (cell - key) / 2,
-                pad_top + line * cell + (cell - key) / 2,
-                key,
-                key,
+                w / 2 - d / 2 - across + col * across,
+                pad_top + line * down,
+                d,
+                d,
             )
         });
-        // The pattern: a square of three by three dots, OK below.
+        // The pattern: three by three dots in the same room, OK below
+        // where there is no touch.
         let ok_h = ui::button_height(Rect::new(0, 0, 0, row));
-        let side = room_w.min(room_h.saturating_sub(ok_h + row)).max(3);
-        let step = side / 3;
-        let (x0, y0) = ((w - step * 3) / 2, pad_top);
+        let ok_room = if env.device.input.touch {
+            0
+        } else {
+            ok_h + row
+        };
+        let step = (metrics.mm(22) as u16)
+            .min(width / 3)
+            .min(room.saturating_sub(ok_room) / 3)
+            .max(3);
+        let x0 = (w - step * 3) / 2;
+        let y0 = y + (room.saturating_sub(ok_room + step * 3)) / 2;
         let points = core::array::from_fn(|i| {
             Point::new(
                 i32::from(x0 + (i % 3) as u16 * step + step / 2),
@@ -125,10 +174,14 @@ impl Layout {
         });
         let ok_w = w / 3;
         let ok = Rect::new((w - ok_w) / 2, y0 + step * 3 + row / 2, ok_w, ok_h);
-        let password = Rect::new(w / 6, pad_top + row, w * 2 / 3, ok_h);
+        let password = Rect::new(w / 6, y + room.saturating_sub(ok_h) / 3, w * 2 / 3, ok_h);
         Self {
-            message,
+            clock,
+            clock_size,
+            title,
             dots,
+            message,
+            list_top,
             keys,
             points,
             radius: i32::from(step / 10).max(4),
@@ -158,9 +211,10 @@ impl LockScreen {
         } else {
             Step::Choose
         };
+        let header = step != Step::Unlock;
         Self {
             locked,
-            header: ui::Header::new(env, &style, step != Step::Unlock),
+            header: ui::Header::new(env, &style, header),
             step,
             kind: active.unwrap_or_else(|| String::from("pin")),
             entered: String::new(),
@@ -171,7 +225,7 @@ impl LockScreen {
             shown: !env.device.input.touch,
             finger: None,
             asked: false,
-            layout: Layout::new(env, &style),
+            layout: Layout::new(env, &style, header),
             style,
         }
     }
@@ -211,7 +265,7 @@ impl LockScreen {
     fn kind_row(&self, index: usize) -> Rect {
         let l = &self.layout;
         let row = self.style.row as u16;
-        Rect::new(0, l.dots.y + index as u16 * row, l.dots.width, row)
+        Rect::new(0, l.list_top + index as u16 * row, l.dots.width, row)
     }
 
     /// Kind `kind` was chosen: off at once, else the new code.
@@ -367,24 +421,78 @@ impl LockScreen {
     fn draw_pin(&self, canvas: &mut Canvas<'_>, env: &Env<'_>) {
         let style = &self.style;
         let l = &self.layout;
-        let r = i32::from(l.dots.height) / 6;
-        let count = self.entered.len() as i32;
-        let gap = r * 3;
-        let mut x = i32::from(l.dots.width) / 2 - (count * gap) / 2 + gap / 2;
+        // A dot for every digit, rings for the least still to come.
+        let r = i32::from(l.dots.height) / 7;
+        let count = self.entered.len().max(MIN_LENGTH) as i32;
+        let gap = r * 4;
+        let mut x = i32::from(l.dots.width) / 2 - (count - 1) * gap / 2;
         let y = i32::from(l.dots.y) + i32::from(l.dots.height) / 2;
-        for _ in 0..count {
-            circle(canvas, Point::new(x, y), r, Color::BLACK);
+        for i in 0..count {
+            if (i as usize) < self.entered.len() {
+                circle(canvas, Point::new(x, y), r, Color::BLACK);
+            } else {
+                ring(canvas, Point::new(x, y), r, style.line.max(2));
+            }
             x += gap;
         }
+        let Some(font) = style.font(env) else {
+            return;
+        };
         for (i, key) in KEYS.iter().enumerate() {
+            let rect = l.keys[i];
             let focused = self.shown && self.focus == i;
-            if *key == DELETE {
-                // Deleting is an arrow back.
-                ui::draw_button(canvas, env, style, l.keys[i], "", false, focused);
-                icon_in(canvas, env, style, l.keys[i], "arrow-left");
+            let centre = Point::new(
+                i32::from(rect.x) + i32::from(rect.width) / 2,
+                i32::from(rect.y) + i32::from(rect.height) / 2,
+            );
+            let radius = i32::from(rect.width) / 2;
+            canvas.describe(Role::Button, key, rect, focused, None);
+            // Digits in a thin ring; delete and OK as plain signs. Chosen
+            // with the buttons, a key is filled.
+            let digit = *key != DELETE && *key != "OK";
+            let ink = if focused {
+                circle(canvas, centre, radius, Color::BLACK);
+                Color::WHITE
             } else {
-                ui::draw_button(canvas, env, style, l.keys[i], key, false, focused);
+                if digit {
+                    ring(canvas, centre, radius, style.line.max(1));
+                }
+                Color::BLACK
+            };
+            if digit {
+                let size = f32::from(rect.height) * 0.42;
+                let x = f32::from(rect.x) + (f32::from(rect.width) - font.measure(size, key)) / 2.0;
+                ui::draw_label(canvas, &font, size, x, rect, key, ink);
+            } else {
+                let name = if *key == DELETE {
+                    "arrow-left"
+                } else {
+                    "check"
+                };
+                let size = f32::from(rect.height) * 0.4;
+                let x = f32::from(rect.x)
+                    + (f32::from(rect.width) - ui::icon_width(env, name, size)) / 2.0;
+                ui::draw_icon(canvas, env, name, size, x, rect, ink);
             }
+        }
+    }
+
+    /// The time, large, and the date below it.
+    fn draw_clock(&self, canvas: &mut Canvas<'_>, env: &Env<'_>) {
+        let style = &self.style;
+        let l = &self.layout;
+        let Some(font) = style.font(env) else {
+            return;
+        };
+        let time = quireink_sdk::time::clock_text(env).unwrap_or_default();
+        let big = line(env, style, l.clock_size);
+        let top = Rect::new(l.clock.x, l.clock.y, l.clock.width, big);
+        let x = (f32::from(top.width) - font.measure(l.clock_size, &time)) / 2.0;
+        ui::draw_label(canvas, &font, l.clock_size, x, top, &time, Color::BLACK);
+        if let Some(date) = quireink_sdk::time::date_text(env) {
+            let below = Rect::new(top.x, top.y + big, top.width, line(env, style, style.small));
+            let x = (f32::from(below.width) - font.measure(style.small, &date)) / 2.0;
+            ui::draw_label(canvas, &font, style.small, x, below, &date, style.faint(70));
         }
     }
 
@@ -404,7 +512,7 @@ impl LockScreen {
         }
         for (i, &point) in l.points.iter().enumerate() {
             canvas.describe(
-                quireink_sdk::semantics::Role::Button,
+                Role::Button,
                 "",
                 Rect::new(
                     (point.x - l.radius * 3).max(0) as u16,
@@ -419,9 +527,12 @@ impl LockScreen {
             circle(
                 canvas,
                 point,
-                if on { l.radius } else { l.radius / 3 },
+                if on { l.radius } else { l.radius / 2 },
                 Color::BLACK,
             );
+            if on {
+                ring(canvas, point, l.radius * 2, self.style.line.max(1));
+            }
             if self.shown && self.focus == i {
                 ring(canvas, point, l.radius * 3, self.style.line * 2);
             }
@@ -432,13 +543,6 @@ impl LockScreen {
             ui::draw_button(canvas, env, &self.style, l.ok, ok, false, focused);
         }
     }
-}
-
-/// Icon `name` in the middle of `rect`.
-fn icon_in(canvas: &mut Canvas<'_>, env: &Env<'_>, style: &UiStyle, rect: Rect, name: &str) {
-    let size = style.text;
-    let x = f32::from(rect.x) + (f32::from(rect.width) - ui::icon_width(env, name, size)) / 2.0;
-    ui::draw_icon(canvas, env, name, size, x, rect, Color::BLACK);
 }
 
 /// A filled circle.
@@ -458,7 +562,12 @@ impl Screen for LockScreen {
         canvas.clear(Color::WHITE);
         let style = self.style;
         let title = env.i18n.tr(self.title_key());
-        self.header.draw(canvas, env, &style, title, None, None);
+        if self.step == Step::Unlock {
+            self.draw_clock(canvas, env);
+            ui::draw_message(canvas, env, &style, self.layout.title, title);
+        } else {
+            self.header.draw(canvas, env, &style, title, None, None);
+        }
         let message = if self.waiting(env) {
             let seconds = self.wait_until.map_or(0, |until| {
                 until.millis().saturating_sub(env.now.millis()) / 1000 + 1
@@ -563,9 +672,21 @@ impl Screen for LockScreen {
         if self.step == Step::Choose {
             let kinds = Self::kinds(&env);
             let a = action;
-            if [actions::UP, actions::LEFT, actions::PREVIOUS].contains(a) {
+            let up = [
+                actions::UP,
+                actions::LEFT,
+                actions::PREVIOUS,
+                actions::PREV_PAGE,
+            ];
+            let down = [
+                actions::DOWN,
+                actions::RIGHT,
+                actions::NEXT,
+                actions::NEXT_PAGE,
+            ];
+            if up.contains(a) {
                 self.focus = self.focus.saturating_sub(1);
-            } else if [actions::DOWN, actions::RIGHT, actions::NEXT].contains(a) {
+            } else if down.contains(a) {
                 self.focus = (self.focus + 1).min(kinds.len() - 1);
             } else if *a == actions::CONFIRM && self.shown {
                 self.choose_kind(kinds[self.focus], cx);
@@ -581,9 +702,10 @@ impl Screen for LockScreen {
             -1
         } else if *a == actions::RIGHT || *a == actions::NEXT {
             1
-        } else if *a == actions::UP {
+        } else if *a == actions::UP || *a == actions::PREV_PAGE {
+            // A row up or down; page buttons where there are no others.
             -3
-        } else if *a == actions::DOWN {
+        } else if *a == actions::DOWN || *a == actions::NEXT_PAGE {
             3
         } else if *a == actions::CONFIRM {
             if self.shown {
