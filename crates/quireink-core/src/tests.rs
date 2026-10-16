@@ -459,6 +459,8 @@ fn swipes_in_from_the_edges_come_first() {
 /// A screen that holds the edges for itself, taking every finger.
 struct EdgeHolder {
     log: Log,
+    /// Holds the edges as a whole; else only takes the fingers it gets.
+    holds: bool,
 }
 
 impl Screen for EdgeHolder {
@@ -472,7 +474,7 @@ impl Screen for EdgeHolder {
     }
 
     fn holds_edges(&self) -> bool {
-        true
+        self.holds
     }
 
     fn on_pointer(&mut self, event: &PointerEvent, _: &mut Cx<'_, '_>) -> Handled {
@@ -483,7 +485,7 @@ impl Screen for EdgeHolder {
     }
 }
 
-struct EdgeHolderPlugin(Log);
+struct EdgeHolderPlugin(Log, bool);
 
 impl Plugin for EdgeHolderPlugin {
     fn manifest(&self) -> Manifest {
@@ -497,11 +499,16 @@ impl Plugin for EdgeHolderPlugin {
     }
 
     fn register(&self, r: &mut dyn Registrar) -> Result<(), RegisterError> {
-        let log = self.0.clone();
+        let (log, holds) = (self.0.clone(), self.1);
         r.add_screen(ScreenSpec {
             id: Id::new_static("holder.screen"),
             title: Cow::Borrowed("holder"),
-            factory: Box::new(move |_, _| Box::new(EdgeHolder { log: log.clone() })),
+            factory: Box::new(move |_, _| {
+                Box::new(EdgeHolder {
+                    log: log.clone(),
+                    holds,
+                })
+            }),
         })?;
         r.bind_slot(
             slots::HOME,
@@ -534,15 +541,19 @@ button.menu = core.refresh-screen
 
 #[test]
 fn screens_may_hold_the_edges() {
-    let log = log();
-    let mut kernel = Kernel::builder(DEVICE)
-        .plugin(EdgeHolderPlugin(log.clone()))
-        .build()
-        .unwrap();
-    kernel.start(Instant(0));
-    // The finger at the edge is the screen's: no going home.
-    swipe(&mut kernel, 100, (45, 88), (45, 30));
-    assert_eq!(*log.borrow(), ["holder:down"]);
+    for holds in [true, false] {
+        let log = log();
+        let mut kernel = Kernel::builder(DEVICE)
+            .plugin(EdgeHolderPlugin(log.clone(), holds))
+            .build()
+            .unwrap();
+        kernel.start(Instant(0));
+        // The finger at the edge is the screen's: no going home. Also
+        // when the screen only takes the fingers it wants (a grip that
+        // moves a row) and leaves the edges otherwise.
+        swipe(&mut kernel, 100, (45, 88), (45, 30));
+        assert_eq!(*log.borrow(), ["holder:down"]);
+    }
 }
 
 #[test]

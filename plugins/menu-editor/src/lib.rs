@@ -18,11 +18,11 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use quireink_sdk::builtin::{actions, menus};
-use quireink_sdk::ui::{self, ListChange, ListView, UiStyle};
+use quireink_sdk::ui::{self, ListChange, ListView, Reorder, ReorderStep, UiStyle};
 use quireink_sdk::{
     ActionSpec, Canvas, Color, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Manifest,
-    MenuEntry, Params, Plugin, Rect, RefreshMode, RegisterError, Registrar, SDK_VERSION, Screen,
-    ScreenSpec, Version,
+    MenuEntry, Params, Plugin, PointerEvent, Rect, RefreshMode, RegisterError, Registrar,
+    SDK_VERSION, Screen, ScreenSpec, Version,
 };
 
 pub const PLUGIN: Id = Id::new_static("menu-editor");
@@ -171,11 +171,13 @@ fn save(menu: &str, ids: Vec<Id>, cx: &mut Cx<'_, '_>) {
     }
 }
 
-/// A full screen with a header and a list.
+/// A full screen with a header and a list, whose first rows may be moved
+/// by dragging.
 struct Frame {
     style: UiStyle,
     header: ui::Header,
     list: ListView,
+    reorder: Reorder,
 }
 
 impl Frame {
@@ -189,15 +191,18 @@ impl Frame {
             list: ListView::new(area, style.row).focus_on_keys(env),
             style,
             header,
+            reorder: Reorder::default(),
         }
     }
 
+    /// Draws the rows; the first `movable` with a grip.
     fn draw(
         &mut self,
         canvas: &mut Canvas<'_>,
         env: &Env<'_>,
         title: &str,
         rows: &[(String, String)],
+        movable: usize,
     ) {
         let style = self.style;
         self.header.draw(
@@ -214,9 +219,40 @@ impl Frame {
             rows.len(),
             |canvas, index, rect, focused| {
                 let (label, value) = &rows[index];
+                let rect = if index < movable {
+                    Reorder::draw_grip(canvas, env, &style, rect, focused);
+                    Reorder::content(rect)
+                } else {
+                    rect
+                };
                 ui::draw_value_row(canvas, env, &style, rect, focused, label, value);
             },
         );
+        self.reorder.draw(canvas, &style, &self.list);
+    }
+
+    /// Follows a finger dragging one of the first `movable` rows: where
+    /// it was let go, the row moved (`from`, `to`).
+    fn on_pointer(
+        &mut self,
+        event: &PointerEvent,
+        movable: usize,
+        cx: &mut Cx<'_, '_>,
+    ) -> (Handled, Option<(usize, usize)>) {
+        let Some(step) = self.reorder.on_pointer(event, &self.list, movable) else {
+            return (Handled::No, None);
+        };
+        if step != ReorderStep::Same {
+            cx.request_redraw();
+            cx.request_refresh(RefreshMode::Fast);
+        }
+        match step {
+            ReorderStep::Dropped { from, to } if from != to => {
+                self.list.focus = to;
+                (Handled::Yes, Some((from, to)))
+            }
+            _ => (Handled::Yes, None),
+        }
     }
 
     /// Moves the focus for navigation actions; `Some(index)` to choose an
@@ -368,7 +404,7 @@ impl Screen for MenusScreen {
     fn draw(&mut self, canvas: &mut Canvas<'_>, env: &Env<'_>) {
         let rows = self.rows(env);
         let title = env.i18n.tr("menu-editor.title");
-        self.frame.draw(canvas, env, title, &rows);
+        self.frame.draw(canvas, env, title, &rows, 0);
     }
 
     fn on_action(&mut self, action: &Id, cx: &mut Cx<'_, '_>) -> Handled {
@@ -450,7 +486,20 @@ impl Screen for EntriesScreen {
     fn draw(&mut self, canvas: &mut Canvas<'_>, env: &Env<'_>) {
         let rows = self.rows(env);
         let title = env.i18n.tr(&self.menu).to_string();
-        self.frame.draw(canvas, env, &title, &rows);
+        let movable = entries(env, &self.menu).len();
+        self.frame.draw(canvas, env, &title, &rows, movable);
+    }
+
+    /// Entries are moved by dragging their grip.
+    fn on_pointer(&mut self, event: &PointerEvent, cx: &mut Cx<'_, '_>) -> Handled {
+        let env = *cx.env();
+        let mut ids = entries(&env, &self.menu);
+        let (handled, moved) = self.frame.on_pointer(event, ids.len(), cx);
+        if let Some((from, to)) = moved {
+            ui::reorder::moved(&mut ids, from, to);
+            save(&self.menu, ids, cx);
+        }
+        handled
     }
 
     fn on_action(&mut self, action: &Id, cx: &mut Cx<'_, '_>) -> Handled {
@@ -738,7 +787,7 @@ impl Screen for AddScreen {
     fn draw(&mut self, canvas: &mut Canvas<'_>, env: &Env<'_>) {
         let rows = self.rows(env);
         let title = env.i18n.tr("menu-editor.add").to_string();
-        self.frame.draw(canvas, env, &title, &rows);
+        self.frame.draw(canvas, env, &title, &rows, 0);
     }
 
     fn on_action(&mut self, action: &Id, cx: &mut Cx<'_, '_>) -> Handled {
