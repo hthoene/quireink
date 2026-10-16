@@ -806,6 +806,8 @@ makes it replaceable. ✅ done, 🔶 partly, ⬜ open.
 | C18 | Home screen of pages of widgets: status line (time, battery), date, continue reading, recent covers, a grid of tools, a large clock, today's reading with a daily goal, the last 7 days, news headlines, a word of the day, any plugin's; swiped or paged through, edited on the device (pencil or long press; with buttons too) | `Registrar::add_widget` with targets (`WidgetTarget`), settings `home.page-1` to `home.page-4`, menu `core.tools` | ✅ |
 | C19 | OPDS: covers in lists (devices with the memory), a folder per catalog, automatic sync (rules), OPDS 2 (JSON) | `opds` plugin, C5, C20 | ✅ (OPDS 2: JSON catalogs read as they stream, navigation, publications, groups, covers, search templates, next pages) |
 | C20 | Large-memory devices may use more (covers in lists, caches) without separate code | `DeviceInfo::memory` (`MemoryClass::Small`/`Large`) | ✅ |
+| C21 | Widgets with their own settings: where in their place they sit (left, centre, right; many, such as the time, are left aligned now), and what they show (e.g. the clock's format and size) | Settings per widget, given by the plugin that adds it (`add_widget`), edited where the widgets are edited (C18) | ⬜ |
+| C22 | Text and paper colours: pure black on white is hard on the eyes on phone screens; softer text, gray or sepia paper | Settings for the colours of text, paper and menus (Appearance), which themes (C7) set as defaults; the shells draw them where the screen has colour or gray | ⬜ |
 
 ### 12.2 Ideas from KOReader and CrossPoint / CrossInk
 
@@ -839,6 +841,16 @@ replaceable by plugins.
 | S1 | Read-later articles (Wallabag), news feeds as books, highlights to Readwise and Joplin (C15), Calibre wireless (C16) | KOReader | 🔶 (news feeds: `news` plugin, RSS and Atom as books in `News`; highlights to Readwise: `readwise`; read-later articles: `wallabag` (EPUBs Wallabag makes, archived once read), shipped switched off; Joplin and Calibre wireless open) |
 | U1 | Typing on a phone: passwords and keys sent from a phone's browser (QR code) into any text field; a store of credentials, replaceable by plugins | own idea | ✅ (keyboard "Phone", slot `core.remote-keyboard` bound by `transfer`; `Env::secrets` and `Command::SetSecret` keep every password and key in `.quireink/secrets.txt`, veiled, not encrypted; *Settings → Passwords and keys* types them anew or removes them; stats, kosync, opds and translate moved there) |
 | U2 | Pasting with a long press in a text field | phones | ✅ |
+
+### 12.3 Found on the devices
+
+Seen while using QuireInk on the devices, to be checked and fixed.
+⬜ open, ✅ fixed.
+
+| # | What | Where | State |
+|---|------|-------|-------|
+| B1 | The status lines above the text never show | Android phone (Sony Xperia) | ⬜ (above the text there is no line by default; items chosen for the parts above show only once a line *Text and symbols* is chosen for that place too, which is easy to miss) |
+| B2 | In the dictionary, the page of the entry is drawn over *Online* | All, with a network | ✅ (the page at the right edge, *Online* left of it) |
 
 ---
 

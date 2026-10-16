@@ -370,7 +370,10 @@ impl Screen for Popup {
         let note = self.note(env);
         let margin = style.margin as f32;
         let note_width = font.measure(style.small, &note);
-        let mut right = f32::from(header.width) - margin - note_width;
+        // The page at the right edge, *Online* left of it, the word left
+        // of both.
+        let note_x = f32::from(header.width) - margin - note_width;
+        let mut right = note_x;
         if let Some(online) = self.online_area(env, &note) {
             ui::draw_label(
                 canvas,
@@ -387,7 +390,7 @@ impl Screen for Popup {
             canvas,
             &font,
             style.small,
-            right,
+            note_x,
             header,
             &note,
             Color::gray(80),

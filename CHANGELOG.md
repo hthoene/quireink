@@ -8,6 +8,7 @@ change the plugin SDK.
 
 - Smaller text by default: menus 9 pt (was 11), status lines 6 pt
   (was 8). Both stay adjustable in the settings.
+- Dictionary: the page of a long entry no longer covers *Online*.
 
 ## [0.1.1] - 2026-10-15
 
