@@ -22,9 +22,9 @@ use quireink_sdk::{
     Screen, Storage, files,
 };
 
-use crate::books;
 use crate::listing::{Entry, Listing};
 use crate::{PLUGIN, ROOT};
+use quireink_sdk::library;
 
 /// The view of authors (`mode` = `authors`), series (`series`) or tags
 /// (`tags`).
@@ -223,10 +223,10 @@ impl Walk {
             if entry.is_dir {
                 self.dirs.push(path);
             } else {
-                let cached = books::load(env.storage, &path).filter(|b| b.indexed);
+                let cached = library::book(env.storage, &path).filter(|b| b.indexed);
                 let book = cached.unwrap_or_else(|| {
                     opened = true;
-                    books::index(env, &path)
+                    library::index(env, &path)
                 });
                 let title = book.title.unwrap_or_else(|| {
                     let name = entry.name.as_str();
@@ -317,11 +317,11 @@ fn search(storage: &dyn Storage, query: &str) -> Vec<Line> {
 /// The favourite books still there, as catalog lines from the details
 /// the library keeps.
 fn favourites(env: &Env<'_>) -> Vec<Line> {
-    books::favourites(env.storage)
+    library::favourites(env.storage)
         .into_iter()
         .filter(|path| env.storage.size(path).is_ok())
         .map(|path| {
-            let book = books::load(env.storage, &path).unwrap_or_default();
+            let book = library::book(env.storage, &path).unwrap_or_default();
             let name = files::name(&path);
             Line {
                 title: book

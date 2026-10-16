@@ -45,6 +45,7 @@ pub mod icons;
 mod id;
 pub mod json;
 pub mod keys;
+pub mod library;
 pub mod md5;
 pub mod qr;
 pub mod secrets;

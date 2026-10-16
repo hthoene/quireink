@@ -174,6 +174,11 @@ Plugins define their own (the reader's `reader.notes-exported`, for
 example), and `Command::Schedule` emits one at a time of day. Open
 screens get every event too (`Screen::on_event`).
 
+What is known of books is a service, not a screen's: `library` has a
+book's details (title, author, series, tags, cover, progress, and
+fields plugins add with `library::set_field`), the books read last and
+the favourites, so any plugin can show or use them.
+
 The bookmarks and highlights of books are shared: `annotations` reads
 and keeps them, and whoever changes them emits
 `annotations::changed(book)`, so the reader shows them anew and syncs

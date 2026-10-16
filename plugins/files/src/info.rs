@@ -13,7 +13,7 @@ use quireink_sdk::{
     files,
 };
 
-use crate::books;
+use quireink_sdk::library;
 
 /// What is shown of a book.
 #[derive(Debug, Default)]
@@ -48,7 +48,7 @@ impl InfoScreen {
 fn details(env: &Env<'_>, path: &str) -> Details {
     let storage = env.storage;
     let name = files::name(path);
-    let cached = books::load(storage, path);
+    let cached = library::book(storage, path);
     let mut details = Details {
         title: name.rsplit_once('.').map_or(name, |(n, _)| n).to_string(),
         ..Details::default()

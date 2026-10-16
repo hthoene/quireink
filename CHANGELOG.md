@@ -6,6 +6,12 @@ change the plugin SDK.
 
 ## [Unreleased]
 
+- The library is a service (`library` in the plugin SDK): what is known
+  of books (title, author, series, tags, cover, progress, and fields
+  plugins add), the books read last and the favourites, kept by the
+  kernel from the reading events. The library, the home screen and the
+  sleep screen show the same data instead of keeping copies of their
+  own; what the library kept before is taken over.
 - Bookmarks and highlights shared with KOReader (`koreader` plugin), for
   books read in both on one device or in one synced library folder:
   what KOReader has in `Book.sdr` comes over when a book is opened, and

@@ -16,8 +16,9 @@
 //!   default) lead the grid of tools; plugins add their own with
 //!   `Registrar::add_menu_entry`.
 //!
-//! The recently read books come from the standard reading events
-//! (`core.book-opened`, `core.page-turned`), so any reader plugin works.
+//! The recently read books and their covers come from the library service
+//! (`quireink_sdk::library`), which follows the standard reading events,
+//! so any reader plugin works.
 //! The home screen is bound to `core.home`; replace it with any other
 //! screen by configuration or with a plugin of higher priority.
 
@@ -101,16 +102,6 @@ impl Plugin for Home {
             item: actions::LIBRARY,
             order: 10,
         })?;
-        for event in [events::BOOK_OPENED, events::PAGE_TURNED] {
-            r.subscribe(
-                event,
-                Box::new(|env, params, _| recent::record(env, params)),
-            )?;
-        }
-        r.subscribe(
-            events::BOOK_MOVED,
-            Box::new(|env, params, _| recent::moved(env, params)),
-        )?;
         pages::register(r)?;
         blocks::register(r)?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/en.ini")))?;
