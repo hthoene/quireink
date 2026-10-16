@@ -232,6 +232,12 @@ fn android_main(app: AndroidApp) {
             changed |= apply(state, effects);
         }
         if state.wake_at.is_some_and(|at| at <= now()) {
+            // What changed shows before the timer runs: it may take a
+            // while (e.g. reading a folder on an SD card) and say so first.
+            if changed && let Some(window) = &window {
+                show(window, epd.as_mut(), state);
+                changed = false;
+            }
             let effects = state.kernel.tick(now());
             changed |= apply(state, effects);
         }
@@ -251,10 +257,7 @@ fn android_main(app: AndroidApp) {
             }
         }
         if changed && let Some(window) = &window {
-            if let (Some(epd), Some(mode)) = (epd.as_mut(), state.refresh.take()) {
-                epd.set(mode);
-            }
-            present(window, &state.frame, state.kernel.colors());
+            show(window, epd.as_mut(), state);
         }
         for warning in state.kernel.take_warnings() {
             log::warn!("{warning}");
@@ -538,6 +541,14 @@ fn turn(app: &AndroidApp, rotation: Rotation) {
     if turned.is_none() {
         log::warn!("cannot turn the screen");
     }
+}
+
+/// Shows the frame, with the e-ink refresh the kernel asked for.
+fn show(window: &NativeWindow, epd: Option<&mut Epd>, state: &mut Running) {
+    if let (Some(epd), Some(mode)) = (epd, state.refresh.take()) {
+        epd.set(mode);
+    }
+    present(window, &state.frame, state.kernel.colors());
 }
 
 /// Copies the whole frame into the window, in the colours of the
