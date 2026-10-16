@@ -17,6 +17,7 @@ use quireink_sdk::builtin::{actions, events, params, slots};
 use quireink_sdk::status::item_ids;
 use quireink_sdk::ui::choice;
 use quireink_sdk::ui::{self, ListChange, ListView, UiStyle};
+use quireink_sdk::widgets;
 use quireink_sdk::{
     Arg, Canvas, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Params, Rect, RefreshMode,
     Screen, SettingValue,
@@ -372,8 +373,8 @@ impl Screen for EditScreen {
     }
 }
 
-/// Adding a widget: every widget not in the list yet; choosing one adds
-/// it at the end and goes back.
+/// Adding a widget: every widget not in the list yet (spaces always);
+/// choosing one adds it at the end and goes back.
 pub(crate) struct AddScreen {
     style: UiStyle,
     header: ui::Header,
@@ -392,13 +393,18 @@ impl AddScreen {
         let area = Rect::new(0, top, display.width, display.height.saturating_sub(top));
         let target = target_of(params);
         let shown = target.widgets(env);
+        let mut offered: Vec<(Id, String)> = env
+            .widgets
+            .iter()
+            .filter(|(id, _)| {
+                widgets::repeatable(id.as_str()) || !shown.iter().any(|s| s == id.as_str())
+            })
+            .map(|(id, title)| (id.clone(), title.to_string()))
+            .collect();
+        // The spaces after the widgets that show something.
+        offered.sort_by_key(|(id, _)| widgets::repeatable(id.as_str()));
         Self {
-            widgets: env
-                .widgets
-                .iter()
-                .filter(|(id, _)| !shown.iter().any(|s| s == id.as_str()))
-                .map(|(id, title)| (id.clone(), title.to_string()))
-                .collect(),
+            widgets: offered,
             list: ListView::new(area, style.row).focus_on_keys(env),
             style,
             header,

@@ -230,37 +230,58 @@ fn picture(env: &Env<'_>) -> Option<ImageRef> {
 }
 
 /// The widgets of [`WIDGET_LIST`] between the margins, together in the
-/// middle of the screen; `false` if none shows.
+/// middle of the screen, or where free spaces push them; `false` if none
+/// shows.
 fn draw_widgets(canvas: &mut Canvas<'_>, env: &Env<'_>) -> bool {
     let style = UiStyle::new(env);
     let display = env.device.display;
     let margin = style.margin as u16;
     let gap = style.gap as u16;
     let width = display.width.saturating_sub(2 * margin);
-    let mut placed: Vec<(&str, u16)> = Vec::new();
+    // Free spaces (`None`) share the room the others leave.
+    let mut placed: Vec<(&str, Option<u16>)> = Vec::new();
     let mut total = 0u16;
+    let mut shown = 0;
     for id in quireink_sdk::status::item_ids(env.settings.text(WIDGET_LIST.as_str())) {
+        if id == quireink_sdk::widgets::FILL {
+            placed.push((id, None));
+            continue;
+        }
         let Some(height) = env.widgets.height(id, env, width).filter(|h| *h > 0) else {
             continue;
         };
-        let added = height + if placed.is_empty() { 0 } else { gap * 2 };
+        let added = height + if shown == 0 { 0 } else { gap * 2 };
         if total + added > display.height {
             break;
         }
         total += added;
-        placed.push((id, height));
+        shown += 1;
+        placed.push((id, Some(height)));
     }
-    if placed.is_empty() {
+    if shown == 0 {
         return false;
     }
-    let mut y = (display.height - total) / 2;
-    for (n, (id, height)) in placed.into_iter().enumerate() {
-        if n > 0 {
+    let fills = placed.iter().filter(|(_, h)| h.is_none()).count();
+    let fill =
+        quireink_sdk::widgets::fill_height(u32::from(display.height), u32::from(total), fills);
+    let mut y = if fills == 0 {
+        (display.height - total) / 2
+    } else {
+        0
+    };
+    let mut drawn = 0;
+    for (id, height) in placed {
+        let Some(height) = height else {
+            y += fill;
+            continue;
+        };
+        if drawn > 0 {
             y += gap * 2;
         }
         let area = Rect::new(margin, y, width, height);
         env.widgets.draw(id, canvas, env, area);
         y += height;
+        drawn += 1;
     }
     true
 }

@@ -40,6 +40,7 @@ use alloc::vec::Vec;
 use quireink_sdk::builtin::{actions, events, slots};
 use quireink_sdk::ui::choice::Choice;
 use quireink_sdk::ui::{self, UiStyle};
+use quireink_sdk::widgets;
 use quireink_sdk::{
     Canvas, Color, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Manifest, MenuEntry,
     Params, Plugin, Point, Priority, Rect, RefreshMode, RegisterError, Registrar, SDK_VERSION,
@@ -160,7 +161,8 @@ impl Dashboard {
     }
 
     /// Places the page's widgets between the margins, top to bottom, as
-    /// far as they fit above the footer.
+    /// far as they fit above the footer; free spaces share the room the
+    /// others leave.
     fn layout(&mut self, env: &Env<'_>) {
         let style = UiStyle::new(env);
         let display = env.device.display;
@@ -177,16 +179,33 @@ impl Dashboard {
             display.width,
             footer_height,
         );
+        // The heights first: free spaces (`None`) take what is left.
+        let column: Vec<(&String, Option<u16>)> = pages[self.page]
+            .iter()
+            .filter_map(|id| {
+                if id == widgets::FILL {
+                    return Some((id, None));
+                }
+                let height = env.widgets.height(id, env, width)?;
+                (height > 0).then_some((id, Some(height)))
+            })
+            .collect();
+        let used: u32 = column
+            .iter()
+            .filter_map(|(_, h)| *h)
+            .map(|h| u32::from(h + gap))
+            .sum::<u32>()
+            + u32::from(gap);
+        let fills = column.iter().filter(|(_, h)| h.is_none()).count();
+        let fill = widgets::fill_height(u32::from(footer.y), used, fills);
         let mut y = gap;
         self.widgets.clear();
         self.targets.clear();
-        for id in &pages[self.page] {
-            let Some(height) = env.widgets.height(id, env, width) else {
+        for (id, height) in column {
+            let Some(height) = height else {
+                y += fill;
                 continue;
             };
-            if height == 0 {
-                continue;
-            }
             if y + height > footer.y {
                 break;
             }
