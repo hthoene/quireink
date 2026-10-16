@@ -59,17 +59,17 @@ use core::mem;
 use quireink_graphics::{Framebuffer, GraphicsError};
 use quireink_i18n::Translator;
 use quireink_platform::{
-    Color, DeviceInfo, FrameView, InputEvent, Instant, NoStorage, PointerEvent, PointerPhase, Rect,
-    RefreshMode, Storage, SystemStatus,
+    Color, DeviceInfo, FrameView, InputEvent, Instant, NoStorage, Point, PointerEvent,
+    PointerPhase, Rect, RefreshMode, Storage, SystemStatus,
 };
 use quireink_sdk::builtin::{
     CONFIG_FILE, GLOBAL_KEYMAP_LAYER, events, keymap_presets, params as builtin_params,
     settings as core_settings, slots,
 };
 use quireink_sdk::{
-    Actions, Command, Cx, Env, EventHandler, Fonts, Formats, GestureKind, Handled, Hyphenation, Id,
-    Manifest, Menus, Metrics, Output, Params, Plugin, PluginInfo, PluginState, Plugins,
-    RegisterError, RequiredFor, SDK_VERSION, Screen, Settings, StatusItems,
+    Actions, Command, Cx, Direction, Env, EventHandler, Fonts, Formats, Gesture, GestureKind,
+    Handled, Hyphenation, Id, Manifest, Menus, Metrics, Output, Params, Plugin, PluginInfo,
+    PluginState, Plugins, RegisterError, RequiredFor, SDK_VERSION, Screen, Settings, StatusItems,
 };
 
 use crate::core_plugin::{CORE, CorePlugin};
@@ -396,6 +396,7 @@ impl KernelBuilder {
                 speech: self.speech,
                 sleep: self.sleep,
                 slots: Vec::new(),
+                screens: Vec::new(),
                 font_dirs: Vec::new(),
                 secrets: Default::default(),
                 storage: self.storage.unwrap_or_else(|| Box::new(NoStorage)),
@@ -415,6 +416,8 @@ impl KernelBuilder {
             scheduled: Vec::new(),
             recognizer: Recognizer::default(),
             captured: Vec::new(),
+            edge_touch: None,
+            edge_pending: None,
             stack: Vec::new(),
             refresh: RefreshPolicy::default(),
             output: Output::default(),
@@ -593,6 +596,12 @@ impl KernelBuilder {
         }
         kernel.shrink_to_fit();
         kernel.shared.slots = kernel.registry.bound_slots();
+        kernel.shared.screens = kernel
+            .registry
+            .screens
+            .iter()
+            .map(|(id, spec)| (id.clone(), spec.title.clone()))
+            .collect();
         Ok(kernel)
     }
 }
@@ -615,6 +624,15 @@ struct ActiveScreen {
     /// What it was opened with, e.g. the book.
     params: Params,
     screen: Box<dyn Screen>,
+}
+
+/// A finger that came down at an edge (see [`Kernel::edge_lifted`]).
+#[derive(Debug, Clone, Copy)]
+struct EdgeTouch {
+    id: u8,
+    side: Direction,
+    start: Point,
+    tool: quireink_platform::PointerTool,
 }
 
 /// The QuireInk kernel. See the [crate documentation](crate).
@@ -643,6 +661,12 @@ pub struct Kernel {
     recognizer: Recognizer,
     /// Pointer ids captured by the active screen.
     captured: Vec<u8>,
+    /// A finger that came down at an edge, followed by the kernel for a
+    /// swipe in from it (see [`keymap::InputKey::Edge`]).
+    edge_touch: Option<EdgeTouch>,
+    /// A swipe in from an edge on a screen with its own gestures, waiting
+    /// for the second one that applies it: the side, and until when.
+    edge_pending: Option<(Direction, Instant)>,
     stack: Vec<ActiveScreen>,
     refresh: RefreshPolicy,
     output: Output,
@@ -1977,6 +2001,30 @@ impl Kernel {
     }
 
     fn pointer(&mut self, event: PointerEvent) {
+        // Swipes in from an edge come before the screen sees the finger.
+        if let Some(touch) = self.edge_touch.filter(|t| t.id == event.id) {
+            match event.phase {
+                PointerPhase::Up => {
+                    self.edge_touch = None;
+                    self.edge_lifted(touch, event.point);
+                }
+                PointerPhase::Cancel => self.edge_touch = None,
+                _ => {}
+            }
+            return;
+        }
+        if event.phase == PointerPhase::Down
+            && !self.captured.contains(&event.id)
+            && let Some(side) = self.edge_at(event.point)
+        {
+            self.edge_touch = Some(EdgeTouch {
+                id: event.id,
+                side,
+                start: event.point,
+                tool: event.tool,
+            });
+            return;
+        }
         let captured = self.captured.contains(&event.id);
         if captured || event.phase == PointerPhase::Down {
             let handled = self.with_top(|screen, cx| screen.on_pointer(&event, cx));
@@ -1995,6 +2043,97 @@ impl Kernel {
         if let Some(recognized) = self.recognizer.pointer(&event, self.now, &thresholds) {
             self.recognized(recognized);
         }
+    }
+
+    /// How the screen shown takes gestures (`gestures.policy`).
+    fn policy(&self) -> keymap::Policy {
+        keymap::Policy::of(self.resolve(&InputKey::Policy).as_ref())
+    }
+
+    /// The edge a finger coming down at `point` may swipe in from: one
+    /// with something bound, where the screen lets edges apply.
+    fn edge_at(&self, point: Point) -> Option<Direction> {
+        if self.policy() == keymap::Policy::Off
+            || self
+                .stack
+                .last()
+                .is_some_and(|top| top.screen.holds_edges())
+        {
+            return None;
+        }
+        let display = self.shared.device.display;
+        // Wide at the top and the bottom: on Android the outermost strip is
+        // the system's (its notifications, its home), a swipe begun just
+        // inside it is ours. Narrow at the sides, where pages are tapped.
+        let metrics = Metrics::new(display.dpi);
+        let mm = |id: &Id| {
+            let value = self.shared.settings.int(id.as_str()).clamp(0, 50) as u32;
+            metrics.mm(value) as i32
+        };
+        let (across, along) = (
+            mm(&core_settings::EDGE_ENDS),
+            mm(&core_settings::EDGE_SIDES),
+        );
+        let (w, h) = (i32::from(display.width), i32::from(display.height));
+        let side = if point.y < across {
+            Direction::Up
+        } else if point.y >= h - across {
+            Direction::Down
+        } else if point.x < along {
+            Direction::Left
+        } else if point.x >= w - along {
+            Direction::Right
+        } else {
+            return None;
+        };
+        let bound = self
+            .resolve(&InputKey::Edge(side))
+            .is_some_and(|action| action != quireink_sdk::builtin::actions::NOTHING);
+        bound.then_some(side)
+    }
+
+    /// A finger that came down at an edge was lifted at `end`: a swipe in
+    /// from the edge applies what it is bound to (on screens with their
+    /// own gestures, a second one within a few seconds); anything else
+    /// is what it would have been elsewhere, a tap or a swipe.
+    fn edge_lifted(&mut self, touch: EdgeTouch, end: Point) {
+        let (start, thresholds) = (touch.start, self.thresholds());
+        let (dx, dy) = (end.x - start.x, end.y - start.y);
+        let (inward, across) = match touch.side {
+            Direction::Up => (dy, dx),
+            Direction::Down => (-dy, dx),
+            Direction::Left => (dx, dy),
+            Direction::Right => (-dx, dy),
+        };
+        if inward >= thresholds.swipe_distance as i32 && across.abs() < inward {
+            if self.policy() == keymap::Policy::Own {
+                let again = self
+                    .edge_pending
+                    .take()
+                    .is_some_and(|(side, until)| side == touch.side && self.now < until);
+                if !again {
+                    self.edge_pending = Some((touch.side, self.now.add_millis(3000)));
+                    let text = self.shared.translator.tr("core.edge-again").to_string();
+                    self.output.commands.push(Command::Notify(text));
+                    return;
+                }
+            }
+            return self.route_key(InputKey::Edge(touch.side));
+        }
+        let moved = input::distance(start, end);
+        let kind = if moved <= thresholds.tap_slop {
+            GestureKind::Tap
+        } else if moved >= thresholds.swipe_distance {
+            GestureKind::Swipe(input::direction(start, end))
+        } else {
+            return;
+        };
+        self.recognized(Recognized::Gesture(Gesture {
+            kind,
+            start,
+            end,
+            tool: touch.tool,
+        }));
     }
 
     fn recognized(&mut self, recognized: Recognized) {
@@ -2023,6 +2162,10 @@ impl Kernel {
                 if self.with_top(|screen, cx| screen.on_gesture(gesture, cx)) == Handled::Yes {
                     return;
                 }
+                // Screens with gestures of their own: none from the key map.
+                if self.policy() != keymap::Policy::Standard {
+                    return;
+                }
                 let display = self.shared.device.display;
                 let zone = Zone::of(gesture.start, display.width, display.height);
                 let key = match gesture.kind {
@@ -2039,21 +2182,24 @@ impl Kernel {
     /// Resolves an input through the key map layers of the active screen,
     /// its slot and the global layer.
     fn route_key(&mut self, key: InputKey) {
-        let action = {
-            let top = self.stack.last();
-            let mut layers: Vec<&str> = Vec::with_capacity(3);
-            if let Some(top) = top {
-                layers.push(top.id.as_str());
-                if let Some(slot) = &top.slot {
-                    layers.push(slot.as_str());
-                }
-            }
-            layers.push(GLOBAL_KEYMAP_LAYER);
-            self.shared.keymap.resolve(&layers, &key).cloned()
-        };
-        if let Some(action) = action {
+        if let Some(action) = self.resolve(&key) {
             self.dispatch(action);
         }
+    }
+
+    /// What `key` is bound to in the key map layers of the active screen,
+    /// its slot and the global layer.
+    fn resolve(&self, key: &InputKey) -> Option<Id> {
+        let top = self.stack.last();
+        let mut layers: Vec<&str> = Vec::with_capacity(3);
+        if let Some(top) = top {
+            layers.push(top.id.as_str());
+            if let Some(slot) = &top.slot {
+                layers.push(slot.as_str());
+            }
+        }
+        layers.push(GLOBAL_KEYMAP_LAYER);
+        self.shared.keymap.resolve(&layers, key).cloned()
     }
 
     fn dispatch(&mut self, action: Id) {
@@ -2297,6 +2443,11 @@ impl Kernel {
             },
             Command::Redraw(mode) => {
                 self.output.redraw = true;
+                if mode == RefreshMode::Full {
+                    // Everything, also beneath an overlay.
+                    let bounds = self.framebuffer.bounds();
+                    self.invalidate(bounds);
+                }
                 self.output.request_refresh(mode);
             }
             Command::SetMenu(menu, entries) => self.set_menu(menu, entries),
@@ -2908,6 +3059,8 @@ struct Shared {
     sleep: bool,
     /// Slots some screen is bound to.
     slots: Vec<Id>,
+    /// Every screen, with the translation key of its name.
+    screens: Vec<(Id, Cow<'static, str>)>,
     /// Folders fonts are read from.
     font_dirs: Vec<String>,
     /// Passwords and keys (see [`quireink_sdk::secrets`]).
@@ -2940,6 +3093,7 @@ impl Shared {
             speech: self.speech,
             sleep: self.sleep,
             slots: &self.slots,
+            screens: &self.screens,
             font_dirs: &self.font_dirs,
             secrets: &self.secrets,
             storage: self.storage.as_ref(),

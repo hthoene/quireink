@@ -75,6 +75,14 @@ pub trait Screen {
         Handled::No
     }
 
+    /// Whether the screen takes the edges for itself now: swipes in from
+    /// the edges (home, quick panel, back) wait until it no longer does,
+    /// e.g. while things on it are arranged by dragging. Gestures a screen
+    /// never wants are better switched off for it (`gestures.policy`).
+    fn holds_edges(&self) -> bool {
+        false
+    }
+
     /// Raw pointer samples, offered before gesture recognition. Returning
     /// [`Handled::Yes`] for a `Down` event captures that pointer: all its
     /// further samples go here and no gesture is recognized. Drawing and

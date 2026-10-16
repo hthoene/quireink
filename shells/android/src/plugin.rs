@@ -195,7 +195,7 @@ impl AndroidPlugin {
         // In the reader's quick panel, first, and with the device's
         // settings in the main menu.
         for (n, item) in items.into_iter().enumerate() {
-            for (menu, order) in [(READER_PANEL, -10), (menus::MAIN, 82)] {
+            for (menu, order) in [(READER_PANEL, -10), (menus::MAIN, 82), (menus::QUICK, 20)] {
                 r.add_menu_entry(MenuEntry {
                     menu,
                     item: item.clone(),

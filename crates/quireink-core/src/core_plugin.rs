@@ -4,6 +4,7 @@
 
 use alloc::borrow::Cow;
 use alloc::boxed::Box;
+use alloc::string::String;
 use alloc::vec::Vec;
 
 use quireink_sdk::builtin::{
@@ -64,7 +65,39 @@ impl Plugin for CorePlugin {
                 out.push(Command::RunAction(target.clone()));
             })
         };
-        let handled: [(Id, &'static str, ActionHandler); 12] = [
+        // How a screen takes gestures (`gestures.policy` in key maps): ids
+        // to bind, nothing to run.
+        for (id, title) in [
+            ("core.gestures.standard", "core.gestures.standard"),
+            ("core.gestures.own", "core.gestures.own"),
+            ("core.gestures.off", "core.gestures.off"),
+        ] {
+            r.add_action(ActionSpec {
+                id: Id::new_static(id),
+                title: Cow::Borrowed(title),
+                handler: None,
+            })?;
+        }
+        let handled: [(Id, &'static str, ActionHandler); 14] = [
+            (
+                actions::REFRESH_SCREEN,
+                "core.action.refresh-screen",
+                Box::new(|_: &Env<'_>, out: &mut Vec<Command>| {
+                    out.push(Command::Redraw(quireink_sdk::RefreshMode::Full));
+                }),
+            ),
+            (
+                actions::QUICK_PANEL,
+                "core.action.quick-panel",
+                Box::new(|_: &Env<'_>, out: &mut Vec<Command>| {
+                    out.push(Command::OpenSlot(
+                        slots::PANEL,
+                        Params::new()
+                            .with(params::MENU, String::from(menus::QUICK.as_str()))
+                            .with(params::MODE, "top"),
+                    ));
+                }),
+            ),
             // Screens without their own meaning of next/previous turn pages.
             (
                 actions::NEXT,
@@ -194,6 +227,24 @@ impl Plugin for CorePlugin {
             // Lowest possible priority: any real screen wins.
             r.bind_slot(id, screens::PLACEHOLDER, Priority(i16::MIN))?;
         }
+        // Choosing the items or lines of a status line, for any setting.
+        r.add_screen(ScreenSpec {
+            id: screens::STATUS_ITEMS,
+            title: Cow::Borrowed("core.status.choose"),
+            factory: Box::new(|env, params| {
+                Box::new(quireink_sdk::ui::items::ItemsScreen::open(env, params))
+            }),
+        })?;
+        r.add_screen(ScreenSpec {
+            id: screens::STATUS_LINES,
+            title: Cow::Borrowed("core.status.choose"),
+            factory: Box::new(|env, params| {
+                let params = params
+                    .clone()
+                    .with(params::MODE, quireink_sdk::ui::items::LINES);
+                Box::new(quireink_sdk::ui::items::ItemsScreen::open(env, &params))
+            }),
+        })?;
         r.add_screen(ScreenSpec {
             id: screens::PLACEHOLDER,
             title: Cow::Borrowed("core.screen.placeholder"),
@@ -222,6 +273,25 @@ impl Plugin for CorePlugin {
             })?;
             r.add_icon(action, Cow::Borrowed(icon))?;
         }
+
+        // The quick panel: what is changed often, whatever is open; plugins
+        // add their own (the light, …).
+        for (item, order) in [
+            (settings::NIGHT_MODE, 10),
+            (settings::ROTATION, 40),
+            (actions::REFRESH_SCREEN, 50),
+            (actions::SCREENSHOT, 60),
+            (actions::SLEEP, 70),
+            (actions::SETTINGS, 90),
+        ] {
+            r.add_menu_entry(MenuEntry {
+                menu: menus::QUICK,
+                item,
+                order,
+            })?;
+        }
+        r.add_icon(actions::QUICK_PANEL, Cow::Borrowed("adjustments"))?;
+        r.add_icon(actions::REFRESH_SCREEN, Cow::Borrowed("refresh"))?;
 
         // The settings' main page: reading, the device, customising.
         for (id, title, order) in [
@@ -296,6 +366,23 @@ impl Plugin for CorePlugin {
             .description("core.setting.speak-focus.help"),
         )?;
         r.set_menu_need(settings::SPEAK_FOCUS, quireink_sdk::MenuNeed::Speech)?;
+        for (id, title, default, max) in [
+            (settings::EDGE_ENDS, "core.setting.edge-ends", 10, 25),
+            (settings::EDGE_SIDES, "core.setting.edge-sides", 5, 25),
+        ] {
+            r.add_setting(
+                SettingSpec::new(
+                    id.clone(),
+                    title,
+                    SettingKind::Int { min: 0, max },
+                    SettingValue::Int(default),
+                )
+                .group(groups::CONTROLS)
+                .unit("core.unit.mm")
+                .advanced()
+                .description("core.setting.edge.help"),
+            )?;
+        }
         r.add_setting(
             SettingSpec::new(
                 settings::UI_SIZE,
@@ -577,6 +664,11 @@ impl Plugin for CorePlugin {
             id: status_items::CLOCK,
             title: Cow::Borrowed("core.status.clock"),
             value: Box::new(|env, _| time::clock_text(env).map(StatusValue::Text)),
+        })?;
+        r.add_status_item(StatusItemSpec {
+            id: status_items::DATE,
+            title: Cow::Borrowed("core.status.date"),
+            value: Box::new(|env, _| time::date_text(env).map(StatusValue::Text)),
         })?;
         r.add_status_item(StatusItemSpec {
             id: status_items::BATTERY,

@@ -185,7 +185,7 @@ impl Recognizer {
     }
 }
 
-fn distance(a: Point, b: Point) -> u32 {
+pub(crate) fn distance(a: Point, b: Point) -> u32 {
     let dx = i64::from(a.x) - i64::from(b.x);
     let dy = i64::from(a.y) - i64::from(b.y);
     isqrt((dx * dx + dy * dy) as u64) as u32
@@ -204,7 +204,7 @@ fn isqrt(n: u64) -> u64 {
     x
 }
 
-fn direction(from: Point, to: Point) -> Direction {
+pub(crate) fn direction(from: Point, to: Point) -> Direction {
     let dx = i64::from(to.x) - i64::from(from.x);
     let dy = i64::from(to.y) - i64::from(from.y);
     if dx.abs() >= dy.abs() {

@@ -414,6 +414,186 @@ fn taps_resolve_through_zones() {
     assert_eq!(*log.borrow(), ["a:core.next-page", "a:core.prev-page"]);
 }
 
+fn swipe(kernel: &mut Kernel, at: u64, from: (i32, i32), to: (i32, i32)) {
+    let event = |phase, (x, y)| {
+        InputEvent::Pointer(PointerEvent {
+            id: 0,
+            phase,
+            point: Point::new(x, y),
+            tool: PointerTool::Finger,
+            pressure: 1000,
+        })
+    };
+    kernel.handle(Instant(at), event(PointerPhase::Down, from));
+    kernel.handle(Instant(at + 30), event(PointerPhase::Move, to));
+    kernel.handle(Instant(at + 60), event(PointerPhase::Up, to));
+    render(kernel);
+}
+
+#[test]
+fn swipes_in_from_the_edges_come_first() {
+    let log = log();
+    let mut kernel = Kernel::builder(DEVICE)
+        .plugin(TestPlugin::new("a", &log))
+        .build()
+        .unwrap();
+    kernel.start(Instant(0));
+    // Up from the bottom edge: home; in from the left edge: back.
+    swipe(&mut kernel, 100, (45, 88), (45, 30));
+    swipe(&mut kernel, 300, (2, 45), (70, 45));
+    // The same swipes in the middle of the screen turn pages.
+    swipe(&mut kernel, 500, (45, 50), (45, 5));
+    // At an edge, a tap is a tap.
+    tap(&mut kernel, 700, 88, 45);
+    assert_eq!(
+        *log.borrow(),
+        [
+            "a:core.home",
+            "a:core.back",
+            "a:core.next-page",
+            "a:core.next-page"
+        ]
+    );
+}
+
+/// A screen that holds the edges for itself, taking every finger.
+struct EdgeHolder {
+    log: Log,
+}
+
+impl Screen for EdgeHolder {
+    fn draw(&mut self, _: &mut Canvas<'_>, _: &Env<'_>) {}
+
+    fn on_action(&mut self, action: &Id, _: &mut Cx<'_, '_>) -> Handled {
+        self.log
+            .borrow_mut()
+            .push(alloc::format!("holder:{action}"));
+        Handled::Yes
+    }
+
+    fn holds_edges(&self) -> bool {
+        true
+    }
+
+    fn on_pointer(&mut self, event: &PointerEvent, _: &mut Cx<'_, '_>) -> Handled {
+        if event.phase == PointerPhase::Down {
+            self.log.borrow_mut().push(String::from("holder:down"));
+        }
+        Handled::Yes
+    }
+}
+
+struct EdgeHolderPlugin(Log);
+
+impl Plugin for EdgeHolderPlugin {
+    fn manifest(&self) -> Manifest {
+        Manifest {
+            id: Id::new_static("holder"),
+            name: Cow::Borrowed("Holder"),
+            description: Cow::Borrowed(""),
+            version: Version::new(1, 0, 0),
+            sdk: SDK_VERSION,
+        }
+    }
+
+    fn register(&self, r: &mut dyn Registrar) -> Result<(), RegisterError> {
+        let log = self.0.clone();
+        r.add_screen(ScreenSpec {
+            id: Id::new_static("holder.screen"),
+            title: Cow::Borrowed("holder"),
+            factory: Box::new(move |_, _| Box::new(EdgeHolder { log: log.clone() })),
+        })?;
+        r.bind_slot(
+            slots::HOME,
+            Id::new_static("holder.screen"),
+            Priority::DEFAULT,
+        )
+    }
+}
+
+#[test]
+fn the_screen_is_refreshed_whole_on_request() {
+    let log = log();
+    let mut kernel = Kernel::builder(DEVICE)
+        .plugin(TestPlugin::new("a", &log))
+        .user_config(
+            "[keymap.global]
+button.menu = core.refresh-screen
+",
+        )
+        .build()
+        .unwrap();
+    kernel.start(Instant(0));
+    render(&mut kernel);
+    let effects = press(&mut kernel, 100, "menu");
+    assert_eq!(
+        effects.refresh,
+        Some((Rect::new(0, 0, 90, 90), RefreshMode::Full))
+    );
+}
+
+#[test]
+fn screens_may_hold_the_edges() {
+    let log = log();
+    let mut kernel = Kernel::builder(DEVICE)
+        .plugin(EdgeHolderPlugin(log.clone()))
+        .build()
+        .unwrap();
+    kernel.start(Instant(0));
+    // The finger at the edge is the screen's: no going home.
+    swipe(&mut kernel, 100, (45, 88), (45, 30));
+    assert_eq!(*log.borrow(), ["holder:down"]);
+}
+
+#[test]
+fn tools_with_their_own_gestures_need_a_second_swipe() {
+    let log = log();
+    let mut plugin = TestPlugin::new("a", &log);
+    plugin.keymap = Some(
+        "[keymap.a.screen]
+gestures.policy = core.gestures.own
+",
+    );
+    let mut kernel = Kernel::builder(DEVICE).plugin(plugin).build().unwrap();
+    kernel.start(Instant(0));
+    // Swipes and taps of the key map do nothing: the tool takes them.
+    swipe(&mut kernel, 100, (45, 50), (45, 5));
+    tap(&mut kernel, 300, 85, 45);
+    assert!(log.borrow().is_empty());
+    // From the edge, the second swipe goes home; one alone does not.
+    swipe(&mut kernel, 500, (45, 88), (45, 30));
+    assert!(log.borrow().is_empty());
+    swipe(&mut kernel, 1500, (45, 88), (45, 30));
+    assert_eq!(*log.borrow(), ["a:core.home"]);
+    log.borrow_mut().clear();
+    // Too late for a second one.
+    swipe(&mut kernel, 2000, (45, 88), (45, 30));
+    swipe(&mut kernel, 9000, (45, 88), (45, 30));
+    assert!(log.borrow().is_empty());
+
+    // The user switches gestures off there: edges do nothing at all.
+    let log = self::log();
+    let mut plugin = TestPlugin::new("a", &log);
+    plugin.keymap = Some(
+        "[keymap.a.screen]
+gestures.policy = core.gestures.own
+",
+    );
+    let mut kernel = Kernel::builder(DEVICE)
+        .plugin(plugin)
+        .user_config(
+            "[keymap.a.screen]
+gestures.policy = core.gestures.off
+",
+        )
+        .build()
+        .unwrap();
+    kernel.start(Instant(0));
+    swipe(&mut kernel, 100, (45, 88), (45, 30));
+    swipe(&mut kernel, 200, (45, 88), (45, 30));
+    assert!(log.borrow().is_empty());
+}
+
 #[test]
 fn reports_unknown_references_in_config() {
     let mut kernel = Kernel::builder(DEVICE)

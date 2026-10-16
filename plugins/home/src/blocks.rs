@@ -255,23 +255,7 @@ pub(crate) fn draw_status(canvas: &mut Canvas<'_>, env: &Env<'_>, area: Rect) {
 
 /// The date in words: "Thursday, 15 October".
 pub(crate) fn date_text(env: &Env<'_>) -> String {
-    let Some(now) = time::local_time(env) else {
-        return String::new();
-    };
-    env.i18n.format(
-        "home.date",
-        &[
-            (
-                "weekday",
-                Arg::Str(env.i18n.tr(&format!("home.weekday.{}", now.weekday))),
-            ),
-            ("day", Arg::Int(i64::from(now.day))),
-            (
-                "month",
-                Arg::Str(env.i18n.tr(&format!("home.month.{}", now.month))),
-            ),
-        ],
-    )
+    time::date_text(env).unwrap_or_default()
 }
 
 fn date_height(env: &Env<'_>, _: u16) -> u16 {

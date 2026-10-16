@@ -61,6 +61,9 @@ pub struct Env<'a> {
     pub sleep: bool,
     /// The slots some screen is bound to (see [`Env::has_slot`]).
     pub slots: &'a [crate::Id],
+    /// Every screen: its id and the translation key of its name, e.g. for
+    /// settings that differ per screen (what gestures do there).
+    pub screens: &'a [(crate::Id, alloc::borrow::Cow<'static, str>)],
     /// The folders reading fonts are found in at start-up, the first one
     /// QuireInk's own (where new fonts go); empty where the device has
     /// only its built-in fonts.

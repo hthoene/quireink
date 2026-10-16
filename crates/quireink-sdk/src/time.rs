@@ -375,6 +375,26 @@ pub fn clock_text(env: &Env<'_>) -> Option<String> {
     }
 }
 
+/// Today in words, e.g. "Thursday, 15 October", if the device knows the
+/// date.
+pub fn date_text(env: &Env<'_>) -> Option<String> {
+    let now = local_time(env)?;
+    Some(env.i18n.format(
+        "core.date",
+        &[
+            (
+                "weekday",
+                quireink_i18n::Arg::Str(env.i18n.tr(&format!("core.weekday.{}", now.weekday))),
+            ),
+            ("day", quireink_i18n::Arg::Int(i64::from(now.day))),
+            (
+                "month",
+                quireink_i18n::Arg::Str(env.i18n.tr(&format!("core.month.{}", now.month))),
+            ),
+        ],
+    ))
+}
+
 /// The values of `core.clock-format`.
 pub const CLOCK_24H: &str = "core.clock.24h";
 pub const CLOCK_12H: &str = "core.clock.12h";

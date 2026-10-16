@@ -197,7 +197,8 @@ pub enum Command {
     Back,
     /// Changes a setting; invalid values are rejected with a warning.
     SetSetting(Id, SettingValue),
-    /// Redraws the current screen completely.
+    /// Redraws the current screen completely; with
+    /// [`RefreshMode::Full`] the whole screen, flashing.
     Redraw(RefreshMode),
     /// Notifies all subscribers of an event, then every open screen.
     Emit(Id, Params),
