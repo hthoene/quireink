@@ -6,6 +6,20 @@ change the plugin SDK.
 
 ## [Unreleased]
 
+- The home screen is a grid, as on a phone: 4 columns by default (rows
+  to fit the screen; both settings), each widget taking a rectangle of
+  cells, each tool an icon in a cell of its own; empty cells stay empty.
+  A long press or the pencil shows the grid: drag an item to move it, by
+  its corner to size it, tap it for its options (move or size it with
+  the buttons, its settings, remove it); *Add* adds widgets, tools and
+  pages. The status line sits above the grid. Pages written before are
+  placed in the grid by themselves.
+- Widgets have more settings of their own: the clock's size (also as
+  large as its cells allow), the date's size, whether the continue card
+  shows its cover, its progress and a frame, and for the recently read
+  books their heading, their titles, where the titles sit and how many
+  books show. Tools with or without their names.
+
 ## [0.2.0] - 2026-10-16
 
 - Books from a catalog (OPDS) or from Calibre keep the title, author,

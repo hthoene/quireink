@@ -1,12 +1,11 @@
 //! Editing a list of widgets, as a list that buttons work as well as
 //! taps: the widgets (choosing one offers to move it up or down, its own
-//! settings where it has some, or to remove it), then *Add a widget*; for a page of the home screen also
-//! *Add a page* and *Remove this page*. Every change is kept at once.
+//! settings where it has some, or to remove it), then *Add a widget*.
+//! Every change is kept at once.
 //!
-//! It edits a page of the home screen (parameter `page`, or `id` with the
-//! page's setting) or any other setting that is a list of widgets
-//! (parameter `id`), e.g. the sleep screen's: such settings name this
-//! screen as their editor.
+//! It edits a setting that is a list of widgets (parameter `id`), e.g.
+//! the sleep screen's: such settings name this screen as their editor.
+//! The home screen's pages are grids, edited in place.
 
 use alloc::borrow::Cow;
 use alloc::format;
@@ -19,47 +18,31 @@ use quireink_sdk::ui::choice;
 use quireink_sdk::ui::{self, ListChange, ListView, UiStyle};
 use quireink_sdk::widgets;
 use quireink_sdk::{
-    Arg, Canvas, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Params, Rect, RefreshMode,
-    Screen, SettingValue,
+    Canvas, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Params, Rect, RefreshMode, Screen,
+    SettingValue,
 };
 
-use crate::pages::{self, MAX_PAGES, STATUS};
-use crate::{ADD_SCREEN, CHOICE};
+use crate::{CHOICE, LIST_ADD_SCREEN};
 
 /// A widget's options were chosen.
 const CHOSEN: Id = Id::new_static("home.edit-chosen");
-/// Parameter: the page edited (0 the first).
-pub(crate) const PAGE: &str = "page";
 const OPTION_LABELS: &str = "home.edit.";
 
-/// What is edited.
+/// What is edited: a setting that lists widgets.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Target {
-    /// A page of the home screen (0 the first).
-    Page(usize),
-    /// Another setting that lists widgets.
     Setting(String),
 }
 
 /// What the parameters ask to edit.
 pub(crate) fn target_of(params: &Params) -> Target {
-    if let Some(page) = params.get(PAGE).and_then(|p| p.parse().ok()) {
-        return Target::Page(page);
-    }
-    let Some(id) = params.get(params::ID) else {
-        return Target::Page(0);
-    };
-    match (0..MAX_PAGES).find(|&i| pages::setting(i).as_str() == id) {
-        Some(page) => Target::Page(page),
-        None => Target::Setting(id.to_string()),
-    }
+    Target::Setting(params.get(params::ID).unwrap_or_default().to_string())
 }
 
 impl Target {
     /// Its widgets.
     fn widgets(&self, env: &Env<'_>) -> Vec<String> {
         match self {
-            Target::Page(page) => pages::pages(env).get(*page).cloned().unwrap_or_default(),
             Target::Setting(id) => item_ids(env.settings.text(id))
                 .map(ToString::to_string)
                 .collect(),
@@ -67,15 +50,8 @@ impl Target {
     }
 
     /// The commands that keep `widgets` as its list.
-    fn store(&self, env: &Env<'_>, widgets: Vec<String>) -> Vec<Command> {
+    fn store(&self, widgets: Vec<String>) -> Vec<Command> {
         match self {
-            Target::Page(page) => {
-                let mut pages = pages::pages(env);
-                if let Some(list) = pages.get_mut(*page) {
-                    *list = widgets;
-                }
-                pages::store(&pages)
-            }
             Target::Setting(id) => Id::parse(id)
                 .ok()
                 .map(|id| {
@@ -89,16 +65,12 @@ impl Target {
     /// The parameters that ask to edit it.
     fn params(&self) -> Params {
         match self {
-            Target::Page(page) => Params::new().with(PAGE, format!("{page}")),
             Target::Setting(id) => Params::new().with(params::ID, id.clone()),
         }
     }
 
     fn title(&self, env: &Env<'_>) -> String {
         match self {
-            Target::Page(page) => env
-                .i18n
-                .format("home.edit.title", &[("page", Arg::Int(*page as i64 + 1))]),
             Target::Setting(id) => env
                 .settings
                 .specs()
@@ -112,8 +84,6 @@ impl Target {
 enum Row {
     Widget(usize),
     Add,
-    AddPage,
-    RemovePage,
 }
 
 pub(crate) struct EditScreen {
@@ -142,15 +112,6 @@ impl EditScreen {
         let count = self.target.widgets(env).len();
         let mut rows: Vec<Row> = (0..count).map(Row::Widget).collect();
         rows.push(Row::Add);
-        if let Target::Page(_) = self.target {
-            let pages = pages::pages(env).len();
-            if pages < MAX_PAGES {
-                rows.push(Row::AddPage);
-            }
-            if pages > 1 {
-                rows.push(Row::RemovePage);
-            }
-        }
         rows
     }
 
@@ -200,26 +161,7 @@ impl EditScreen {
                     &options,
                 ));
             }
-            Row::Add => cx.command(Command::OpenScreen(ADD_SCREEN, self.target.params())),
-            Row::AddPage => {
-                let mut pages = pages::pages(&env);
-                pages.push(alloc::vec![String::from(STATUS)]);
-                self.target = Target::Page(pages.len() - 1);
-                Self::run(cx, pages::store(&pages));
-                self.list.focus = 0;
-                self.redraw(cx);
-            }
-            Row::RemovePage => {
-                let mut pages = pages::pages(&env);
-                if let Target::Page(page) = self.target
-                    && page < pages.len()
-                    && pages.len() > 1
-                {
-                    pages.remove(page);
-                    Self::run(cx, pages::store(&pages));
-                }
-                cx.command(Command::Back);
-            }
+            Row::Add => cx.command(Command::OpenScreen(LIST_ADD_SCREEN, self.target.params())),
         }
     }
 
@@ -248,7 +190,7 @@ impl EditScreen {
             }
             _ => return,
         }
-        let commands = self.target.store(&env, list);
+        let commands = self.target.store(list);
         Self::run(cx, commands);
         self.redraw(cx);
     }
@@ -256,7 +198,7 @@ impl EditScreen {
 
 /// Whether widget `id` has settings of its own (a settings group with its
 /// id, see `quireink_sdk::widgets`).
-fn has_settings(env: &Env<'_>, id: &str) -> bool {
+pub(crate) fn has_settings(env: &Env<'_>, id: &str) -> bool {
     env.settings.groups().any(|group| group.id.as_str() == id)
         && env
             .settings
@@ -296,16 +238,6 @@ impl Screen for EditScreen {
                         (None, name.to_string(), "›")
                     }
                     Row::Add => (Some("plus"), env.i18n.tr("home.edit.add").to_string(), "›"),
-                    Row::AddPage => (
-                        Some("plus"),
-                        env.i18n.tr("home.edit.add-page").to_string(),
-                        "",
-                    ),
-                    Row::RemovePage => (
-                        Some("trash"),
-                        env.i18n.tr("home.edit.remove-page").to_string(),
-                        "",
-                    ),
                 };
                 let rect = ui::draw_row_icon(canvas, env, &style, rect, room, icon, ink);
                 ui::draw_value_row(canvas, env, &style, rect, focused, &title, value);
@@ -419,7 +351,7 @@ impl AddScreen {
         };
         let mut list = self.target.widgets(&env);
         list.push(id.as_str().to_string());
-        for command in self.target.store(&env, list) {
+        for command in self.target.store(list) {
             cx.command(command);
         }
         cx.command(Command::Back);

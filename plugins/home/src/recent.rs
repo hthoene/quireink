@@ -8,7 +8,7 @@ use alloc::vec::Vec;
 use quireink_sdk::{Storage, library};
 
 /// Books shown at most.
-const LIMIT: usize = 8;
+const LIMIT: usize = 9;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Recent {
