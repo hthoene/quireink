@@ -31,6 +31,7 @@ mod html;
 mod markdown;
 mod obfuscation;
 mod package;
+mod woff;
 
 use alloc::borrow::Cow;
 use alloc::boxed::Box;
@@ -313,6 +314,36 @@ mod tests {
         // Without the book's styles there are no embedded fonts either.
         let plain_doc = EpubDocument::open_with(&storage, "books/test.epub", false).unwrap();
         assert!(plain_doc.fonts(&storage).is_empty());
+    }
+
+    #[test]
+    fn woff_fonts_come_out_as_their_font() {
+        let woff = include_bytes!("../tests/data/atkinson-subset.woff");
+        let zip = ZipBuilder::new()
+            .stored("mimetype", "application/epub+zip")
+            .deflated("META-INF/container.xml", CONTAINER)
+            .deflated("OEBPS/content.opf", OPF)
+            .deflated("OEBPS/nav.xhtml", NAV)
+            .deflated("OEBPS/text/ch1.xhtml", CH1)
+            .deflated(
+                "OEBPS/text/ch 2.xhtml",
+                "<html><body><p class=\"web\">Web</p></body></html>",
+            )
+            .stored("OEBPS/fonts/Web.woff", &woff[..])
+            .deflated(
+                "OEBPS/style.css",
+                "@font-face { font-family: Web; src: url(fonts/Web.woff) format('woff') } \
+                 .web { font-family: Web }",
+            )
+            .build();
+        let storage = MemoryStorage::new().with("books/web.epub", zip);
+        let doc = EpubDocument::open(&storage, "books/web.epub").unwrap();
+        assert_eq!(doc.fonts(&storage).len(), 1);
+        let font = doc.font_data(&storage, 0).unwrap();
+        // A TrueType font again, as the reader's fonts read it.
+        assert_eq!(&font[..4], &[0, 1, 0, 0]);
+        let ttf = include_bytes!("../tests/data/atkinson-subset.ttf");
+        assert!(font.len() >= ttf.len() - 64 && font.len() <= ttf.len() + 64);
     }
 
     fn blocks(

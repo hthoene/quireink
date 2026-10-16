@@ -1472,6 +1472,7 @@ dependencies = [
 name = "quireink-plugin-format-epub"
 version = "0.1.1"
 dependencies = [
+ "miniz_oxide 0.8.9",
  "quireink-i18n",
  "quireink-sdk",
  "quireink-zip",

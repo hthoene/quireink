@@ -641,8 +641,9 @@ impl Parser {
     }
 }
 
-/// The first OpenType or TrueType file of a `src` list such as
-/// `url("a.woff2") format("woff2"), url(a.ttf) format("truetype")`.
+/// The first OpenType, TrueType or WOFF file of a `src` list such as
+/// `url("a.woff2") format("woff2"), url(a.ttf) format("truetype")` (WOFF 2
+/// is not read).
 fn font_url(src: &str) -> Option<String> {
     src.split("url(").skip(1).find_map(|part| {
         let (url, rest) = part.split_once(')')?;
@@ -653,10 +654,14 @@ fn font_url(src: &str) -> Option<String> {
             .unwrap_or_default()
             .to_ascii_lowercase();
         let lower = url.to_ascii_lowercase();
-        let by_name = [".ttf", ".otf", ".ttc"].iter().any(|e| lower.ends_with(e));
-        let by_format = format.contains("truetype") || format.contains("opentype");
+        let by_name = [".ttf", ".otf", ".ttc", ".woff"]
+            .iter()
+            .any(|e| lower.ends_with(e));
+        let by_format = format.contains("truetype")
+            || format.contains("opentype")
+            || (format.contains("woff") && !format.contains("woff2"));
         let other =
-            format.contains("woff") || format.contains("svg") || format.contains("embedded");
+            format.contains("woff2") || format.contains("svg") || format.contains("embedded");
         ((by_name && !other) || by_format).then(|| String::from(url))
     })
 }
@@ -759,11 +764,12 @@ mod tests {
              @font-face { font-family: \"My Serif\"; font-weight: bold; font-style: italic; \
              src: url(../fonts/MySerif-BI.otf) } \
              @font-face { font-family: Web; src: url(web.woff) } \
+             @font-face { font-family: Newer; src: url(n.woff2) format('woff2') } \
              p { font-family: \"My Serif\", serif } h1 { font-family: sans-serif } \
              .other { font-family: Unknown, serif }",
         );
-        // "Web" only has a WOFF file, so it is not embedded.
-        assert_eq!(r.families, ["my serif", "unknown"]);
+        // "Newer" only has a WOFF 2 file, so it is not embedded.
+        assert_eq!(r.families, ["my serif", "web", "unknown"]);
         assert_eq!(
             r.faces,
             [
@@ -779,11 +785,17 @@ mod tests {
                     italic: true,
                     path: String::from("OEBPS/fonts/MySerif-BI.otf"),
                 },
+                FontFace {
+                    family: 2,
+                    bold: false,
+                    italic: false,
+                    path: String::from("OEBPS/css/web.woff"),
+                },
             ]
         );
         assert_eq!(r.props("p", "").family, Some(1));
         assert_eq!(r.props("h1", "").family, Some(0));
-        assert_eq!(r.props("p", "other").family, Some(2));
+        assert_eq!(r.props("p", "other").family, Some(3));
         let copy = Rules::decode(&r.encode());
         assert_eq!(copy.families, r.families);
         assert_eq!(copy.props("p", "").family, Some(1));
