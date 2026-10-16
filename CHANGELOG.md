@@ -15,6 +15,8 @@ change the plugin SDK.
   *Free space*, which takes the room the others leave, e.g. to put the
   clock in the middle or the tools at the bottom. Both may be added more
   than once, on the home screen and the sleep screen.
+- Snapshot tests: screens of the X4 and the Boox are drawn headless and
+  compared with reference pictures, so layout faults fail a test.
 - The folder chooser says when it is still opening a folder (slow SD
   cards) and ignores taps until it shows it.
 - Widgets have settings of their own, from the home screen's editor:
