@@ -2005,6 +2005,7 @@ fn speech_goes_to_the_shell_and_stops_with_its_screen() {
     assert!(!log.borrow().contains(&String::from("event ov.reply c")));
 }
 
+<<<<<<< HEAD
 /// Publishes a service and a point (`provider`), or uses them (`user`).
 struct ServicePlugin {
     id: &'static str,
@@ -2016,6 +2017,17 @@ impl Plugin for ServicePlugin {
         Manifest {
             id: Id::parse(self.id).unwrap(),
             name: Cow::Borrowed("Services"),
+=======
+/// Turns the `menu` button into the next page, swallows `confirm`, and
+/// refreshes everything in full.
+struct FilterPlugin;
+
+impl Plugin for FilterPlugin {
+    fn manifest(&self) -> Manifest {
+        Manifest {
+            id: Id::new_static("filter"),
+            name: Cow::Borrowed("Filters"),
+>>>>>>> input-filters
             description: Cow::Borrowed(""),
             version: Version::new(1, 0, 0),
             sdk: SDK_VERSION,
@@ -2023,6 +2035,7 @@ impl Plugin for ServicePlugin {
     }
 
     fn register(&self, r: &mut dyn Registrar) -> Result<(), RegisterError> {
+<<<<<<< HEAD
         if self.id == "provider" {
             r.add_service(Id::new_static("provider.greeting"), Box::new("hello"))?;
             // Not in its namespace: refused.
@@ -2044,10 +2057,37 @@ impl Plugin for ServicePlugin {
                 },
             ),
         )
+=======
+        use quireink_sdk::filters::{InputFilterSpec, InputVerdict, RefreshFilterSpec};
+        r.add_input_filter(InputFilterSpec {
+            id: Id::new_static("filter.input"),
+            title: Cow::Borrowed(""),
+            filter: Box::new(|_, event| match event {
+                InputEvent::Button {
+                    name: "menu",
+                    state: ButtonState::Pressed,
+                } => InputVerdict::Run(actions::NEXT_PAGE),
+                InputEvent::Button {
+                    name: "menu" | "confirm",
+                    ..
+                } => InputVerdict::Take,
+                _ => InputVerdict::Pass,
+            }),
+        })?;
+        r.add_refresh_filter(RefreshFilterSpec {
+            id: Id::new_static("filter.refresh"),
+            title: Cow::Borrowed(""),
+            filter: Box::new(|_, refresh| {
+                (refresh.screen.as_ref().map(Id::as_str) == Some("a.screen"))
+                    .then_some(RefreshMode::Full)
+            }),
+        })
+>>>>>>> input-filters
     }
 }
 
 #[test]
+<<<<<<< HEAD
 fn plugins_offer_each_other_services() {
     let log = log();
     let mut kernel = Kernel::builder(DEVICE)
@@ -2067,4 +2107,26 @@ fn plugins_offer_each_other_services() {
         *log.borrow(),
         ["Some(\"hello\")", "user:square", "provider:circle"]
     );
+=======
+fn filters_see_inputs_and_refreshes_first() {
+    let log = log();
+    let mut kernel = Kernel::builder(DEVICE)
+        .plugin(TestPlugin::new("a", &log))
+        .plugin(FilterPlugin)
+        .build()
+        .unwrap();
+    kernel.start(Instant(0));
+    render(&mut kernel);
+    let button = |name, state| InputEvent::Button { name, state };
+    let effects = kernel.handle(Instant(100), button("menu", ButtonState::Pressed));
+    kernel.handle(Instant(150), button("menu", ButtonState::Released));
+    assert_eq!(*log.borrow(), ["a:core.next-page"]);
+    // The screen asked for a partial refresh of a corner: in full, whole.
+    assert_eq!(
+        effects.refresh,
+        Some((Rect::new(0, 0, 90, 90), RefreshMode::Full))
+    );
+    press(&mut kernel, 300, "confirm");
+    assert_eq!(log.borrow().len(), 1, "confirm was taken");
+>>>>>>> input-filters
 }
