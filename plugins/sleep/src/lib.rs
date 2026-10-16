@@ -201,7 +201,9 @@ fn picture(env: &Env<'_>) -> Option<ImageRef> {
         let name = entry.name.to_lowercase();
         if !entry.is_dir
             && !entry.name.starts_with('.')
-            && [".jpg", ".jpeg", ".png"].iter().any(|e| name.ends_with(e))
+            && [".jpg", ".jpeg", ".png", ".gif"]
+                .iter()
+                .any(|e| name.ends_with(e))
         {
             pictures.push(entry.name.to_string());
         }

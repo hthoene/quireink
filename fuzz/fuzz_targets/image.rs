@@ -1,4 +1,4 @@
-//! Any bytes as a JPEG or PNG, decoded to gray at a small size.
+//! Any bytes as a JPEG, PNG or GIF, decoded to gray at a small size.
 
 #![no_main]
 
@@ -20,7 +20,7 @@ impl ImageSink for Count {
 }
 
 fuzz_target!(|data: &[u8]| {
-    for format in [Format::Jpeg, Format::Png] {
+    for format in [Format::Jpeg, Format::Png, Format::Gif] {
         let mut source = data;
         let _ = decode(format, &mut source, 64, &mut Count(0));
     }

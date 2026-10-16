@@ -44,7 +44,9 @@ fn is_picture(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     !lower.starts_with("__macosx/")
         && !lower.rsplit('/').next().unwrap_or("").starts_with('.')
-        && [".jpg", ".jpeg", ".png"].iter().any(|e| lower.ends_with(e))
+        && [".jpg", ".jpeg", ".png", ".gif"]
+            .iter()
+            .any(|e| lower.ends_with(e))
 }
 
 /// Names in reading order: numbers within them by value.

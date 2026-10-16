@@ -21,6 +21,9 @@ change the plugin SDK.
   sample rounds its corners. Plugin SDK: `UiStyle` gains `corner` and
   `strong` (with `UiStyle::faint` for gray text), `ui::fill_round`,
   `ui::stroke_round`, and the canvas rounded rectangles.
+- GIF pictures in books, comics and the sleep screen's own pictures: the
+  first picture of the file (also of an animation, interlaced or with
+  transparency), decoded to gray row by row like JPEG and PNG.
 - Small capitals (CSS `font-variant: small-caps`, `font-variant-caps`)
   in EPUB, HTML and the other converted formats: lower case letters as
   smaller capitals, the text itself unchanged (search, selection and
