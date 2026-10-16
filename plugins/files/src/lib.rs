@@ -23,7 +23,6 @@ extern crate alloc;
 
 mod folders;
 mod info;
-mod listing;
 mod shelves;
 
 use alloc::borrow::Cow;
@@ -32,11 +31,11 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use listing::{Entry, Listing, UNRANKED};
 use quireink_sdk::builtin::{
     actions as core_actions, events, groups, params, settings as core_settings, slots,
 };
 use quireink_sdk::files;
+use quireink_sdk::library::listing::{Entry, Listing, UNRANKED};
 use quireink_sdk::library::{self, Book};
 use quireink_sdk::ui::{self, ListChange, ListView, UiStyle};
 use quireink_sdk::{

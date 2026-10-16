@@ -1,4 +1,5 @@
-//! Sorted, paged directory listings that never hold more than a page.
+//! Sorted, paged listings of the books and folders of a folder, that
+//! never hold more than a page.
 //!
 //! Folders with thousands of books must work on a device with a few
 //! hundred kilobytes of RAM, so a listing is never loaded completely.
@@ -11,10 +12,10 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::cmp::Ordering;
 
-use quireink_sdk::{Formats, Storage};
+use crate::{Formats, Storage};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Entry {
+pub struct Entry {
     pub name: String,
     pub is_dir: bool,
     /// Place in the sort order before names ([`UNRANKED`] for none).
@@ -22,7 +23,7 @@ pub(crate) struct Entry {
 }
 
 /// The rank of entries ordered by name only.
-pub(crate) const UNRANKED: u32 = u32::MAX;
+pub const UNRANKED: u32 = u32::MAX;
 
 impl Entry {
     pub fn folder(name: &str) -> Self {
@@ -60,13 +61,22 @@ fn is_sidecar(name: &str) -> bool {
 /// The visible entries of a directory: folders and files a format plugin
 /// can open (or only folders); hidden names (starting with `.`) and
 /// sidecar folders of other readers are skipped.
-pub(crate) struct Listing<'a> {
+pub struct Listing<'a> {
     pub storage: &'a dyn Storage,
     pub formats: &'a Formats,
     pub dir: &'a str,
     pub folders_only: bool,
     /// Ranks files before the name order, e.g. by when they were read.
     pub rank: Option<&'a dyn Fn(&str) -> u32>,
+}
+
+impl core::fmt::Debug for Listing<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Listing")
+            .field("dir", &self.dir)
+            .field("folders_only", &self.folders_only)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Listing<'_> {
@@ -206,18 +216,18 @@ impl Listing<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{FormatSpec, MemoryStorage};
     use alloc::format;
-    use quireink_sdk::{FormatSpec, MemoryStorage};
 
     fn formats() -> Formats {
         let mut formats = Formats::new();
         formats
             .add(FormatSpec {
-                id: quireink_sdk::Id::new_static("test.txt"),
+                id: crate::Id::new_static("test.txt"),
                 title: alloc::borrow::Cow::Borrowed("TXT"),
                 extensions: alloc::vec![alloc::borrow::Cow::Borrowed("txt")],
                 open: alloc::boxed::Box::new(|_, _, _| {
-                    Err(quireink_sdk::document::DocumentError::UnsupportedFormat)
+                    Err(crate::document::DocumentError::UnsupportedFormat)
                 }),
             })
             .unwrap();

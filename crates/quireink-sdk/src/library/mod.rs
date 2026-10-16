@@ -10,11 +10,16 @@
 //!   `.quireink/library/books/<hash>.ini`.
 //! - The books opened last, most recent first (`opened.txt`), and the
 //!   favourites (`favourites.txt`).
+//! - The catalog of all books under the library folder ([`catalog`]),
+//!   and listings of a folder's books ([`listing`]).
 //!
 //! The kernel keeps them up to date from the standard reading events and
 //! moves them with a book ([`record`], [`moved`]). Nothing here grows
 //! with the size of the library: the lists are capped, and details are
 //! read a book at a time.
+
+pub mod catalog;
+pub mod listing;
 
 use alloc::format;
 use alloc::string::{String, ToString};
@@ -329,6 +334,8 @@ pub fn take_over_old(storage: &dyn Storage) {
         let _ = storage.rename(&format!("{old}/{name}"), &format!("{DIR}/{name}"));
     }
     let _ = storage.rename(&format!("{old}/books"), &format!("{DIR}/books"));
+    // The catalog is made anew where it is now.
+    let _ = storage.remove(&format!("{old}/catalog.txt"));
 }
 
 #[cfg(test)]
