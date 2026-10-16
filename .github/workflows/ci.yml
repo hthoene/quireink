@@ -130,7 +130,7 @@ jobs:
             --screenshot out/two-buttons-settings.png
           $emu --headless --profile boox-go-7 --set slots.core.home=diagnostics.screen \
             --script "page-forward,long-tap:600:800"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: matrix.os == 'ubuntu-latest'
         with:
           name: emulator-screenshots
@@ -155,7 +155,7 @@ jobs:
         run: cargo ndk -t arm64-v8a --platform 26 clippy -p quireink-android
       - name: Build the APK
         run: shells/android/build-apk.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: quireink-android-apk
           path: target/android/quireink.apk
@@ -181,7 +181,7 @@ jobs:
           for target in epub txt xml hyphen image; do
             cargo +nightly fuzz run "$target" -- -max_total_time=60 -rss_limit_mb=1024
           done
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: fuzz-crashes
