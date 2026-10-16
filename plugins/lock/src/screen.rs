@@ -672,8 +672,18 @@ impl Screen for LockScreen {
         if self.step == Step::Choose {
             let kinds = Self::kinds(&env);
             let a = action;
-            let up = [actions::UP, actions::LEFT, actions::PREVIOUS, actions::PREV_PAGE];
-            let down = [actions::DOWN, actions::RIGHT, actions::NEXT, actions::NEXT_PAGE];
+            let up = [
+                actions::UP,
+                actions::LEFT,
+                actions::PREVIOUS,
+                actions::PREV_PAGE,
+            ];
+            let down = [
+                actions::DOWN,
+                actions::RIGHT,
+                actions::NEXT,
+                actions::NEXT_PAGE,
+            ];
             if up.contains(a) {
                 self.focus = self.focus.saturating_sub(1);
             } else if down.contains(a) {
