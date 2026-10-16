@@ -1024,6 +1024,17 @@ impl Screen for Browser {
             self.chosen(option, &path, cx);
             return;
         }
+        if *event == events::LIBRARY_CHANGED {
+            // Books came or went: shown as they are now.
+            let env = *cx.env();
+            let focus = self.list.focus;
+            self.load(&env);
+            self.list.focus = focus.min(self.len.saturating_sub(1));
+            self.show_focus(&env);
+            cx.request_redraw();
+            cx.request_refresh(RefreshMode::Partial);
+            return;
+        }
         if *event == events::SETTING_CHANGED {
             // The UI size, the order or the library folder may have
             // changed; a new library folder is shown from its top.

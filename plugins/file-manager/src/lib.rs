@@ -303,6 +303,9 @@ impl Browser {
                     }
                     moved
                 };
+                if result.is_ok() && picked.copy {
+                    cx.command(quireink_sdk::library::changed());
+                }
                 self.message = result.err().map(|e| error(&env, e));
                 self.focus = Focus::List;
                 self.load(&env);
@@ -367,7 +370,11 @@ impl Browser {
                 ));
             }
             "delete-yes" => {
-                self.message = ops::delete(env.storage, path).err().map(|e| error(&env, e));
+                let deleted = ops::delete(env.storage, path);
+                if deleted.is_ok() {
+                    cx.command(quireink_sdk::library::changed());
+                }
+                self.message = deleted.err().map(|e| error(&env, e));
                 if self.picked.as_ref().is_some_and(|p| p.path == path) {
                     self.picked = None;
                 }

@@ -6,6 +6,12 @@ change the plugin SDK.
 
 ## [Unreleased]
 
+- Plugin SDK: services, what one plugin offers others
+  (`Registrar::add_service`, `Env::services`), and points plugins define
+  for others to contribute to (`Registrar::contribute`); the event
+  `core.library-changed` (`library::changed`), emitted when books come
+  into the library or leave it (Wi-Fi transfer, catalogs, Calibre, the
+  file manager), and the library shows them at once.
 - Rules can have a condition: only between two times of day, only while
   reading or while not, only on battery or while charging, only while a
   switch is on or off (hold a rule, *Only if …*). They can also set a

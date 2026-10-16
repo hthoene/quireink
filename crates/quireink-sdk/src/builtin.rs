@@ -237,6 +237,11 @@ pub mod events {
     /// [`PATH`](super::params::PATH) (the new one). Plugins that keep data
     /// by a book's path move it along (progress, notes, statistics).
     pub const BOOK_MOVED: Id = Id::new_static("core.book-moved");
+    /// Books came into the library or left it (received, downloaded,
+    /// copied, deleted): views of the library read it again. Plugins that
+    /// change the library emit it ([`library::changed`](crate::library::changed));
+    /// a move is [`BOOK_MOVED`].
+    pub const LIBRARY_CHANGED: Id = Id::new_static("core.library-changed");
     /// The bookmarks or highlights of a book changed
     /// ([`annotations`](crate::annotations)): parameter
     /// [`PATH`](super::params::PATH). Readers show them anew, syncs pass

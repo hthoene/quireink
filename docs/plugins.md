@@ -174,8 +174,9 @@ r.subscribe(events::BOOK_OPENED, Box::new(move |env, params, out| {
 
 The kernel and plugins emit events with parameters; any plugin can
 listen. Standard ones are in `builtin::events`: started, a setting
-changed, a book opened, a page turned, a book moved, its bookmarks or
-highlights changed, a word looked up, the device suspends or resumes.
+changed, a book opened, a page turned, a book moved, books came into
+the library or left it, its bookmarks or highlights changed, a word
+looked up, the device suspends or resumes.
 Plugins define their own (the reader's `reader.notes-exported`, for
 example), and `Command::Schedule` emits one at a time of day. Open
 screens get every event too (`Screen::on_event`).
@@ -246,6 +247,8 @@ cargo run -p quireink-emulator -- --profile xteink-x4 --headless --script "confi
 | Text filters | `add_text_filter` | Change a book's text before it is laid out |
 | Status items and lines | `add_status_item`, `add_status_line` | What status lines show |
 | Widgets | `add_widget` | Blocks for the home screen and the sleep screen |
+| Services | `add_service` | Anything one plugin offers others, found with `env.services.get` |
+| Contributions | `contribute` | Additions to a point another plugin defined |
 | Translations | `add_translations` | Catalogs for any language |
 
 Slots are how a plugin replaces another: bind your screen to
@@ -254,6 +257,28 @@ Slots are how a plugin replaces another: bind your screen to
 `builtin::slots`, built-in menus in `builtin::menus`: the main menu
 (`core.main`), its tools (`core.tools`) and the settings' pages
 (`core.settings-pages`).
+
+### Services and points of your own
+
+A plugin can offer others more than the kernel knows of. A service is
+any value published under an id in its namespace, usually a trait
+object whose trait the plugin's crate exports; others use it when it is
+there and do without it when not:
+
+```rust
+// The publishing plugin.
+r.add_service(WEATHER, Box::new(Box::new(Forecast::new()) as Box<dyn Weather>))?;
+
+// Any other plugin, wherever it has an `Env`.
+if let Some(weather) = env.services.get::<Box<dyn Weather>>(WEATHER.as_str()) {
+    let today = weather.today();
+}
+```
+
+A point is an id a plugin names, with what a contribution there is in
+its documentation (for example one line per entry); others add to it
+with `r.contribute(point, text)`, and the plugin reads
+`env.services.contributions(point)`, each with the plugin it came from.
 
 ### Widgets with settings
 

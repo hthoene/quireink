@@ -181,6 +181,9 @@ impl TransferScreen {
                 let (response, done) = web::answer(env.storage, &self.key, &self.page, request);
                 cx.command(Command::Respond(response));
                 if let Some(done) = done {
+                    if !matches!(done, web::Done::Sent(_)) {
+                        cx.command(quireink_sdk::library::changed());
+                    }
                     let (key, name) = match &done {
                         web::Done::Received(name) => ("transfer.received", name),
                         web::Done::Sent(name) => ("transfer.sent", name),

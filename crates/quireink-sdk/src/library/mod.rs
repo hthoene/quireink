@@ -370,6 +370,15 @@ pub fn take_over_old(storage: &dyn Storage) {
     let _ = storage.remove(&format!("{old}/catalog.txt"));
 }
 
+/// The command that tells everyone books came into the library or left
+/// it ([`events::LIBRARY_CHANGED`](crate::builtin::events::LIBRARY_CHANGED)).
+pub fn changed() -> crate::Command {
+    crate::Command::Emit(
+        crate::builtin::events::LIBRARY_CHANGED,
+        crate::Params::new(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

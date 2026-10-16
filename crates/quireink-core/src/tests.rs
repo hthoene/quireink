@@ -2004,3 +2004,67 @@ fn speech_goes_to_the_shell_and_stops_with_its_screen() {
     kernel.speech_done(Instant(9), id, true);
     assert!(!log.borrow().contains(&String::from("event ov.reply c")));
 }
+
+/// Publishes a service and a point (`provider`), or uses them (`user`).
+struct ServicePlugin {
+    id: &'static str,
+    log: Log,
+}
+
+impl Plugin for ServicePlugin {
+    fn manifest(&self) -> Manifest {
+        Manifest {
+            id: Id::parse(self.id).unwrap(),
+            name: Cow::Borrowed("Services"),
+            description: Cow::Borrowed(""),
+            version: Version::new(1, 0, 0),
+            sdk: SDK_VERSION,
+        }
+    }
+
+    fn register(&self, r: &mut dyn Registrar) -> Result<(), RegisterError> {
+        if self.id == "provider" {
+            r.add_service(Id::new_static("provider.greeting"), Box::new("hello"))?;
+            // Not in its namespace: refused.
+            let stolen = r.add_service(Id::new_static("core.greeting"), Box::new(1u8));
+            assert!(matches!(stolen, Err(RegisterError::Namespace { .. })));
+            return r.contribute(Id::new_static("provider.shapes"), Cow::Borrowed("circle"));
+        }
+        r.contribute(Id::new_static("provider.shapes"), Cow::Borrowed("square"))?;
+        let log = self.log.clone();
+        r.subscribe(
+            quireink_sdk::builtin::events::STARTED,
+            Box::new(
+                move |env: &Env<'_>, _: &quireink_sdk::Params, _: &mut Vec<Command>| {
+                    let greeting = env.services.get::<&str>("provider.greeting");
+                    log.borrow_mut().push(alloc::format!("{greeting:?}"));
+                    for (plugin, shape) in env.services.contributions("provider.shapes") {
+                        log.borrow_mut().push(alloc::format!("{plugin}:{shape}"));
+                    }
+                },
+            ),
+        )
+    }
+}
+
+#[test]
+fn plugins_offer_each_other_services() {
+    let log = log();
+    let mut kernel = Kernel::builder(DEVICE)
+        .plugin(TestPlugin::new("a", &log))
+        .plugin(ServicePlugin {
+            id: "user",
+            log: log.clone(),
+        })
+        .plugin(ServicePlugin {
+            id: "provider",
+            log: log.clone(),
+        })
+        .build()
+        .unwrap();
+    kernel.start(Instant(0));
+    assert_eq!(
+        *log.borrow(),
+        ["Some(\"hello\")", "user:square", "provider:circle"]
+    );
+}
