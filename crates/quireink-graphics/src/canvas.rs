@@ -224,7 +224,8 @@ mod tests {
     #[test]
     fn round_outlines_are_hollow() {
         let mut fb = Framebuffer::new(20, 12, PixelFormat::Gray8).unwrap();
-        fb.canvas().stroke_round_rect(0, 0, 20, 12, 2, 4, Color::BLACK);
+        fb.canvas()
+            .stroke_round_rect(0, 0, 20, 12, 2, 4, Color::BLACK);
         let gray = |x, y| fb.view().pixel(x, y).r;
         assert_eq!(gray(0, 0), 255);
         assert_eq!(gray(10, 0), 0);
@@ -232,7 +233,9 @@ mod tests {
         assert_eq!(gray(10, 6), 255);
         // Without a radius, as stroke_rect.
         let mut square = Framebuffer::new(6, 6, PixelFormat::Gray8).unwrap();
-        square.canvas().stroke_round_rect(0, 0, 6, 6, 1, 0, Color::BLACK);
+        square
+            .canvas()
+            .stroke_round_rect(0, 0, 6, 6, 1, 0, Color::BLACK);
         assert_eq!(square.view().pixel(0, 0).r, 0);
     }
 
