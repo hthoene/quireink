@@ -81,6 +81,7 @@ pub use crate::net::{
 use crate::refresh::RefreshPolicy;
 use crate::registry::{PluginRegistrar, Registry, Staging};
 pub use crate::sockets::{SOCKET_PART, SocketCall, SocketEvent};
+use quireink_sdk::filters::InputVerdict;
 
 pub use quireink_sdk as sdk;
 
@@ -389,6 +390,8 @@ impl KernelBuilder {
                 status_items: StatusItems::new(),
                 widgets: quireink_sdk::widgets::Widgets::new(),
                 text_filters: quireink_sdk::filters::TextFilters::new(),
+                input_filters: quireink_sdk::filters::InputFilters::new(),
+                refresh_filters: quireink_sdk::filters::RefreshFilters::new(),
                 stylesheets: Vec::new(),
                 network: self.network,
                 clipboard: String::new(),
@@ -829,6 +832,20 @@ impl Kernel {
     pub fn handle(&mut self, now: Instant, event: InputEvent) -> Effects {
         self.now = now;
         self.last_activity = now;
+        // Plugins' input filters come first.
+        let verdict = {
+            let env = self.shared.env(now);
+            self.shared.input_filters.apply(&env, &event)
+        };
+        match verdict {
+            InputVerdict::Pass => {}
+            InputVerdict::Take => return self.finish(),
+            InputVerdict::Run(action) => {
+                self.dispatch(action);
+                self.run_commands();
+                return self.finish();
+            }
+        }
         match event {
             InputEvent::Button { name, state } => {
                 if let Some(recognized) = self.recognizer.button(name, state, now) {
@@ -999,6 +1016,8 @@ impl Kernel {
         shared.status_items.shrink_to_fit();
         shared.widgets.shrink_to_fit();
         shared.text_filters.shrink_to_fit();
+        shared.input_filters.shrink_to_fit();
+        shared.refresh_filters.shrink_to_fit();
         shared.stylesheets.shrink_to_fit();
         shared.translator.shrink_to_fit();
     }
@@ -1872,6 +1891,12 @@ impl Kernel {
         for filter in staging.text_filters.drain(..) {
             self.shared.text_filters.add(filter);
         }
+        for filter in staging.input_filters.drain(..) {
+            self.shared.input_filters.add(filter);
+        }
+        for filter in staging.refresh_filters.drain(..) {
+            self.shared.refresh_filters.add(filter);
+        }
         Ok(())
     }
 
@@ -2266,7 +2291,14 @@ impl Kernel {
             let screen = self.framebuffer.bounds();
             let requested = requested.unwrap_or(RefreshMode::Partial);
             let (mode, region) = self.refresh.decide(requested, dirty, screen, interval);
-            effects.refresh = Some((region, mode));
+            let refresh = quireink_sdk::filters::Refresh {
+                mode,
+                region,
+                screen: self.stack.last().map(|top| top.id.clone()),
+            };
+            let env = self.shared.env(self.now);
+            let refresh = self.shared.refresh_filters.apply(&env, refresh, screen);
+            effects.refresh = Some((refresh.region, refresh.mode));
         }
         if let Some(at) = self.output.wake_at.take() {
             self.screen_timer = Some(self.screen_timer.map_or(at, |t| t.min(at)));
@@ -3060,6 +3092,9 @@ struct Shared {
     status_items: StatusItems,
     widgets: quireink_sdk::widgets::Widgets,
     text_filters: quireink_sdk::filters::TextFilters,
+    /// Filters of every input and of every refresh, from every plugin.
+    input_filters: quireink_sdk::filters::InputFilters,
+    refresh_filters: quireink_sdk::filters::RefreshFilters,
     /// Plugins' stylesheets for books.
     stylesheets: Vec<Cow<'static, str>>,
     network: bool,

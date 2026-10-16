@@ -244,6 +244,8 @@ cargo run -p quireink-emulator -- --profile xteink-x4 --headless --script "confi
 | Fonts | `add_font`, `add_font_file`, `bind_font` | Fonts and the roles they fill |
 | Hyphenation | `add_hyphenation` | Patterns for a language |
 | Text filters | `add_text_filter` | Change a book's text before it is laid out |
+| Input filters | `add_input_filter` | See every button and finger first: pass it, take it, or run an action instead |
+| Refresh filters | `add_refresh_filter` | Change how the panel is refreshed, e.g. in full on a screen of your own |
 | Status items and lines | `add_status_item`, `add_status_line` | What status lines show |
 | Widgets | `add_widget` | Blocks for the home screen and the sleep screen |
 | Translations | `add_translations` | Catalogs for any language |

@@ -96,8 +96,8 @@ pub use quireink_graphics::Canvas;
 pub use quireink_i18n::{Arg, Translator};
 pub use quireink_platform::{Battery, SystemStatus, WallClock};
 pub use quireink_platform::{
-    Color, DeviceInfo, DisplayInfo, InputCaps, Instant, MemoryClass, PixelFormat, Point,
-    PointerEvent, PointerPhase, PointerTool, Rect, RefreshMode,
+    ButtonState, Color, DeviceInfo, DisplayInfo, InputCaps, InputEvent, Instant, MemoryClass,
+    PixelFormat, Point, PointerEvent, PointerPhase, PointerTool, Rect, RefreshMode,
 };
 pub use quireink_platform::{DirEntry, NoStorage, Storage, StorageError};
 pub use status::{

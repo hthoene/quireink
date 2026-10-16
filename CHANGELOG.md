@@ -6,6 +6,12 @@ change the plugin SDK.
 
 ## [Unreleased]
 
+- Plugin SDK: input filters (`Registrar::add_input_filter`) see every
+  button and finger before screens and key maps do, and may take it or
+  run an action instead; refresh filters (`Registrar::add_refresh_filter`)
+  change how the panel is refreshed. `InputEvent` and `ButtonState` are
+  part of the SDK.
+
 - Drag and drop in lists, as on phones: entries of menus (*Customise
   menus*), the widgets of the sleep screen and the items of status lines
   carry a grip (≡) at their end; drag it to move the row, a bar shows

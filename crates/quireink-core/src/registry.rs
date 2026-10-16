@@ -117,6 +117,8 @@ pub(crate) struct Staging {
     pub(crate) status_lines: Vec<StatusLineSpec>,
     pub(crate) widgets: Vec<quireink_sdk::widgets::WidgetSpec>,
     pub(crate) text_filters: Vec<quireink_sdk::filters::TextFilterSpec>,
+    pub(crate) input_filters: Vec<quireink_sdk::filters::InputFilterSpec>,
+    pub(crate) refresh_filters: Vec<quireink_sdk::filters::RefreshFilterSpec>,
     pub(crate) stylesheets: Vec<Cow<'static, str>>,
 }
 
@@ -299,6 +301,27 @@ impl Registrar for PluginRegistrar<'_> {
         self.check_namespace(&filter.id)?;
         Self::check_unique(self.staging.text_filters.iter().map(|f| &f.id), &filter.id)?;
         self.staging.text_filters.push(filter);
+        Ok(())
+    }
+
+    fn add_input_filter(
+        &mut self,
+        filter: quireink_sdk::filters::InputFilterSpec,
+    ) -> Result<(), RegisterError> {
+        self.check_namespace(&filter.id)?;
+        Self::check_unique(self.staging.input_filters.iter().map(|f| &f.id), &filter.id)?;
+        self.staging.input_filters.push(filter);
+        Ok(())
+    }
+
+    fn add_refresh_filter(
+        &mut self,
+        filter: quireink_sdk::filters::RefreshFilterSpec,
+    ) -> Result<(), RegisterError> {
+        self.check_namespace(&filter.id)?;
+        let ids = self.staging.refresh_filters.iter().map(|f| &f.id);
+        Self::check_unique(ids, &filter.id)?;
+        self.staging.refresh_filters.push(filter);
         Ok(())
     }
 
