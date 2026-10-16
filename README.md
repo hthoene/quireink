@@ -56,6 +56,16 @@ installs new versions from the releases page.
   PocketBook, reMarkable, Boox and other Android e-readers, desktop and web.
   Grayscale and colour e-ink.
 
+## How it's made
+
+QuireInk is a one-person project. Much of its code and documentation is
+written with the help of an AI model (Claude, by Anthropic); its maker
+decides what goes in, every change has to pass more than 400 tests,
+snapshot tests of its screens and the other checks before it is merged,
+and releases are built reproducibly and tried on a real reader first.
+QuireInk is young and may have rough edges; issues and wishes are welcome.
+More at [quireink.org/about](https://quireink.org/about).
+
 ## Customisation at a glance
 
 A plain text file (`quireink.ini`) on the device changes behaviour without
