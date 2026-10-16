@@ -205,12 +205,14 @@ fn element_props(
     props
 }
 
-/// `style` with bold, italic and the font family as `props` sets them.
+/// `style` with bold, italic, small capitals and the font family as
+/// `props` sets them.
 fn styled(style: TextStyle, props: &Props) -> TextStyle {
     let mut bits = style.bits();
     for (flag, on) in [
         (TextStyle::BOLD, props.bold),
         (TextStyle::ITALIC, props.italic),
+        (TextStyle::SMALL_CAPS, props.small_caps),
     ] {
         match on {
             Some(true) => bits |= flag.bits(),

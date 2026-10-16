@@ -21,6 +21,11 @@ change the plugin SDK.
   sample rounds its corners. Plugin SDK: `UiStyle` gains `corner` and
   `strong` (with `UiStyle::faint` for gray text), `ui::fill_round`,
   `ui::stroke_round`, and the canvas rounded rectangles.
+- Small capitals (CSS `font-variant: small-caps`, `font-variant-caps`)
+  in EPUB, HTML and the other converted formats: lower case letters as
+  smaller capitals, the text itself unchanged (search, selection and
+  notes as before). Books are prepared anew once. Document model:
+  `TextStyle::SMALL_CAPS`; embedded font families at most 31 (was 63).
 - Snapshot tests: screens of the X4 and the Boox are drawn headless and
   compared with reference pictures, so layout faults fail a test.
 - The folder chooser says when it is still opening a folder (slow SD
