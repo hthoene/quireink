@@ -1,6 +1,7 @@
 //! Editing a list of widgets, as a list that buttons work as well as
-//! taps: the widgets (choosing one offers to move it up or down, its own
-//! settings where it has some, or to remove it), then *Add a widget*.
+//! taps: the widgets (dragged by their grip to move them; choosing one
+//! offers to move it up or down, its own settings where it has some, or
+//! to remove it), then *Add a widget*.
 //! Every change is kept at once.
 //!
 //! It edits a setting that is a list of widgets (parameter `id`), e.g.
@@ -15,11 +16,11 @@ use alloc::vec::Vec;
 use quireink_sdk::builtin::{actions, events, params, slots};
 use quireink_sdk::status::item_ids;
 use quireink_sdk::ui::choice;
-use quireink_sdk::ui::{self, ListChange, ListView, UiStyle};
+use quireink_sdk::ui::{self, ListChange, ListView, Reorder, ReorderStep, UiStyle};
 use quireink_sdk::widgets;
 use quireink_sdk::{
-    Canvas, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Params, Rect, RefreshMode, Screen,
-    SettingValue,
+    Canvas, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Params, PointerEvent, Rect,
+    RefreshMode, Screen, SettingValue,
 };
 
 use crate::{CHOICE, LIST_ADD_SCREEN};
@@ -90,6 +91,7 @@ pub(crate) struct EditScreen {
     style: UiStyle,
     header: ui::Header,
     list: ListView,
+    reorder: Reorder,
     target: Target,
 }
 
@@ -102,6 +104,7 @@ impl EditScreen {
         let area = Rect::new(0, top, display.width, display.height.saturating_sub(top));
         Self {
             list: ListView::new(area, style.row).focus_on_keys(env),
+            reorder: Reorder::default(),
             style,
             header,
             target: target_of(params),
@@ -235,14 +238,42 @@ impl Screen for EditScreen {
                     Row::Widget(at) => {
                         let id = list.get(at).map_or("", String::as_str);
                         let name = env.widgets.title(id).map_or(id, |t| env.i18n.tr(t));
-                        (None, name.to_string(), "›")
+                        (None, name.to_string(), "")
                     }
                     Row::Add => (Some("plus"), env.i18n.tr("home.edit.add").to_string(), "›"),
+                };
+                let rect = if matches!(rows[index], Row::Widget(_)) {
+                    Reorder::draw_grip(canvas, env, &style, rect, focused);
+                    Reorder::content(rect)
+                } else {
+                    rect
                 };
                 let rect = ui::draw_row_icon(canvas, env, &style, rect, room, icon, ink);
                 ui::draw_value_row(canvas, env, &style, rect, focused, &title, value);
             },
         );
+        self.reorder.draw(canvas, &style, &self.list);
+    }
+
+    /// Widgets are moved by dragging their grip.
+    fn on_pointer(&mut self, event: &PointerEvent, cx: &mut Cx<'_, '_>) -> Handled {
+        let env = *cx.env();
+        let mut list = self.target.widgets(&env);
+        let Some(step) = self.reorder.on_pointer(event, &self.list, list.len()) else {
+            return Handled::No;
+        };
+        if let ReorderStep::Dropped { from, to } = step
+            && from != to
+        {
+            ui::reorder::moved(&mut list, from, to);
+            self.list.focus = to;
+            let commands = self.target.store(list);
+            Self::run(cx, commands);
+        }
+        if step != ReorderStep::Same {
+            self.redraw(cx);
+        }
+        Handled::Yes
     }
 
     fn on_action(&mut self, action: &Id, cx: &mut Cx<'_, '_>) -> Handled {

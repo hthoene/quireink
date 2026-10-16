@@ -2023,18 +2023,9 @@ impl Kernel {
             }
             return;
         }
-        if event.phase == PointerPhase::Down
-            && !self.captured.contains(&event.id)
-            && let Some(side) = self.edge_at(event.point)
-        {
-            self.edge_touch = Some(EdgeTouch {
-                id: event.id,
-                side,
-                start: event.point,
-                tool: event.tool,
-            });
-            return;
-        }
+        // A screen may take a finger before the edges do: what it takes
+        // is meant for it (a grip that moves a row, a handle), as apps on
+        // phones keep such places from the system's gestures.
         let captured = self.captured.contains(&event.id);
         if captured || event.phase == PointerPhase::Down {
             let handled = self.with_top(|screen, cx| screen.on_pointer(&event, cx));
@@ -2048,6 +2039,17 @@ impl Kernel {
                 self.captured.push(event.id);
                 return;
             }
+        }
+        if event.phase == PointerPhase::Down
+            && let Some(side) = self.edge_at(event.point)
+        {
+            self.edge_touch = Some(EdgeTouch {
+                id: event.id,
+                side,
+                start: event.point,
+                tool: event.tool,
+            });
+            return;
         }
         let thresholds = self.thresholds();
         if let Some(recognized) = self.recognizer.pointer(&event, self.now, &thresholds) {
