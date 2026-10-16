@@ -13,6 +13,12 @@
 //! that edit widgets open them (slot
 //! [`SETTINGS`](crate::builtin::slots::SETTINGS) with parameter
 //! [`ID`](crate::builtin::params::ID)).
+//!
+//! The kernel brings two widgets for room between the others, which a list
+//! may hold more than once ([`repeatable`]): [`SPACE`], a gap of a set
+//! height, and [`FILL`], the room the others leave. Screens that place
+//! widgets one below the other give each fill its share of that room
+//! ([`fill_height`]); elsewhere it is not there.
 
 use alloc::borrow::Cow;
 use alloc::boxed::Box;
@@ -130,6 +136,30 @@ impl Widgets {
     }
 }
 
+/// A gap of the height [`SPACE_SIZE`] says.
+pub const SPACE: &str = "core.space";
+/// The room the other widgets leave, shared among the fills: its own
+/// height is 0, screens that place widgets give it the rest.
+pub const FILL: &str = "core.fill";
+/// The height of [`SPACE`]: one of [`SPACE_SIZES`].
+pub const SPACE_SIZE: &str = "core.space.size";
+/// The values of [`SPACE_SIZE`]: small, medium, large.
+pub const SPACE_SIZES: [&str; 3] = ["core.space.small", "core.space.medium", "core.space.large"];
+
+/// Whether a list of widgets may hold `id` more than once.
+pub fn repeatable(id: &str) -> bool {
+    id == SPACE || id == FILL
+}
+
+/// The height of each of `fills` fills where widgets `used` pixels high
+/// are placed in `room` pixels.
+pub fn fill_height(room: u32, used: u32, fills: usize) -> u16 {
+    if fills == 0 {
+        return 0;
+    }
+    (room.saturating_sub(used) / fills as u32).min(u32::from(u16::MAX)) as u16
+}
+
 /// The values of a widget's alignment setting ([`align_setting`]).
 pub const ALIGNMENTS: [&str; 3] = ["core.align.left", "core.align.center", "core.align.right"];
 
@@ -215,6 +245,14 @@ mod tests {
             assert_eq!(Align::of(align.value()), align);
         }
         assert_eq!(Align::of("sideways"), Align::Left);
+    }
+
+    #[test]
+    fn fills_share_the_room_left() {
+        assert_eq!(fill_height(1000, 400, 2), 300);
+        assert_eq!(fill_height(1000, 1200, 1), 0);
+        assert_eq!(fill_height(1000, 400, 0), 0);
+        assert!(repeatable(FILL) && repeatable(SPACE) && !repeatable("home.clock"));
     }
 
     #[test]

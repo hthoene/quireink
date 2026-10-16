@@ -11,6 +11,7 @@ use quireink_sdk::builtin::{
     settings_sections, slots, status_items,
 };
 use quireink_sdk::time::{self, AUTO, CLOCK_12H, CLOCK_24H, TIME_ZONES};
+use quireink_sdk::widgets::{self, WidgetSpec};
 use quireink_sdk::{
     ActionHandler, ActionSpec, Canvas, Color, Command, Cx, Env, Handled, Id, Manifest, MenuEntry,
     Params, Plugin, Priority, RegisterError, Registrar, SDK_VERSION, Screen, ScreenSpec,
@@ -380,6 +381,7 @@ impl Plugin for CorePlugin {
             .description("core.setting.rotation.help"),
         )?;
         r.set_menu_need(settings::ROTATION, quireink_sdk::MenuNeed::Rotation)?;
+        register_spaces(r)?;
         // Each colour, then its own colour code.
         for (id, title, values, own, own_title, own_default) in [
             (
@@ -608,6 +610,54 @@ fn screenshot_path(env: &Env<'_>) -> alloc::string::String {
         n += 1;
     }
     path
+}
+
+/// The widgets for room between the others: a gap of a set height, and
+/// the room left (see `quireink_sdk::widgets`).
+fn register_spaces(r: &mut dyn Registrar) -> Result<(), RegisterError> {
+    let space = Id::new_static(widgets::SPACE);
+    r.add_setting_group(widgets::settings_group(&space, "core.widget.space"))?;
+    r.add_setting(
+        SettingSpec::new(
+            Id::new_static(widgets::SPACE_SIZE),
+            "core.setting.space-size",
+            SettingKind::Choice(
+                widgets::SPACE_SIZES
+                    .iter()
+                    .map(|s| Cow::Borrowed(*s))
+                    .collect(),
+            ),
+            SettingValue::Text(Cow::Borrowed(widgets::SPACE_SIZES[1])),
+        )
+        .group(space.clone())
+        .description("core.setting.space-size.help"),
+    )?;
+    r.add_widget(WidgetSpec {
+        id: space,
+        title: Cow::Borrowed("core.widget.space"),
+        height: Box::new(|env, _| {
+            let size = env.settings.text(widgets::SPACE_SIZE);
+            let mm = match widgets::SPACE_SIZES.iter().position(|s| *s == size) {
+                Some(0) => 4,
+                Some(2) => 20,
+                _ => 10,
+            };
+            env.metrics.mm(mm).min(u32::from(u16::MAX)) as u16
+        }),
+        draw: Box::new(|_, _, _| {}),
+        signature: None,
+        targets: None,
+    })?;
+    r.add_widget(WidgetSpec {
+        id: Id::new_static(widgets::FILL),
+        title: Cow::Borrowed("core.widget.fill"),
+        // Screens that place widgets give it the room left.
+        height: Box::new(|_, _| 0),
+        draw: Box::new(|_, _, _| {}),
+        signature: None,
+        targets: None,
+    })?;
+    Ok(())
 }
 
 #[cfg(test)]
