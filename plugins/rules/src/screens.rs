@@ -3,8 +3,11 @@
 //! Adding a rule asks, one after the other: when (a choice; for a time of
 //! day the time on the keyboard and the days, for a repeat the minutes,
 //! for the battery the percentage, for a switch which one), what (a
-//! choice: run an action, turn a switch on or off), then which action or
-//! switch ([`PickScreen`]).
+//! choice: run an action, turn a switch on or off, set a number, show a
+//! message), then which action, switch or number ([`PickScreen`]) and
+//! its value, or the message. A rule's options add a condition (only
+//! if …): between two times, while reading or not, on battery or while
+//! charging, while a switch is on or off.
 
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
@@ -14,12 +17,12 @@ use quireink_sdk::builtin::{actions, params, slots};
 use quireink_sdk::ui::choice;
 use quireink_sdk::ui::{self, ListChange, ListView, UiStyle};
 use quireink_sdk::{
-    Canvas, Color, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Params, Rect, RefreshMode,
-    Screen, SettingKind,
+    Arg, Canvas, Color, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Params, Rect,
+    RefreshMode, Screen, SettingKind,
 };
 
-use crate::rule::{self, EVERY_DAY, Effect, Rule, Trigger, WEEKDAYS, WEEKENDS};
-use crate::{CHOICE, PICK_SCREEN, effect_text, trigger_text};
+use crate::rule::{self, Condition, EVERY_DAY, Effect, Rule, Trigger, WEEKDAYS, WEEKENDS};
+use crate::{CHOICE, PICK_SCREEN, effect_text, trigger_text, when_text};
 
 /// Replies: a trigger, a time, an effect, an action or switch picked, a
 /// rule's option.
@@ -52,11 +55,33 @@ const DAYS: [&str; 10] = [
     "every", "weekdays", "weekends", "1", "2", "3", "4", "5", "6", "0",
 ];
 const EFFECT_CHOSEN: Id = Id::new_static("rules.effect-chosen");
+/// What a rule may do, in this order.
+const EFFECTS: [&str; 5] = ["action", "switch-on", "switch-off", "number", "message"];
 const PICKED: Id = Id::new_static("rules.picked");
+const NUMBER_ENTERED: Id = Id::new_static("rules.number-entered");
+const MESSAGE_ENTERED: Id = Id::new_static("rules.message-entered");
 const OPTION_CHOSEN: Id = Id::new_static("rules.option-chosen");
-/// Picking an action, or a switch.
+/// A rule's condition was chosen; for times between, the first and the
+/// second time entered; for a switch, which one.
+const CONDITION_CHOSEN: Id = Id::new_static("rules.condition-chosen");
+const FROM_ENTERED: Id = Id::new_static("rules.from-entered");
+const TO_ENTERED: Id = Id::new_static("rules.to-entered");
+const CONDITION_PICKED: Id = Id::new_static("rules.condition-picked");
+/// The conditions offered, in this order.
+const CONDITIONS: [&str; 8] = [
+    "always",
+    "between",
+    "reading",
+    "not-reading",
+    "battery",
+    "charging",
+    "switch-on",
+    "switch-off",
+];
+/// Picking an action, a switch or a number.
 const ACTION: &str = "action";
 const SWITCH: &str = "switch";
+const NUMBER: &str = "number";
 
 /// A rule being added: when, then what kind of effect.
 #[derive(Debug, Clone, Default)]
@@ -66,8 +91,14 @@ struct Draft {
     minute: Option<u16>,
     /// The switch to watch is turned on (`true`) or off.
     watch_on: bool,
-    /// `action`, `switch-on` or `switch-off`.
+    /// `action`, `switch-on`, `switch-off` or `number`.
     effect: Option<&'static str>,
+    /// The number picked, until its value is entered.
+    number: Option<Id>,
+    /// The rule whose condition is being chosen.
+    editing: Option<usize>,
+    /// The first time of a condition between two, until the second.
+    from: Option<u16>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -169,8 +200,44 @@ impl RulesScreen {
             &title,
             &i.to_string(),
             "rules.option.",
-            &["remove"],
+            &["condition", "remove"],
         ));
+    }
+
+    /// Adds the rule drafted, doing `effect`.
+    fn finish(&mut self, effect: Effect, cx: &mut Cx<'_, '_>) {
+        let env = *cx.env();
+        let Some(trigger) = self.draft.trigger.clone() else {
+            return;
+        };
+        self.draft = Draft::default();
+        let mut out = Vec::new();
+        crate::add(
+            &env,
+            Rule {
+                trigger,
+                effect,
+                on: true,
+                condition: Condition::Always,
+            },
+            &mut out,
+        );
+        for command in out {
+            cx.command(command);
+        }
+        self.rules = rule::load(env.storage);
+        self.list.focus = self.rules.len().saturating_sub(1);
+        self.redraw(cx);
+    }
+
+    /// Gives the rule being edited `condition`.
+    fn set_condition(&mut self, condition: Condition, cx: &mut Cx<'_, '_>) {
+        let Some(i) = self.draft.editing.take().filter(|&i| i < self.rules.len()) else {
+            return;
+        };
+        self.rules[i].condition = condition;
+        self.save(cx);
+        self.redraw(cx);
     }
 
     /// Asks what the new rule does.
@@ -182,7 +249,7 @@ impl RulesScreen {
             env.i18n.tr("rules.what"),
             "",
             "rules.effect.",
-            &["action", "switch-on", "switch-off"],
+            &EFFECTS,
         ));
     }
 
@@ -214,7 +281,7 @@ impl Screen for RulesScreen {
             |canvas, index, rect, focused| match rows[index] {
                 Row::Rule(i) => {
                     let rule = &rules[i];
-                    let title = trigger_text(env, &rule.trigger);
+                    let title = when_text(env, rule);
                     let note = effect_text(env, &rule.effect);
                     ui::draw_switch_row(canvas, env, &style, rect, focused, &title, &note, rule.on);
                 }
@@ -410,6 +477,8 @@ impl Screen for RulesScreen {
                 "action" => ("action", ACTION),
                 "switch-on" => ("switch-on", SWITCH),
                 "switch-off" => ("switch-off", SWITCH),
+                "number" => ("number", NUMBER),
+                "message" => return ask(cx, "rules.message-title", "", MESSAGE_ENTERED),
                 _ => return,
             };
             self.draft.effect = Some(effect);
@@ -420,8 +489,7 @@ impl Screen for RulesScreen {
                     .with(params::REPLY, PICKED.as_str()),
             ));
         } else if *event == PICKED {
-            let (Some(trigger), Some(kind), Some(id)) = (
-                self.draft.trigger.clone(),
+            let (Some(kind), Some(id)) = (
                 self.draft.effect,
                 params.get(params::ID).and_then(|id| Id::parse(id).ok()),
             ) else {
@@ -430,25 +498,112 @@ impl Screen for RulesScreen {
             let effect = match kind {
                 "action" => Effect::Action(id),
                 "switch-on" => Effect::Switch(id, true),
-                _ => Effect::Switch(id, false),
+                "switch-off" => Effect::Switch(id, false),
+                _ => {
+                    // A number: which value?
+                    let Some((min, max)) = range(&env, &id) else {
+                        return;
+                    };
+                    let title = env.i18n.format(
+                        "rules.number-title",
+                        &[("min", Arg::Int(min)), ("max", Arg::Int(max))],
+                    );
+                    let now = env.settings.int(id.as_str()).to_string();
+                    self.draft.number = Some(id);
+                    cx.command(Command::OpenSlot(
+                        slots::KEYBOARD,
+                        Params::new()
+                            .with(params::TITLE, title)
+                            .with(params::TEXT, now)
+                            .with(params::REPLY, NUMBER_ENTERED.as_str()),
+                    ));
+                    return;
+                }
             };
-            self.draft = Draft::default();
-            let mut out = Vec::new();
-            crate::add(
-                &env,
-                Rule {
-                    trigger,
-                    effect,
-                    on: true,
-                },
-                &mut out,
-            );
-            for command in out {
-                cx.command(command);
+            self.finish(effect, cx);
+        } else if *event == NUMBER_ENTERED {
+            let Some(id) = self.draft.number.clone() else {
+                return;
+            };
+            let value = params
+                .get(params::TEXT)
+                .and_then(|t| t.trim().trim_end_matches('%').trim().parse::<i64>().ok());
+            match (value, range(&env, &id)) {
+                (Some(v), Some((min, max))) if (min..=max).contains(&v) => {
+                    self.finish(Effect::Number(id, v), cx);
+                }
+                _ => {
+                    let text = env.i18n.tr("rules.bad-number").to_string();
+                    cx.command(Command::Notify(text));
+                }
             }
-            self.rules = rule::load(env.storage);
-            self.list.focus = self.rules.len().saturating_sub(1);
-            self.redraw(cx);
+        } else if *event == MESSAGE_ENTERED {
+            let text = params.get(params::TEXT).unwrap_or_default().trim();
+            if !text.is_empty() {
+                self.finish(Effect::Message(text.to_string()), cx);
+            }
+        } else if *event == OPTION_CHOSEN && option == "condition" {
+            let at = params
+                .get(params::PATH)
+                .and_then(|p| p.parse::<usize>().ok());
+            if let Some(i) = at.filter(|&i| i < self.rules.len()) {
+                self.draft = Draft {
+                    editing: Some(i),
+                    ..Draft::default()
+                };
+                cx.command(choice::open(
+                    CHOICE,
+                    CONDITION_CHOSEN,
+                    env.i18n.tr("rules.only-if"),
+                    "",
+                    "rules.condition.",
+                    &CONDITIONS,
+                ));
+            }
+        } else if *event == CONDITION_CHOSEN {
+            let condition = match option {
+                "always" => Condition::Always,
+                "reading" => Condition::Reading,
+                "not-reading" => Condition::NotReading,
+                "battery" => Condition::OnBattery,
+                "charging" => Condition::Charging,
+                "between" => return ask(cx, "rules.from-title", "22:00", FROM_ENTERED),
+                "switch-on" | "switch-off" => {
+                    self.draft.watch_on = option == "switch-on";
+                    cx.command(Command::OpenScreen(
+                        PICK_SCREEN,
+                        Params::new()
+                            .with(params::MODE, SWITCH)
+                            .with(params::REPLY, CONDITION_PICKED.as_str()),
+                    ));
+                    return;
+                }
+                _ => return,
+            };
+            self.set_condition(condition, cx);
+        } else if *event == FROM_ENTERED || *event == TO_ENTERED {
+            let Some(minute) = rule::parse_time(params.get(params::TEXT).unwrap_or_default())
+            else {
+                cx.command(Command::Notify(env.i18n.tr("rules.bad-time").to_string()));
+                return;
+            };
+            if *event == FROM_ENTERED {
+                self.draft.from = Some(minute);
+                return ask(cx, "rules.to-title", "06:00", TO_ENTERED);
+            }
+            if let Some(from) = self.draft.from.take() {
+                self.set_condition(Condition::Between { from, to: minute }, cx);
+            }
+        } else if *event == CONDITION_PICKED {
+            let Some(id) = params.get(params::ID).and_then(|id| Id::parse(id).ok()) else {
+                return;
+            };
+            let condition = if self.draft.watch_on {
+                Condition::SwitchOn(id)
+            } else {
+                Condition::SwitchOff(id)
+            };
+            self.set_condition(condition, cx);
         } else if *event == OPTION_CHOSEN && option == "remove" {
             let at = params
                 .get(params::PATH)
@@ -463,8 +618,16 @@ impl Screen for RulesScreen {
     }
 }
 
-/// Picks an action (parameter `mode` = `action`) or a switch (`switch`):
-/// every one by its name, in alphabetical order. The choice comes back
+/// The range of number setting `id`.
+fn range(env: &Env<'_>, id: &Id) -> Option<(i64, i64)> {
+    env.settings.specs().find_map(|s| match s.kind {
+        SettingKind::Int { min, max } if s.id == *id => Some((min, max)),
+        _ => None,
+    })
+}
+
+/// Picks an action (parameter `mode` = `action`), a switch (`switch`) or a
+/// number (`number`): every one by its name, in alphabetical order. The choice comes back
 /// as the event named by `reply`, with `id`.
 pub(crate) struct PickScreen {
     style: UiStyle,
@@ -483,12 +646,16 @@ impl PickScreen {
         let display = env.device.display;
         let top = header.area.height + style.gap as u16;
         let area = Rect::new(0, top, display.width, display.height.saturating_sub(top));
-        let switches = params.get(params::MODE) == Some(SWITCH);
-        let mut entries: Vec<(Id, String)> = if switches {
+        let mode = params.get(params::MODE).unwrap_or(ACTION);
+        let mut entries: Vec<(Id, String)> = if mode == SWITCH || mode == NUMBER {
             env.settings
                 .specs()
                 // "Only this book" means nothing outside a book.
-                .filter(|s| matches!(s.kind, SettingKind::Bool) && s.id != SCOPE_ONLY)
+                .filter(|s| match s.kind {
+                    SettingKind::Bool => mode == SWITCH && s.id != SCOPE_ONLY,
+                    SettingKind::Int { .. } => mode == NUMBER,
+                    _ => false,
+                })
                 .map(|s| (s.id.clone(), env.i18n.tr(&s.title).to_string()))
                 .collect()
         } else {
@@ -501,10 +668,10 @@ impl PickScreen {
         entries.dedup_by(|a, b| a.0 == b.0);
         let title = env
             .i18n
-            .tr(if switches {
-                "rules.pick.switch"
-            } else {
-                "rules.pick.action"
+            .tr(match mode {
+                SWITCH => "rules.pick.switch",
+                NUMBER => "rules.pick.number",
+                _ => "rules.pick.action",
             })
             .to_string();
         Self {

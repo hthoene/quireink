@@ -613,7 +613,7 @@ architecture (G1 to G12 below).
 | G9 | Plugins could not be managed at runtime | **Plugin management service** (list, enable, disable, install, update) and config write-back. | Config write-back ✅ M2 / list, enable, disable, restart ✅ M5 / install, update M5 |
 | G10 | Fixed library schema | Library service with **plugin-defined metadata fields** and metadata providers; the library service itself is replaceable. | M2 to M5 |
 | G11 | Widgets were pixels only | **Widget semantics** (role, label, state) for accessibility, automation and tests. ✅ told by the drawing helpers (`semantics`) | M2 |
-| G12 | Only the kernel could define extension points | **Plugin-defined extension points**: a plugin publishes a service through which others contribute; a second init phase (`activate`) runs after all plugins registered. | M5 |
+| G12 | Only the kernel could define extension points | **Plugin-defined extension points**: a plugin publishes a service through which others contribute; a second init phase (`activate`) runs after all plugins registered. ✅ `services` (`add_service`, `contribute`, `Env::services`); no second phase needed, as services and contributions are read at run time | M5 |
 
 **Rule derived from this check:** before a feature is added to a first-party
 plugin, ask whether a community plugin could build the same feature with the
@@ -790,7 +790,7 @@ makes it replaceable. ✅ done, 🔶 partly, ⬜ open.
 | C2 | Formats, fonts, hyphenation, translations, key maps, menus | Contributions, data plugins | ✅ |
 | C3 | Status lines: own text size; whole lines from plugins; a tap switches between the chosen ones, above and below the text | `add_status_line`, `add_status_item` | ✅ |
 | C4 | Short messages any plugin can show the same way ("Sync done"), how long they show | `Command::Notify`, slot `core.notice` | ✅ |
-| C5 | Rules: "every day at 22:00: night mode on", "when QuireInk starts: sync the catalogs"; when: start, time of day, book opened, waking up; then: any action, any switch on or off | `rules` plugin, `Command::Schedule` (timers for plugins) | ✅ (more triggers, e.g. Wi-Fi, once the shells report them) |
+| C5 | Rules: "every day at 22:00: night mode on", "when QuireInk starts: sync the catalogs"; when: start, time of day on chosen days, every so many minutes, book opened, closed or finished, waking up, going to sleep, battery low, charging, switches; only if: between two times, reading or not, on battery or charging, a switch on or off; then: any action, any switch on or off, a number, a message | `rules` plugin, `Command::Schedule` (timers for plugins) | ✅ (more triggers, e.g. Wi-Fi, once the shells report them; several effects in one rule are several rules with the same moment) |
 | C6 | Reading profiles: named sets of settings ("Night", "Commute", "Large print"), switched with a tap, a button or a rule | `profiles` plugin (reading, display and status line settings; action "Next profile") | ✅ |
 | C7 | Themes: menu text size, margins, row height, lines, dark or light headers; icon packs (icons are a font role) | Settings group "Appearance"; themes are data plugins with setting defaults (sample `samples/plugins/airy-theme`) | ✅ (also corners (`core.ui-corners`) and contrast (`core.ui-contrast`: gray hints drawn black) as tokens of `UiStyle`; icon packs are fonts for the icon role, left to community plugins) |
 | C8 | Menus as tiles with their icons besides lists | Setting `menu.style` (Appearance); other looks by replacing the `core.menu` slot | ✅ |

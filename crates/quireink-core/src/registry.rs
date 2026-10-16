@@ -120,6 +120,8 @@ pub(crate) struct Staging {
     pub(crate) input_filters: Vec<quireink_sdk::filters::InputFilterSpec>,
     pub(crate) refresh_filters: Vec<quireink_sdk::filters::RefreshFilterSpec>,
     pub(crate) stylesheets: Vec<Cow<'static, str>>,
+    pub(crate) services: Vec<(Id, alloc::boxed::Box<dyn core::any::Any>)>,
+    pub(crate) contributions: Vec<(Id, Cow<'static, str>)>,
 }
 
 impl Staging {
@@ -404,6 +406,26 @@ impl Registrar for PluginRegistrar<'_> {
 
     fn add_stylesheet(&mut self, css: Cow<'static, str>) -> Result<(), RegisterError> {
         self.staging.stylesheets.push(css);
+        Ok(())
+    }
+
+    fn add_service(
+        &mut self,
+        id: Id,
+        service: alloc::boxed::Box<dyn core::any::Any>,
+    ) -> Result<(), RegisterError> {
+        self.check_namespace(&id)?;
+        Self::check_unique(self.staging.services.iter().map(|(s, _)| s), &id)?;
+        self.staging.services.push((id, service));
+        Ok(())
+    }
+
+    fn contribute(
+        &mut self,
+        point: Id,
+        contribution: Cow<'static, str>,
+    ) -> Result<(), RegisterError> {
+        self.staging.contributions.push((point, contribution));
         Ok(())
     }
 

@@ -42,6 +42,8 @@ pub struct Env<'a> {
     pub stylesheets: &'a [alloc::borrow::Cow<'static, str>],
     /// Widgets for screens that show them, from every plugin.
     pub widgets: &'a crate::widgets::Widgets,
+    /// What plugins offer each other (see [`services`](crate::services)).
+    pub services: &'a crate::services::Services,
     /// What buttons, taps and swipes do (see [`keys`](crate::keys)).
     pub keys: &'a dyn crate::keys::KeyBindings,
     /// Whether the device can make HTTP requests

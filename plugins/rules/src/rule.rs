@@ -1,8 +1,10 @@
-//! Rules: when something happens, do something. Kept in the plugin's
-//! folder, one rule a line: `trigger<TAB>effect<TAB>target<TAB>on|off`.
+//! Rules: when something happens, do something, if a condition holds.
+//! Kept in the plugin's folder, one rule a line:
+//! `trigger<TAB>effect<TAB>target<TAB>on|off<TAB>condition` (no condition:
+//! always).
 
 use alloc::format;
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use quireink_sdk::{Env, Id, Storage};
@@ -52,6 +54,32 @@ pub(crate) enum Effect {
     Action(Id),
     /// Turns a switch (an on/off setting) on or off.
     Switch(Id, bool),
+    /// Sets a number (a setting with a range), e.g. the light to 20.
+    Number(Id, i64),
+    /// Shows a message.
+    Message(String),
+}
+
+/// When a rule may apply at all, besides its trigger.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) enum Condition {
+    #[default]
+    Always,
+    /// Between two minutes of the day (over midnight when `from` is
+    /// later than `to`).
+    Between {
+        from: u16,
+        to: u16,
+    },
+    /// While a book is open, or while none is.
+    Reading,
+    NotReading,
+    /// While the device runs on its battery, or while it charges.
+    OnBattery,
+    Charging,
+    /// While a switch is on, or off.
+    SwitchOn(Id),
+    SwitchOff(Id),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,6 +88,58 @@ pub(crate) struct Rule {
     pub effect: Effect,
     /// Rules can be paused without being removed.
     pub on: bool,
+    pub condition: Condition,
+}
+
+impl Condition {
+    /// As written in the file: `between 22:00 06:00`, `reading`,
+    /// `not-reading`, `battery`, `charging`, `switch-on <id>`,
+    /// `switch-off <id>`; empty for always.
+    fn text(&self) -> String {
+        match self {
+            Condition::Always => String::new(),
+            Condition::Between { from, to } => format!("between {} {}", clock(*from), clock(*to)),
+            Condition::Reading => String::from("reading"),
+            Condition::NotReading => String::from("not-reading"),
+            Condition::OnBattery => String::from("battery"),
+            Condition::Charging => String::from("charging"),
+            Condition::SwitchOn(id) => format!("switch-on {id}"),
+            Condition::SwitchOff(id) => format!("switch-off {id}"),
+        }
+    }
+
+    fn parse(text: &str) -> Option<Condition> {
+        let text = text.trim();
+        let (word, rest) = text.split_once(' ').unwrap_or((text, ""));
+        let rest = rest.trim();
+        Some(match word {
+            "" | "always" => Condition::Always,
+            "between" => {
+                let (from, to) = rest.split_once(' ')?;
+                Condition::Between {
+                    from: parse_time(from)?,
+                    to: parse_time(to)?,
+                }
+            }
+            "reading" => Condition::Reading,
+            "not-reading" => Condition::NotReading,
+            "battery" => Condition::OnBattery,
+            "charging" => Condition::Charging,
+            "switch-on" => Condition::SwitchOn(Id::parse(rest).ok()?),
+            "switch-off" => Condition::SwitchOff(Id::parse(rest).ok()?),
+            _ => return None,
+        })
+    }
+}
+
+/// Whether `minute` of the day lies between `from` and `to` (`to` not
+/// included; over midnight when `from` is later).
+pub(crate) fn between(minute: u16, from: u16, to: u16) -> bool {
+    if from <= to {
+        (from..to).contains(&minute)
+    } else {
+        minute >= from || minute < to
+    }
 }
 
 impl Trigger {
@@ -151,18 +231,26 @@ pub(crate) fn load(storage: &dyn Storage) -> Vec<Rule> {
             let mut fields = line.split('\t');
             let trigger = Trigger::parse(fields.next()?)?;
             let kind = fields.next()?;
-            let target = Id::parse(fields.next()?.trim()).ok()?;
+            let target = fields.next()?;
+            let id = || Id::parse(target.trim()).ok();
             let effect = match kind {
-                "action" => Effect::Action(target),
-                "switch-on" => Effect::Switch(target, true),
-                "switch-off" => Effect::Switch(target, false),
+                "action" => Effect::Action(id()?),
+                "switch-on" => Effect::Switch(id()?, true),
+                "switch-off" => Effect::Switch(id()?, false),
+                "set" => {
+                    let (id, value) = target.split_once('=')?;
+                    Effect::Number(Id::parse(id.trim()).ok()?, value.trim().parse().ok()?)
+                }
+                "message" => Effect::Message(target.to_string()),
                 _ => return None,
             };
             let on = fields.next().is_none_or(|f| f.trim() != "off");
+            let condition = Condition::parse(fields.next().unwrap_or_default())?;
             Some(Rule {
                 trigger,
                 effect,
                 on,
+                condition,
             })
         })
         .collect()
@@ -172,15 +260,24 @@ pub(crate) fn save(storage: &dyn Storage, rules: &[Rule]) {
     let mut text = String::new();
     for rule in rules {
         let (kind, target) = match &rule.effect {
-            Effect::Action(id) => ("action", id),
-            Effect::Switch(id, true) => ("switch-on", id),
-            Effect::Switch(id, false) => ("switch-off", id),
+            Effect::Action(id) => ("action", id.to_string()),
+            Effect::Switch(id, true) => ("switch-on", id.to_string()),
+            Effect::Switch(id, false) => ("switch-off", id.to_string()),
+            Effect::Number(id, value) => ("set", format!("{id}={value}")),
+            // One line, no fields within it.
+            Effect::Message(text) => ("message", text.replace(['\t', '\n', '\r'], " ")),
         };
-        text.push_str(&format!(
-            "{}\t{kind}\t{target}\t{}\n",
+        let mut line = format!(
+            "{}\t{kind}\t{target}\t{}",
             rule.trigger.text(),
             if rule.on { "on" } else { "off" }
-        ));
+        );
+        if rule.condition != Condition::Always {
+            line.push('\t');
+            line.push_str(&rule.condition.text());
+        }
+        text.push_str(&line);
+        text.push('\n');
     }
     let _ = storage.write(&path(), text.as_bytes());
 }
@@ -228,12 +325,25 @@ mod tests {
         .enumerate()
         .map(|(i, trigger)| Rule {
             trigger,
-            effect: if i % 2 == 0 {
-                Effect::Switch(night.clone(), true)
-            } else {
-                Effect::Action(Id::new_static("opds.sync"))
+            effect: match i % 4 {
+                0 => Effect::Switch(night.clone(), true),
+                1 => Effect::Action(Id::new_static("opds.sync")),
+                2 => Effect::Number(Id::new_static("core.frontlight"), -3),
+                _ => Effect::Message(String::from("Time to sleep")),
             },
             on: i % 3 != 0,
+            condition: match i % 7 {
+                0 => Condition::Always,
+                1 => Condition::Between {
+                    from: 22 * 60,
+                    to: 6 * 60,
+                },
+                2 => Condition::Reading,
+                3 => Condition::NotReading,
+                4 => Condition::OnBattery,
+                5 => Condition::Charging,
+                _ => Condition::SwitchOff(night.clone()),
+            },
         })
         .collect();
         save(&storage, &rules);
@@ -249,6 +359,32 @@ mod tests {
         assert_eq!(Trigger::parse("battery-below 0"), None);
         assert_eq!(Trigger::parse("every 0"), None);
         assert_eq!(Trigger::parse("time 22:00 0"), None);
+        // Written before conditions and messages: always; tabs in a
+        // message do not split the line.
+        save(
+            &storage,
+            &[Rule {
+                trigger: Trigger::Start,
+                effect: Effect::Message(String::from("a\tb")),
+                on: true,
+                condition: Condition::SwitchOn(night.clone()),
+            }],
+        );
+        assert_eq!(
+            load(&storage)[0].effect,
+            Effect::Message(String::from("a b"))
+        );
+        assert_eq!(Condition::parse(""), Some(Condition::Always));
+        assert_eq!(Condition::parse("between 22:00"), None);
+    }
+
+    #[test]
+    fn times_between() {
+        assert!(between(23 * 60, 22 * 60, 6 * 60));
+        assert!(between(60, 22 * 60, 6 * 60));
+        assert!(!between(12 * 60, 22 * 60, 6 * 60));
+        assert!(between(9 * 60, 8 * 60, 17 * 60));
+        assert!(!between(17 * 60, 8 * 60, 17 * 60));
     }
 
     #[test]

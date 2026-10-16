@@ -179,6 +179,22 @@ pub trait Registrar {
     /// [`status`](crate::status)).
     fn add_status_line(&mut self, line: StatusLineSpec) -> Result<(), RegisterError>;
 
+    /// Publishes a service for other plugins as `id` (see
+    /// [`services`](crate::services)).
+    fn add_service(
+        &mut self,
+        id: Id,
+        service: alloc::boxed::Box<dyn core::any::Any>,
+    ) -> Result<(), RegisterError>;
+
+    /// Adds `contribution` to `point`, a point another plugin defined
+    /// (see [`services`](crate::services)).
+    fn contribute(
+        &mut self,
+        point: Id,
+        contribution: Cow<'static, str>,
+    ) -> Result<(), RegisterError>;
+
     /// Adds a translation catalog (see `quireink-i18n`).
     fn add_translations(&mut self, source: Cow<'static, str>) -> Result<(), RegisterError>;
 
