@@ -47,6 +47,11 @@ pub mod actions {
     /// woken (see [`Env::sleep`](crate::Env)). Where the system sleeps on
     /// its own (Android), nothing sends it.
     pub const SLEEP: Id = Id::new_static("core.sleep");
+    /// Opens the quick panel from the top of the screen: the menu
+    /// [`QUICK`](super::menus::QUICK) as a panel of controls (night mode,
+    /// light, turning the screen, …). A swipe down from the top edge
+    /// opens it.
+    pub const QUICK_PANEL: Id = Id::new_static("core.quick-panel");
 }
 
 /// Standard slots.
@@ -149,6 +154,9 @@ pub mod menus {
     /// Extra pages on the main settings page, below the setting groups
     /// (e.g. the plugin manager). Entries are actions.
     pub const SETTINGS: Id = Id::new_static("core.settings-pages");
+    /// The quick panel ([`actions::QUICK_PANEL`](super::actions::QUICK_PANEL)):
+    /// switches and controls for quick changes, from every plugin.
+    pub const QUICK: Id = Id::new_static("core.quick");
 }
 
 /// Standard parameter names.

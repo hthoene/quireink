@@ -82,6 +82,53 @@ pub(crate) enum InputKey {
     LongTap(Zone),
     /// `swipe.<direction>`
     Swipe(Direction),
+    /// `edge.<side>`: a swipe in from the edge `side` (`top`, `bottom`,
+    /// `left`, `right`), before the screen sees it: for going home,
+    /// opening the quick panel, going back.
+    Edge(Direction),
+    /// `gestures.policy`: how a screen takes gestures, bound to one of
+    /// [`POLICIES`] (see [`Policy`]).
+    Policy,
+}
+
+/// The side an edge swipe starts from, as written in key maps.
+pub(crate) fn side_id(side: Direction) -> &'static str {
+    match side {
+        Direction::Up => "top",
+        Direction::Down => "bottom",
+        Direction::Left => "left",
+        Direction::Right => "right",
+    }
+}
+
+/// How a screen takes gestures (`gestures.policy` in its key map layer):
+/// a tool sets its default, the user may change it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Policy {
+    /// Swipes in from the edges and the key map's gestures apply.
+    Standard,
+    /// The screen's own: gestures go to it, swipes in from an edge need a
+    /// second one to apply (no going home by accident while playing).
+    Own,
+    /// No gestures but the screen's own; buttons still work.
+    Off,
+}
+
+/// The values of `gestures.policy`, in the order of [`Policy`].
+pub(crate) const POLICIES: [&str; 3] = [
+    "core.gestures.standard",
+    "core.gestures.own",
+    "core.gestures.off",
+];
+
+impl Policy {
+    pub(crate) fn of(id: Option<&Id>) -> Policy {
+        match id.map(Id::as_str) {
+            Some(p) if p == POLICIES[1] => Policy::Own,
+            Some(p) if p == POLICIES[2] => Policy::Off,
+            _ => Policy::Standard,
+        }
+    }
 }
 
 impl InputKey {
@@ -108,6 +155,16 @@ impl InputKey {
             .into_iter()
             .find(|d| d.id() == name)
             .map(InputKey::Swipe),
+            "edge" => [
+                Direction::Left,
+                Direction::Right,
+                Direction::Up,
+                Direction::Down,
+            ]
+            .into_iter()
+            .find(|d| side_id(*d) == name)
+            .map(InputKey::Edge),
+            "gestures" if name == "policy" => Some(InputKey::Policy),
             _ => None,
         }
     }
@@ -206,7 +263,7 @@ impl Keymap {
                 problem(
                     &mut problems,
                     entry.line,
-                    "expected button.<name>, long.<name>, tap.<zone>, long-tap.<zone> or swipe.<dir>",
+                    "expected button.<name>, long.<name>, tap.<zone>, long-tap.<zone>, swipe.<dir>, edge.<side> or gestures.policy",
                 );
                 continue;
             };

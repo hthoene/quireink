@@ -4,6 +4,7 @@
 
 use alloc::borrow::Cow;
 use alloc::boxed::Box;
+use alloc::string::String;
 use alloc::vec::Vec;
 
 use quireink_sdk::builtin::{
@@ -64,7 +65,32 @@ impl Plugin for CorePlugin {
                 out.push(Command::RunAction(target.clone()));
             })
         };
-        let handled: [(Id, &'static str, ActionHandler); 12] = [
+        // How a screen takes gestures (`gestures.policy` in key maps): ids
+        // to bind, nothing to run.
+        for (id, title) in [
+            ("core.gestures.standard", "core.gestures.standard"),
+            ("core.gestures.own", "core.gestures.own"),
+            ("core.gestures.off", "core.gestures.off"),
+        ] {
+            r.add_action(ActionSpec {
+                id: Id::new_static(id),
+                title: Cow::Borrowed(title),
+                handler: None,
+            })?;
+        }
+        let handled: [(Id, &'static str, ActionHandler); 13] = [
+            (
+                actions::QUICK_PANEL,
+                "core.action.quick-panel",
+                Box::new(|_: &Env<'_>, out: &mut Vec<Command>| {
+                    out.push(Command::OpenSlot(
+                        slots::PANEL,
+                        Params::new()
+                            .with(params::MENU, String::from(menus::QUICK.as_str()))
+                            .with(params::MODE, "top"),
+                    ));
+                }),
+            ),
             // Screens without their own meaning of next/previous turn pages.
             (
                 actions::NEXT,
@@ -222,6 +248,23 @@ impl Plugin for CorePlugin {
             })?;
             r.add_icon(action, Cow::Borrowed(icon))?;
         }
+
+        // The quick panel: what is changed often, whatever is open; plugins
+        // add their own (the light, …).
+        for (item, order) in [
+            (settings::NIGHT_MODE, 10),
+            (settings::ROTATION, 40),
+            (actions::SCREENSHOT, 60),
+            (actions::SLEEP, 70),
+            (actions::SETTINGS, 90),
+        ] {
+            r.add_menu_entry(MenuEntry {
+                menu: menus::QUICK,
+                item,
+                order,
+            })?;
+        }
+        r.add_icon(actions::QUICK_PANEL, Cow::Borrowed("adjustments"))?;
 
         // The settings' main page: reading, the device, customising.
         for (id, title, order) in [

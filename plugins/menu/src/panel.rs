@@ -8,7 +8,8 @@
 //!
 //! Bound to the `core.panel` slot with the parameter `menu`; what the
 //! panel shows is that menu, so users and plugins choose its entries like
-//! any menu's.
+//! any menu's. With the parameter `mode` set to `top` it hangs from the
+//! top of the screen instead (the quick panel).
 
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
@@ -57,6 +58,10 @@ struct Row {
 
 pub(crate) struct PanelScreen {
     rows: Vec<Row>,
+    /// It hangs from the top of the screen.
+    top: bool,
+    /// Where the time, the date and the battery are, hanging from the top.
+    head: Rect,
     style: UiStyle,
     region: Rect,
     /// The control chosen with buttons: its place in reading order.
@@ -74,6 +79,7 @@ fn spec<'e>(env: &Env<'e>, id: &Id) -> Option<&'e SettingSpec> {
 impl PanelScreen {
     pub(crate) fn open(env: &Env<'_>, params: &Params) -> Self {
         let menu = params.get(params::MENU).unwrap_or_default();
+        let top = params.get(params::MODE) == Some("top");
         let style = UiStyle::new(env);
         let display = env.device.display;
         let width = display.width;
@@ -222,23 +228,43 @@ impl PanelScreen {
         } else {
             rows.len().max(1)
         };
-        let height = border + 2 * gap + row_height * per_page as u16 + bar;
-        let region = Rect::new(0, display.height - height, width, height);
+        // Hanging from the top, the time, the date and the battery first.
+        let head = if top { row_height } else { 0 };
+        let height = border + 2 * gap + head + row_height * per_page as u16 + bar;
+        let region = if top {
+            Rect::new(0, 0, width, height)
+        } else {
+            Rect::new(0, display.height - height, width, height)
+        };
+        // The border on the side towards the rest of the screen.
+        let inner_top = if top {
+            region.y + head
+        } else {
+            region.y + border
+        };
         for (index, row) in rows.iter_mut().enumerate() {
-            let dy = region.y + border + gap + row_height * (index % per_page) as u16;
+            let dy = inner_top + gap + row_height * (index % per_page) as u16;
             row.area.y += dy;
             for (_, rect) in &mut row.controls {
                 rect.y += dy;
             }
         }
         let pager = paged.then(|| {
-            let area = Rect::new(0, region.y + region.height - bar, width, bar);
+            let bottom = if top { border } else { 0 };
+            let area = Rect::new(0, region.y + region.height - bar - bottom, width, bar);
             ui::Pager::new(env, area)
         });
         Self {
             rows,
             style,
             region,
+            top,
+            head: Rect::new(
+                margin,
+                region.y + gap / 2,
+                width.saturating_sub(2 * margin),
+                head,
+            ),
             focus: (!env.device.input.touch).then_some(0),
             per_page,
             page: 0,
@@ -540,16 +566,19 @@ impl Screen for PanelScreen {
         let style = self.style;
         let r = self.region;
         ui::fill(canvas, r, Color::WHITE);
-        canvas.fill_rect(
-            i32::from(r.x),
-            i32::from(r.y),
-            u32::from(r.width),
-            (style.line * 2).max(2),
-            Color::BLACK,
-        );
+        let border = (style.line * 2).max(2);
+        let y = if self.top {
+            i32::from(r.y + r.height) - border as i32
+        } else {
+            i32::from(r.y)
+        };
+        canvas.fill_rect(i32::from(r.x), y, u32::from(r.width), border, Color::BLACK);
         let Some(font) = style.font(env) else {
             return;
         };
+        if self.top && self.head.height > 0 {
+            draw_head(canvas, env, &style, &font, self.head);
+        }
         if self.rows.is_empty() {
             ui::draw_message(canvas, env, &style, r, env.i18n.tr("menu.empty"));
             return;
@@ -690,6 +719,45 @@ impl Screen for PanelScreen {
         if *event == events::SETTING_CHANGED {
             self.redraw(cx);
         }
+    }
+}
+
+/// The quick panel's head: the time and the date at the left, the
+/// battery at the right.
+fn draw_head(
+    canvas: &mut Canvas<'_>,
+    env: &Env<'_>,
+    style: &UiStyle,
+    font: &quireink_sdk::FontHandle<'_>,
+    area: Rect,
+) {
+    let time = quireink_sdk::time::clock_text(env).unwrap_or_default();
+    let x = f32::from(area.x);
+    let after = ui::draw_label(canvas, font, style.title, x, area, &time, Color::BLACK);
+    if let Some(now) = quireink_sdk::time::local_time(env) {
+        let date = env.i18n.format(
+            "menu.quick.date",
+            &[
+                ("day", quireink_sdk::Arg::Int(i64::from(now.day))),
+                ("month", quireink_sdk::Arg::Int(i64::from(now.month))),
+            ],
+        );
+        let gap = style.gap as f32;
+        ui::draw_label(
+            canvas,
+            font,
+            style.text,
+            after + gap,
+            area,
+            &date,
+            style.faint(80),
+        );
+    }
+    if let Some(battery) = env.status.battery {
+        let text = alloc::format!("{} %", battery.percent);
+        let w = font.measure(style.text, &text);
+        let x = f32::from(area.x + area.width) - w;
+        ui::draw_label(canvas, font, style.text, x, area, &text, Color::BLACK);
     }
 }
 

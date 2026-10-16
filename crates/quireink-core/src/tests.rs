@@ -414,6 +414,97 @@ fn taps_resolve_through_zones() {
     assert_eq!(*log.borrow(), ["a:core.next-page", "a:core.prev-page"]);
 }
 
+fn swipe(kernel: &mut Kernel, at: u64, from: (i32, i32), to: (i32, i32)) {
+    let event = |phase, (x, y)| {
+        InputEvent::Pointer(PointerEvent {
+            id: 0,
+            phase,
+            point: Point::new(x, y),
+            tool: PointerTool::Finger,
+            pressure: 1000,
+        })
+    };
+    kernel.handle(Instant(at), event(PointerPhase::Down, from));
+    kernel.handle(Instant(at + 30), event(PointerPhase::Move, to));
+    kernel.handle(Instant(at + 60), event(PointerPhase::Up, to));
+    render(kernel);
+}
+
+#[test]
+fn swipes_in_from_the_edges_come_first() {
+    let log = log();
+    let mut kernel = Kernel::builder(DEVICE)
+        .plugin(TestPlugin::new("a", &log))
+        .build()
+        .unwrap();
+    kernel.start(Instant(0));
+    // Up from the bottom edge: home; in from the left edge: back.
+    swipe(&mut kernel, 100, (45, 88), (45, 30));
+    swipe(&mut kernel, 300, (2, 45), (70, 45));
+    // The same swipes in the middle of the screen turn pages.
+    swipe(&mut kernel, 500, (45, 70), (45, 20));
+    // At an edge, a tap is a tap.
+    tap(&mut kernel, 700, 88, 45);
+    assert_eq!(
+        *log.borrow(),
+        [
+            "a:core.home",
+            "a:core.back",
+            "a:core.next-page",
+            "a:core.next-page"
+        ]
+    );
+}
+
+#[test]
+fn tools_with_their_own_gestures_need_a_second_swipe() {
+    let log = log();
+    let mut plugin = TestPlugin::new("a", &log);
+    plugin.keymap = Some(
+        "[keymap.a.screen]
+gestures.policy = core.gestures.own
+",
+    );
+    let mut kernel = Kernel::builder(DEVICE).plugin(plugin).build().unwrap();
+    kernel.start(Instant(0));
+    // Swipes and taps of the key map do nothing: the tool takes them.
+    swipe(&mut kernel, 100, (45, 70), (45, 20));
+    tap(&mut kernel, 300, 85, 45);
+    assert!(log.borrow().is_empty());
+    // From the edge, the second swipe goes home; one alone does not.
+    swipe(&mut kernel, 500, (45, 88), (45, 30));
+    assert!(log.borrow().is_empty());
+    swipe(&mut kernel, 1500, (45, 88), (45, 30));
+    assert_eq!(*log.borrow(), ["a:core.home"]);
+    log.borrow_mut().clear();
+    // Too late for a second one.
+    swipe(&mut kernel, 2000, (45, 88), (45, 30));
+    swipe(&mut kernel, 9000, (45, 88), (45, 30));
+    assert!(log.borrow().is_empty());
+
+    // The user switches gestures off there: edges do nothing at all.
+    let log = self::log();
+    let mut plugin = TestPlugin::new("a", &log);
+    plugin.keymap = Some(
+        "[keymap.a.screen]
+gestures.policy = core.gestures.own
+",
+    );
+    let mut kernel = Kernel::builder(DEVICE)
+        .plugin(plugin)
+        .user_config(
+            "[keymap.a.screen]
+gestures.policy = core.gestures.off
+",
+        )
+        .build()
+        .unwrap();
+    kernel.start(Instant(0));
+    swipe(&mut kernel, 100, (45, 88), (45, 30));
+    swipe(&mut kernel, 200, (45, 88), (45, 30));
+    assert!(log.borrow().is_empty());
+}
+
 #[test]
 fn reports_unknown_references_in_config() {
     let mut kernel = Kernel::builder(DEVICE)

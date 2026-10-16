@@ -6,6 +6,22 @@ change the plugin SDK.
 
 ## [Unreleased]
 
+- Gestures as on phones: up from the bottom edge goes home, down from the
+  top edge opens the quick panel, in from a side goes back (while reading
+  it turns the page). The quick panel holds night mode, the light,
+  turning the screen, a screenshot, sleep and the settings, with the
+  time, date and battery above; plugins and the menu editor change what
+  it holds. Swipes in from the edges come before the screen sees them.
+- Gestures per tool: as standard, the tool's own (gestures go to it, a
+  swipe in from an edge needs a second one: for games and drawing) or
+  off. A tool sets its default (`gestures.policy` in its key map); the
+  user changes it in *Buttons and gestures*.
+- *Buttons and gestures* is easier to find one's way in: where a change
+  applies (everywhere, home screen, reading, library, any tool), inputs
+  in sections (edges, swipes, taps with a picture of the zone, held
+  taps, buttons, held buttons), and the actions to choose from in groups
+  with a search, *As standard* and *Nothing* first.
+
 - The home screen is a grid, as on a phone: 4 columns by default (rows
   to fit the screen; both settings), each widget taking a rectangle of
   cells, each tool an icon in a cell of its own; empty cells stay empty.
