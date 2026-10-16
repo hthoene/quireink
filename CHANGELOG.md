@@ -6,6 +6,9 @@ change the plugin SDK.
 
 ## [Unreleased]
 
+- A new icon: the capital Q of Besley in ink on e-paper, as on
+  quireink.org (its source is `shells/android/icon.svg`).
+
 ## [0.3.0] - 2026-10-16
 
 - Screen lock (off by default): a PIN, a pattern or a password asked for
