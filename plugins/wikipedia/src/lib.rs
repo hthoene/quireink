@@ -235,7 +235,7 @@ impl Screen for Summary {
             right,
             header,
             source,
-            Color::gray(80),
+            style.faint(80),
         );
         let word = ui::fit(&font, style.title, &self.word, right - margin * 2.0);
         ui::draw_label(

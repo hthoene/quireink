@@ -305,7 +305,7 @@ impl Screen for PluginList {
                 style.margin as f32,
                 area,
                 env.i18n.tr(key),
-                quireink_sdk::Color::gray(60),
+                style.faint(60),
             );
         }
     }

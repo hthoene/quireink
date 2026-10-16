@@ -682,17 +682,10 @@ impl KeyboardScreen {
             margin,
             title_area,
             &title,
-            Color::gray(90),
+            style.faint(90),
         );
         let box_area = self.text_box();
-        canvas.stroke_rect(
-            i32::from(box_area.x),
-            i32::from(box_area.y),
-            u32::from(box_area.width),
-            u32::from(box_area.height),
-            style.line.max(2),
-            Color::BLACK,
-        );
+        ui::stroke_round(canvas, &style, box_area, style.line.max(2), Color::BLACK);
         // The end of the text, with a cursor after it; a password as dots.
         let text = if self.password {
             "•".repeat(self.text.chars().count())

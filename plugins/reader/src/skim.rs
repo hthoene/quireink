@@ -184,7 +184,7 @@ impl Screen for SkimScreen {
                 at,
                 info,
                 &self.chapter,
-                Color::gray(80),
+                style.faint(80),
             );
         }
         // The bar: read up to here, chapters as ticks, a knob where one is.

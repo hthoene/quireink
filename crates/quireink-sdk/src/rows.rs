@@ -118,7 +118,7 @@ impl Rows {
         for (n, &(index, rect)) in visible.iter().enumerate() {
             let focused = focus && index == self.focus && !self.is_heading(index);
             if focused {
-                fill(canvas, rect, Color::BLACK);
+                crate::ui::fill_round(canvas, style, rect, Color::BLACK);
             } else if !self.is_heading(index)
                 && visible
                     .get(n + 1)

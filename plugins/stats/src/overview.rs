@@ -161,7 +161,7 @@ impl Overview {
                 left,
                 cell(0, 1),
                 env.i18n.tr(label),
-                Color::gray(90),
+                style.faint(90),
             );
             ui::draw_label(
                 canvas,
@@ -179,7 +179,7 @@ impl Overview {
                 left,
                 cell(2, 1),
                 note,
-                Color::gray(90),
+                style.faint(90),
             );
             if i > 0 {
                 canvas.fill_rect(
@@ -212,7 +212,7 @@ impl Overview {
             f32::from(c.x),
             title,
             &label,
-            Color::gray(90),
+            style.faint(90),
         );
         let today = self.today.unwrap_or(0);
         let first = today - CHART_DAYS + 1;
@@ -303,7 +303,7 @@ impl Screen for Overview {
                     x,
                     self.totals,
                     &text,
-                    Color::gray(60),
+                    style.faint(60),
                 );
             }
         }

@@ -372,6 +372,19 @@ pub mod settings {
     pub const UI_HEADER: Id = Id::new_static("core.ui-header");
     pub const HEADER_DARK: &str = "core.header.dark";
     pub const HEADER_LIGHT: &str = "core.header.light";
+    /// Corners of highlights, buttons and boxes: one of [`CORNERS`].
+    pub const UI_CORNERS: Id = Id::new_static("core.ui-corners");
+    /// The values of [`UI_CORNERS`]: square, slightly rounded, round.
+    pub const CORNERS: [&str; 3] = [
+        "core.corners.square",
+        "core.corners.small",
+        "core.corners.round",
+    ];
+    /// Gray text such as hints and notes: as it is, or black for strong
+    /// contrast ([`CONTRAST_STRONG`]), e.g. on screens with few grays.
+    pub const UI_CONTRAST: Id = Id::new_static("core.ui-contrast");
+    pub const CONTRAST_NORMAL: &str = "core.contrast.normal";
+    pub const CONTRAST_STRONG: &str = "core.contrast.strong";
     /// How long short messages show, in seconds.
     pub const NOTICE_SECONDS: Id = Id::new_static("core.notice-seconds");
     /// Milliseconds a button or finger must be held for a long press.

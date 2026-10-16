@@ -7,7 +7,7 @@ use alloc::vec::Vec;
 use quireink_sdk::builtin::params;
 use quireink_sdk::ui::{self, UiStyle};
 use quireink_sdk::{
-    Arg, Canvas, Color, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Params, Rect, Screen,
+    Arg, Canvas, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Params, Rect, Screen,
 };
 
 use crate::store::{self, Book};
@@ -130,7 +130,7 @@ impl Screen for BookView {
             f32::from(margin),
             label_area,
             label,
-            Color::gray(90),
+            style.faint(90),
         );
         let days = &self.totals.days[self.totals.days.len().saturating_sub(CHART_DAYS)..];
         let values: Vec<u32> = days.iter().map(|(_, s)| *s).collect();

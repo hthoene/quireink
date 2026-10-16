@@ -312,7 +312,7 @@ impl Screen for ListScreen {
                 style.margin as f32,
                 self.status,
                 &text,
-                Color::gray(60),
+                style.faint(60),
             );
         }
     }

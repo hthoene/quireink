@@ -158,7 +158,7 @@ impl Screen for InfoScreen {
                 f32::from(text_x),
                 row,
                 &d.author,
-                Color::gray(80),
+                style.faint(80),
             );
             ty += line(style.text);
         }
@@ -180,7 +180,7 @@ impl Screen for InfoScreen {
         for (key, value) in &d.rows {
             let baseline = i32::from(y) + ascent as i32;
             let label = env.i18n.tr(key);
-            font.draw(canvas, style.small, x, baseline, label, Color::gray(80));
+            font.draw(canvas, style.small, x, baseline, label, style.faint(80));
             let room = f32::from(width) - label_width;
             let value = ui::fit(&font, style.text, value, room);
             font.draw(

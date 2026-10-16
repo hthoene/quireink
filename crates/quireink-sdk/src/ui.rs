@@ -47,6 +47,10 @@ pub struct UiStyle {
     pub line: u32,
     /// Headers on a dark bar, else on a light one with a line below.
     pub dark_header: bool,
+    /// Radius of the corners of highlights, buttons and boxes (0: square).
+    pub corner: u32,
+    /// Gray text is drawn black (see [`UiStyle::faint`]).
+    pub strong: bool,
 }
 
 impl UiStyle {
@@ -72,6 +76,25 @@ impl UiStyle {
                 .tenth_mm(s.int(settings::UI_LINES.as_str()).clamp(1, 10) as u32)
                 .max(1),
             dark_header: s.text(settings::UI_HEADER.as_str()) != settings::HEADER_LIGHT,
+            corner: match settings::CORNERS
+                .iter()
+                .position(|c| *c == s.text(settings::UI_CORNERS.as_str()))
+            {
+                Some(1) => m.tenth_mm(8),
+                Some(2) => m.mm(2),
+                _ => 0,
+            },
+            strong: s.text(settings::UI_CONTRAST.as_str()) == settings::CONTRAST_STRONG,
+        }
+    }
+
+    /// The colour of gray text such as hints and notes: `gray`, or black
+    /// for strong contrast.
+    pub fn faint(&self, gray: u8) -> Color {
+        if self.strong {
+            Color::BLACK
+        } else {
+            Color::gray(gray)
         }
     }
 
@@ -192,7 +215,7 @@ pub fn draw_heading(
         line,
     );
     let x = f32::from(rect.x) + style.margin as f32;
-    draw_label(canvas, &font, style.small, x, area, text, Color::gray(90));
+    draw_label(canvas, &font, style.small, x, area, text, style.faint(90));
 }
 
 /// The switch of an on/off setting at the right end of `row`.
@@ -754,6 +777,37 @@ pub fn fit(font: &FontHandle<'_>, size: f32, text: &str, width: f32) -> String {
     result
 }
 
+/// Fills a rectangle with the style's corners.
+pub fn fill_round(canvas: &mut Canvas<'_>, style: &UiStyle, area: Rect, color: Color) {
+    canvas.fill_round_rect(
+        i32::from(area.x),
+        i32::from(area.y),
+        u32::from(area.width),
+        u32::from(area.height),
+        style.corner,
+        color,
+    );
+}
+
+/// Draws a box's frame, `thickness` wide, with the style's corners.
+pub fn stroke_round(
+    canvas: &mut Canvas<'_>,
+    style: &UiStyle,
+    area: Rect,
+    thickness: u32,
+    color: Color,
+) {
+    canvas.stroke_round_rect(
+        i32::from(area.x),
+        i32::from(area.y),
+        u32::from(area.width),
+        u32::from(area.height),
+        thickness,
+        style.corner,
+        color,
+    );
+}
+
 /// Fills a rectangle.
 pub fn fill(canvas: &mut Canvas<'_>, area: Rect, color: Color) {
     canvas.fill_rect(
@@ -908,7 +962,7 @@ impl ListView {
             let rect = self.row_rect(slot);
             let focused = self.active && self.shown && index == self.focus;
             if focused {
-                fill(canvas, rect, Color::BLACK);
+                fill_round(canvas, style, rect, Color::BLACK);
             } else if self.columns == 1 {
                 let separator = Rect::new(
                     rect.x + style.margin as u16,
@@ -974,7 +1028,7 @@ pub fn draw_note(
     let color = if focused {
         Color::gray(215)
     } else {
-        Color::gray(80)
+        style.faint(80)
     };
     let line = style.small * NOTE_LINE_HEIGHT;
     let ascent = font.line_metrics(style.small).ascent;
@@ -1113,22 +1167,29 @@ pub fn draw_button(
         (Color::WHITE, Color::BLACK)
     };
     let border = button_border(style);
-    fill(canvas, rect, back);
+    let r = style.corner;
     let (x, y, w, h) = (
         i32::from(rect.x),
         i32::from(rect.y),
         u32::from(rect.width),
         u32::from(rect.height),
     );
-    canvas.stroke_rect(x, y, w, h, border, Color::BLACK);
+    if r > 0 {
+        // Round: the corners outside keep what is behind.
+        canvas.fill_round_rect(x, y, w, h, r, back);
+    } else {
+        fill(canvas, rect, back);
+    }
+    canvas.stroke_round_rect(x, y, w, h, border, r, Color::BLACK);
     if focused {
         let out = (border * 2) as i32;
-        canvas.stroke_rect(
+        canvas.stroke_round_rect(
             x - out,
             y - out,
             w + 2 * out as u32,
             h + 2 * out as u32,
             border,
+            r + out as u32,
             Color::BLACK,
         );
     }

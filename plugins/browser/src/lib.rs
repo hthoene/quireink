@@ -34,8 +34,8 @@ use quireink_sdk::files;
 use quireink_sdk::ui::choice::{self, Choice};
 use quireink_sdk::ui::{self, ListChange, ListView, UiStyle};
 use quireink_sdk::{
-    ActionSpec, Arg, Canvas, Color, Command, Cx, Env, Gesture, GestureKind, Handled, HttpRequest,
-    Id, Manifest, MenuEntry, Params, Plugin, Priority, Rect, RefreshMode, RegisterError, Registrar,
+    ActionSpec, Arg, Canvas, Command, Cx, Env, Gesture, GestureKind, Handled, HttpRequest, Id,
+    Manifest, MenuEntry, Params, Plugin, Priority, Rect, RefreshMode, RegisterError, Registrar,
     SDK_VERSION, Screen, ScreenSpec, Version, http_params,
 };
 
@@ -542,7 +542,7 @@ impl Screen for BrowserScreen {
                 style.margin as f32,
                 self.status,
                 message,
-                Color::gray(60),
+                style.faint(60),
             );
         }
     }

@@ -51,6 +51,17 @@ const CASES: &[Case] = &[
         script: "page-forward,page-forward",
     },
     Case {
+        name: "x4-settings-round-strong",
+        profile: "xteink-x4",
+        book: None,
+        sets: &[
+            "slots.core.home=settings.list",
+            "core.ui-corners=core.corners.round",
+            "core.ui-contrast=core.contrast.strong",
+        ],
+        script: "right,right",
+    },
+    Case {
         name: "boox-home",
         profile: "boox-go-7",
         book: None,

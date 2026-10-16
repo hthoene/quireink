@@ -66,7 +66,7 @@ pub(crate) fn bars(
                 let tx = (x + bar_w / 2.0 - w / 2.0)
                     .clamp(f32::from(area.x), f32::from(area.x + area.width) - w);
                 let row = Rect::new(area.x, (base_y - h) as u16 - top_h, area.width, top_h);
-                ui::draw_label(canvas, &font, style.small, tx, row, top, Color::gray(60));
+                ui::draw_label(canvas, &font, style.small, tx, row, top, style.faint(60));
             }
         }
         if highlight == Some(i) {
@@ -88,7 +88,7 @@ pub(crate) fn bars(
             let color = if highlight == Some(i) {
                 Color::BLACK
             } else {
-                Color::gray(90)
+                style.faint(90)
             };
             ui::draw_label(canvas, &font, style.small, lx, row, label, color);
         }

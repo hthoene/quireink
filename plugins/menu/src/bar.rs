@@ -281,7 +281,7 @@ impl Screen for BarScreen {
             let width = f32::from(r.width) - 2.0 * margin;
             let (chapter, page, page_width) =
                 ui::fit_pair(&font, style.small, &self.text, &self.page, width, margin);
-            let gray = Color::gray(70);
+            let gray = style.faint(70);
             ui::draw_label(canvas, &font, style.small, margin, text, &chapter, gray);
             let x = f32::from(r.width) - margin - page_width;
             ui::draw_label(canvas, &font, style.small, x, text, &page, gray);
@@ -300,14 +300,13 @@ impl Screen for BarScreen {
                 inner.height,
             );
             if on {
-                ui::fill(canvas, frame, Color::BLACK);
+                ui::fill_round(canvas, &style, frame, Color::BLACK);
             }
             if self.keys && i == self.focus {
-                canvas.stroke_rect(
-                    i32::from(frame.x),
-                    i32::from(frame.y),
-                    u32::from(frame.width),
-                    u32::from(frame.height),
+                ui::stroke_round(
+                    canvas,
+                    &style,
+                    frame,
                     ui::button_border(&style),
                     Color::BLACK,
                 );

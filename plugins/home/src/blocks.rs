@@ -119,7 +119,7 @@ fn draw_status(canvas: &mut Canvas<'_>, env: &Env<'_>, area: Rect) {
     let Some(font) = style.font(env) else {
         return;
     };
-    let ink = Color::gray(60);
+    let ink = style.faint(60);
     let align = widgets::align(env, STATUS);
     if let Some(clock) = time::clock_text(env) {
         let x = align.x(area, font.measure(style.small, &clock));
@@ -206,19 +206,12 @@ fn draw_card(canvas: &mut Canvas<'_>, env: &Env<'_>, r: Rect) {
         return;
     };
     let line = style.line * 2;
-    canvas.stroke_rect(
-        i32::from(r.x),
-        i32::from(r.y),
-        u32::from(r.width),
-        u32::from(r.height),
-        line,
-        Color::BLACK,
-    );
+    ui::stroke_round(canvas, &style, r, line, Color::BLACK);
     let Some(book) = recent::load(env.storage).into_iter().next() else {
         ui::draw_message(canvas, env, &style, r, env.i18n.tr("home.nothing-read"));
         return;
     };
-    let gray = Color::gray(90);
+    let gray = style.faint(90);
     // The cover on the left, where there is one.
     let inset = style.margin as u16 / 2 + line as u16;
     let r = match covers::get(env.storage, &book.path).flatten() {
@@ -331,7 +324,7 @@ fn draw_shelf(canvas: &mut Canvas<'_>, env: &Env<'_>, area: Rect) {
         return;
     };
     let label = line_height(env, style.small);
-    let gray = Color::gray(90);
+    let gray = style.faint(90);
     ui::draw_label(
         canvas,
         &font,
@@ -544,7 +537,7 @@ fn draw_clock(canvas: &mut Canvas<'_>, env: &Env<'_>, area: Rect) {
         align.x(area, font.measure(style.small, &date)),
         Rect::new(area.x, area.y + big, area.width, small),
         &date,
-        Color::gray(80),
+        style.faint(80),
     );
 }
 

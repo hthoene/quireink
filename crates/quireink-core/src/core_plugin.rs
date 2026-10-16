@@ -289,6 +289,34 @@ impl Plugin for CorePlugin {
             .group(groups::LOOK)
             .description("core.setting.ui-header.help"),
         )?;
+        r.add_setting(
+            SettingSpec::new(
+                settings::UI_CORNERS,
+                "core.setting.ui-corners",
+                SettingKind::Choice(
+                    settings::CORNERS
+                        .iter()
+                        .map(|c| Cow::Borrowed(*c))
+                        .collect(),
+                ),
+                SettingValue::Text(Cow::Borrowed(settings::CORNERS[0])),
+            )
+            .group(groups::LOOK)
+            .description("core.setting.ui-corners.help"),
+        )?;
+        r.add_setting(
+            SettingSpec::new(
+                settings::UI_CONTRAST,
+                "core.setting.ui-contrast",
+                SettingKind::Choice(alloc::vec![
+                    Cow::Borrowed(settings::CONTRAST_NORMAL),
+                    Cow::Borrowed(settings::CONTRAST_STRONG),
+                ]),
+                SettingValue::Text(Cow::Borrowed(settings::CONTRAST_NORMAL)),
+            )
+            .group(groups::LOOK)
+            .description("core.setting.ui-contrast.help"),
+        )?;
         for (id, title, (min, max, default), unit, step) in [
             (
                 settings::UI_MARGIN,
