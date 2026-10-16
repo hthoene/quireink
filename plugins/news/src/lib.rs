@@ -312,7 +312,7 @@ fn draw_headlines(canvas: &mut Canvas<'_>, env: &Env<'_>, area: Rect) {
         f32::from(area.x),
         Rect::new(area.x, area.y, area.width, small),
         env.i18n.tr("news.title"),
-        quireink_sdk::Color::gray(80),
+        style.faint(80),
     );
     for (row, title, _) in headline_rows(env, area) {
         let title = ui::fit(&font, style.text, &title, f32::from(row.width));

@@ -786,7 +786,7 @@ fn draw_cell(
     let gray = if focused {
         Color::gray(215)
     } else {
-        Color::gray(80)
+        style.faint(80)
     };
     ui::draw_label(
         canvas,

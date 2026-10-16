@@ -328,7 +328,7 @@ impl Dashboard {
         let size = style.title;
         let w = ui::icon_width(env, "pencil", size);
         let x = f32::from(self.pencil.x) + (f32::from(self.pencil.width) - w) / 2.0;
-        ui::draw_icon(canvas, env, "pencil", size, x, self.pencil, Color::gray(60));
+        ui::draw_icon(canvas, env, "pencil", size, x, self.pencil, style.faint(60));
     }
 }
 

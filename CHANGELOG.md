@@ -15,6 +15,12 @@ change the plugin SDK.
   *Free space*, which takes the room the others leave, e.g. to put the
   clock in the middle or the tools at the bottom. Both may be added more
   than once, on the home screen and the sleep screen.
+- Appearance: *Corners* (square, slightly rounded, round) for
+  highlighted rows, buttons and boxes, and *Contrast*: strong draws gray
+  hints and notes in black, for screens with few grays. The Airy theme
+  sample rounds its corners. Plugin SDK: `UiStyle` gains `corner` and
+  `strong` (with `UiStyle::faint` for gray text), `ui::fill_round`,
+  `ui::stroke_round`, and the canvas rounded rectangles.
 - Snapshot tests: screens of the X4 and the Boox are drawn headless and
   compared with reference pictures, so layout faults fail a test.
 - The folder chooser says when it is still opening a folder (slow SD

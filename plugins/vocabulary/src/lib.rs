@@ -173,7 +173,7 @@ fn draw_word(canvas: &mut Canvas<'_>, env: &Env<'_>, area: Rect) {
     let title = font.line_metrics(style.title).line_height as u16;
     let align = widgets::align(env, WORD_WIDGET.as_str());
     let x = |size: f32, text: &str| align.x(area, font.measure(size, text));
-    let gray = quireink_sdk::Color::gray(80);
+    let gray = style.faint(80);
     let row = |y: u16, h: u16| Rect::new(area.x, y, area.width, h);
     let label = env.i18n.tr("vocabulary.widget.word");
     ui::draw_label(

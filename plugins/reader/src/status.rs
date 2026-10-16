@@ -333,8 +333,10 @@ pub(crate) fn save_choice(storage: &dyn Storage, chosen: &[String; 2]) {
     );
 }
 
-/// The colour of status lines.
-pub(crate) const COLOR: quireink_sdk::Color = quireink_sdk::Color::gray(80);
+/// The colour of status lines: gray, or black for strong contrast.
+pub(crate) fn color(env: &Env<'_>) -> quireink_sdk::Color {
+    UiStyle::new(env).faint(80)
+}
 
 /// The book as a bar from the left, filled up to where the page is, with
 /// a mark where each chapter begins; the page on the right.

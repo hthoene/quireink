@@ -2283,7 +2283,7 @@ impl Book {
                 area,
                 top,
                 size: status::size(env),
-                color: status::COLOR,
+                color: status::color(env),
                 context: &context,
             };
             env.status_items.draw_line(id, canvas, env, &frame);

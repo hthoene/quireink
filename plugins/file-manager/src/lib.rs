@@ -25,7 +25,7 @@ use quireink_sdk::builtin::{actions, events, groups, menus, params, slots};
 use quireink_sdk::ui::choice::{self, Choice};
 use quireink_sdk::ui::{self, ListChange, ListView, UiStyle};
 use quireink_sdk::{
-    ActionSpec, Arg, Canvas, Color, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Manifest,
+    ActionSpec, Arg, Canvas, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Manifest,
     MenuEntry, Params, Plugin, Rect, RefreshMode, RegisterError, Registrar, SDK_VERSION, Screen,
     ScreenSpec, SettingKind, SettingSpec, SettingValue, Version,
 };
@@ -477,7 +477,7 @@ impl Screen for Browser {
                 style.margin as f32,
                 line,
                 message,
-                Color::gray(60),
+                style.faint(60),
             );
         }
         for (i, button) in self.buttons().into_iter().enumerate() {

@@ -218,7 +218,7 @@ impl Calendar {
                 size / 2,
             );
             let x = f32::from(area.x) + (f32::from(size) - font.measure(style.small, name)) / 2.0;
-            ui::draw_label(canvas, &font, style.small, x, area, name, Color::gray(90));
+            ui::draw_label(canvas, &font, style.small, x, area, name, style.faint(90));
         }
         let first = self.first_shown(env);
         let (year, month) = month_of(self.day);
@@ -297,7 +297,7 @@ impl Calendar {
                     u32::from(inner.width),
                     u32::from(inner.height),
                     border,
-                    Color::gray(90),
+                    style.faint(90),
                 );
             }
         }
@@ -340,7 +340,7 @@ impl Calendar {
             margin,
             line(1),
             &summary,
-            Color::gray(60),
+            style.faint(60),
         );
         for (n, (book, s)) in self.day_books.iter().take(DAY_BOOKS).enumerate() {
             let value = fmt::duration(env, u64::from(*s));
@@ -354,7 +354,7 @@ impl Calendar {
                 margin,
                 r,
                 &book,
-                Color::gray(60),
+                style.faint(60),
             );
             ui::draw_label(
                 canvas,
@@ -363,7 +363,7 @@ impl Calendar {
                 f32::from(d.width) - margin - vw,
                 r,
                 &value,
-                Color::gray(60),
+                style.faint(60),
             );
         }
     }

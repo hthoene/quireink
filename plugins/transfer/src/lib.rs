@@ -321,7 +321,7 @@ pub(crate) fn draw_address(
             x,
             row(y, small),
             &text,
-            Color::gray(60),
+            style.faint(60),
         );
         y += small;
     }

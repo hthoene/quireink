@@ -374,7 +374,7 @@ impl Screen for Panel {
             right,
             header,
             source,
-            Color::gray(80),
+            style.faint(80),
         );
         let original: String = self
             .original

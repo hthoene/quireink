@@ -247,7 +247,7 @@ fn draw_week(canvas: &mut Canvas<'_>, env: &Env<'_>, area: Rect) {
         "stats.week-label",
         &[("time", quireink_sdk::Arg::Str(&fmt::duration(env, total)))],
     );
-    let gray = Color::gray(80);
+    let gray = style.faint(80);
     let x = f32::from(area.x);
     ui::draw_label(
         canvas,
@@ -335,7 +335,7 @@ fn draw(canvas: &mut Canvas<'_>, env: &Env<'_>, area: Rect) {
     let x = |size: f32, text: &str| align.x(area, font.measure(size, text));
     let (first, second) = lines(env, &numbers);
     let row = |y: u16, h: u16| Rect::new(area.x, y, area.width, h);
-    let gray = Color::gray(80);
+    let gray = style.faint(80);
     let label = env.i18n.tr("stats.today");
     ui::draw_label(
         canvas,
