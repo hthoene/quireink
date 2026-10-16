@@ -744,12 +744,30 @@ impl Kernel {
     /// of the frame so; the frame does not change when they do.
     pub fn colors(&self) -> [[u8; 3]; 2] {
         use quireink_sdk::builtin::settings;
-        let rgb = |id: &Id, fallback: [u8; 3]| {
-            settings::rgb(self.shared.settings.text(id.as_str())).unwrap_or(fallback)
+        let text = |id: &Id| self.shared.settings.text(id.as_str());
+        // A preset, or one's own colour code; black and white otherwise.
+        let rgb = |id: &Id, own: &str, code: &Id, fallback: [u8; 3]| {
+            let value = text(id);
+            if value == own {
+                settings::parse_rgb(text(code))
+            } else {
+                settings::rgb(value)
+            }
+            .unwrap_or(fallback)
         };
         [
-            rgb(&settings::TEXT_COLOR, [0, 0, 0]),
-            rgb(&settings::PAPER_COLOR, [255, 255, 255]),
+            rgb(
+                &settings::TEXT_COLOR,
+                settings::OWN_TEXT,
+                &settings::TEXT_COLOR_OWN,
+                [0, 0, 0],
+            ),
+            rgb(
+                &settings::PAPER_COLOR,
+                settings::OWN_PAPER,
+                &settings::PAPER_COLOR_OWN,
+                [255, 255, 255],
+            ),
         ]
     }
 
@@ -2692,6 +2710,8 @@ impl Kernel {
             || *id == core_settings::NIGHT_MODE
             || *id == core_settings::TEXT_COLOR
             || *id == core_settings::PAPER_COLOR
+            || *id == core_settings::TEXT_COLOR_OWN
+            || *id == core_settings::PAPER_COLOR_OWN
         {
             let bounds = self.framebuffer.bounds();
             self.invalidate(bounds);

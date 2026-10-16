@@ -290,35 +290,77 @@ pub mod settings {
     pub const TEXT_COLOR: Id = Id::new_static("core.text-color");
     /// The colour white is shown in: one of [`PAPER_COLORS`].
     pub const PAPER_COLOR: Id = Id::new_static("core.paper-color");
-    /// The values of [`TEXT_COLOR`]: black, dark gray, brown, dark blue.
-    pub const TEXT_COLORS: [&str; 4] = [
+    /// The own text colour, used when [`TEXT_COLOR`] is [`OWN_TEXT`]: a
+    /// colour code such as `#5b4636` (see [`parse_rgb`]).
+    pub const TEXT_COLOR_OWN: Id = Id::new_static("core.text-color-own");
+    /// The own paper colour, used when [`PAPER_COLOR`] is [`OWN_PAPER`].
+    pub const PAPER_COLOR_OWN: Id = Id::new_static("core.paper-color-own");
+    /// The value of [`TEXT_COLOR`] that takes [`TEXT_COLOR_OWN`].
+    pub const OWN_TEXT: &str = "core.color.own";
+    /// The value of [`PAPER_COLOR`] that takes [`PAPER_COLOR_OWN`].
+    pub const OWN_PAPER: &str = "core.paper.own";
+    /// The values of [`TEXT_COLOR`]: dark colours, then one's own.
+    pub const TEXT_COLORS: [&str; 9] = [
         "core.color.black",
         "core.color.dark-gray",
+        "core.color.gray",
         "core.color.brown",
         "core.color.dark-blue",
+        "core.color.dark-green",
+        "core.color.burgundy",
+        "core.color.violet",
+        OWN_TEXT,
     ];
-    /// The values of [`PAPER_COLOR`]: white, cream, sepia, light gray.
-    pub const PAPER_COLORS: [&str; 4] = [
+    /// The values of [`PAPER_COLOR`]: light colours, then one's own.
+    pub const PAPER_COLORS: [&str; 9] = [
         "core.paper.white",
         "core.paper.cream",
         "core.paper.sepia",
+        "core.paper.sand",
         "core.paper.light-gray",
+        "core.paper.mint",
+        "core.paper.light-blue",
+        "core.paper.rose",
+        OWN_PAPER,
     ];
 
     /// The red, green and blue of a value of [`TEXT_COLOR`] or
-    /// [`PAPER_COLOR`].
+    /// [`PAPER_COLOR`] other than one's own.
     pub fn rgb(value: &str) -> Option<[u8; 3]> {
         Some(match value {
             "core.color.black" => [0, 0, 0],
             "core.color.dark-gray" => [51, 51, 51],
+            "core.color.gray" => [85, 85, 85],
             "core.color.brown" => [91, 70, 54],
             "core.color.dark-blue" => [28, 42, 68],
+            "core.color.dark-green" => [30, 58, 42],
+            "core.color.burgundy" => [94, 28, 36],
+            "core.color.violet" => [58, 42, 82],
             "core.paper.white" => [255, 255, 255],
             "core.paper.cream" => [250, 246, 236],
             "core.paper.sepia" => [244, 236, 216],
+            "core.paper.sand" => [233, 222, 196],
             "core.paper.light-gray" => [232, 232, 232],
+            "core.paper.mint" => [226, 240, 230],
+            "core.paper.light-blue" => [226, 236, 244],
+            "core.paper.rose" => [246, 232, 232],
             _ => return None,
         })
+    }
+
+    /// The red, green and blue of a colour code: `#5b4636`, `5b4636` or
+    /// the short `#543`; `None` for anything else.
+    pub fn parse_rgb(code: &str) -> Option<[u8; 3]> {
+        let hex = code.trim().trim_start_matches('#');
+        let digit = |i: usize| u8::from_str_radix(hex.get(i..i + 1)?, 16).ok();
+        match hex.len() {
+            3 => Some([digit(0)? * 17, digit(1)? * 17, digit(2)? * 17]),
+            6 => {
+                let byte = |i: usize| u8::from_str_radix(hex.get(i..i + 2)?, 16).ok();
+                Some([byte(0)?, byte(2)?, byte(4)?])
+            }
+            _ => None,
+        }
     }
     /// Margin of menus and lists, in millimetres.
     pub const UI_MARGIN: Id = Id::new_static("core.ui-margin");
@@ -469,3 +511,26 @@ pub mod fonts {
 
 /// The name of the key map layer that applies everywhere.
 pub const GLOBAL_KEYMAP_LAYER: &str = "global";
+
+#[cfg(test)]
+mod tests {
+    use super::settings::*;
+
+    #[test]
+    fn every_colour_but_ones_own_is_known() {
+        for value in TEXT_COLORS.iter().chain(&PAPER_COLORS) {
+            let own = *value == OWN_TEXT || *value == OWN_PAPER;
+            assert_eq!(rgb(value).is_none(), own, "{value}");
+        }
+    }
+
+    #[test]
+    fn colour_codes() {
+        assert_eq!(parse_rgb("#5b4636"), Some([0x5b, 0x46, 0x36]));
+        assert_eq!(parse_rgb(" F4ECD8 "), Some([0xf4, 0xec, 0xd8]));
+        assert_eq!(parse_rgb("#543"), Some([0x55, 0x44, 0x33]));
+        for wrong in ["", "#", "#12345", "#ggg", "blue", "#1234567"] {
+            assert_eq!(parse_rgb(wrong), None, "{wrong}");
+        }
+    }
+}
