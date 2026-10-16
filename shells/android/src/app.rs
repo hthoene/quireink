@@ -59,6 +59,8 @@ struct Running {
     app: AndroidApp,
     /// Plugins' servers.
     servers: quireink_serve::Servers,
+    /// Plugins' sockets.
+    sockets: quireink_serve::Sockets,
     /// Reading aloud.
     speech: crate::speech::Speech,
     /// The screen is kept on (while reading aloud).
@@ -216,6 +218,10 @@ fn android_main(app: AndroidApp) {
         }
         while let Some(event) = state.servers.next() {
             let effects = state.kernel.server_event(now(), event);
+            changed |= apply(state, effects);
+        }
+        while let Some(event) = state.sockets.take_event() {
+            let effects = state.kernel.socket_event(now(), event);
             changed |= apply(state, effects);
         }
         let kernel = &state.kernel;
@@ -442,6 +448,10 @@ fn start_kernel(
             let waker = app.create_waker();
             quireink_serve::Servers::new(move || waker.wake())
         },
+        sockets: {
+            let waker = app.create_waker();
+            quireink_serve::Sockets::new(move || waker.wake())
+        },
         speech: crate::speech::Speech::new(app),
         awake: false,
         rotation: Rotation::Deg0,
@@ -496,6 +506,9 @@ fn apply(state: &mut Running, effects: Effects) -> bool {
     }
     for call in state.kernel.take_server_calls() {
         state.servers.apply(call);
+    }
+    for call in state.kernel.take_socket_calls() {
+        state.sockets.apply(call);
     }
     for call in state.kernel.take_speech() {
         state.speech.apply(call);

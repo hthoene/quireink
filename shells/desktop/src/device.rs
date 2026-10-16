@@ -35,6 +35,7 @@ pub struct Device {
     pub http: crate::http::Http,
     /// Plugins' servers.
     pub servers: quireink_serve::Servers,
+    pub sockets: quireink_serve::Sockets,
     /// The texts being spoken (emulated), in order: number and when each
     /// ends.
     /// Sleeping (see `Effects::sleep`): only the power button wakes it.
@@ -82,6 +83,7 @@ impl Device {
             wake_at: None,
             http: crate::http::Http::new(),
             servers: quireink_serve::Servers::new(|| {}),
+            sockets: quireink_serve::Sockets::new(|| {}),
             speech: std::collections::VecDeque::new(),
             asleep: false,
             rotation,
@@ -180,11 +182,17 @@ impl Device {
         }
     }
 
-    /// Passes requests to plugins' servers on.
+    /// Passes requests to plugins' servers on, and what their sockets
+    /// brought.
     pub fn poll_servers(&mut self) {
         while let Some(event) = self.servers.next() {
             let now = self.now();
             let effects = budget::track(|| self.kernel.server_event(now, event));
+            self.execute(effects);
+        }
+        while let Some(event) = self.sockets.take_event() {
+            let now = self.now();
+            let effects = budget::track(|| self.kernel.socket_event(now, event));
             self.execute(effects);
         }
         let kernel = &self.kernel;
@@ -251,6 +259,9 @@ impl Device {
         }
         for call in self.kernel.take_server_calls() {
             self.servers.apply(call);
+        }
+        for call in self.kernel.take_socket_calls() {
+            self.sockets.apply(call);
         }
         for call in self.kernel.take_speech() {
             self.speak(call);

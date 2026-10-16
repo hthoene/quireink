@@ -44,6 +44,7 @@ mod keymap;
 mod net;
 mod refresh;
 mod registry;
+mod sockets;
 #[cfg(test)]
 mod tests;
 
@@ -79,6 +80,7 @@ pub use crate::net::{
 };
 use crate::refresh::RefreshPolicy;
 use crate::registry::{PluginRegistrar, Registry, Staging};
+pub use crate::sockets::{SOCKET_PART, SocketCall, SocketEvent};
 
 pub use quireink_sdk as sdk;
 
@@ -427,6 +429,7 @@ impl KernelBuilder {
             server_calls: Vec::new(),
             servers: Vec::new(),
             next_server: 0,
+            sockets: sockets::Sockets::default(),
             request_bodies: Vec::new(),
             incoming: Vec::new(),
             reads_clipboard: self.system_clipboard,
@@ -655,6 +658,9 @@ pub struct Kernel {
     /// screens were open when it started (it stops once fewer are).
     servers: Vec<(u32, Id, Id, usize)>,
     next_server: u32,
+    /// Plugins' sockets and broadcasts, and what the shell is to do for
+    /// them.
+    sockets: sockets::Sockets,
     /// Bodies of requests not answered yet: request, file.
     request_bodies: Vec<(u32, String)>,
     /// Requests whose body is still coming.
@@ -1112,9 +1118,13 @@ impl Kernel {
         });
     }
 
-    /// Stops what closed screens started: servers, speech.
+    /// Stops what closed screens started: servers, sockets, speech.
     fn stop_for_closed_screens(&mut self) {
         self.stop_servers_of_closed_screens();
+        let mut out = Vec::new();
+        self.sockets
+            .close_for_closed_screens(self.stack.len(), &mut out);
+        self.output.commands.extend(out);
         if self
             .speaking
             .iter()
@@ -1426,6 +1436,28 @@ impl Kernel {
             }
             self.output.commands.push(Command::Emit(reply, params));
         }
+        self.finish()
+    }
+
+    /// What to do for plugins' sockets: connect, send, read, close,
+    /// broadcast (report with [`Kernel::socket_event`]). Check after every
+    /// kernel call.
+    pub fn take_socket_calls(&mut self) -> Vec<SocketCall> {
+        mem::take(&mut self.sockets.calls)
+    }
+
+    /// Whether plugins have sockets or broadcasts open, e.g. to keep
+    /// polling for what they bring.
+    pub fn sockets_open(&self) -> bool {
+        self.sockets.any()
+    }
+
+    /// What happened with a socket or a broadcast.
+    pub fn socket_event(&mut self, now: Instant, event: SocketEvent) -> Effects {
+        self.now = now;
+        let mut out = Vec::new();
+        self.sockets.event(event, &*self.shared.storage, &mut out);
+        self.output.commands.extend(out);
         self.finish()
     }
 
@@ -2137,6 +2169,21 @@ impl Kernel {
                 }
             }
             Command::Respond(response) => self.respond(response),
+            command @ (Command::Connect { .. }
+            | Command::SocketSend { .. }
+            | Command::SocketRead { .. }
+            | Command::Disconnect(_)
+            | Command::Broadcast { .. }) => {
+                let mut out = Vec::new();
+                self.sockets.command(
+                    command,
+                    self.shared.network,
+                    self.stack.len(),
+                    &*self.shared.storage,
+                    &mut out,
+                );
+                self.output.commands.extend(out);
+            }
             Command::Back => {
                 if self.stack.len() > 1 {
                     self.close_above(self.stack.len() - 2);
