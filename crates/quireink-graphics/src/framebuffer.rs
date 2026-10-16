@@ -24,6 +24,8 @@ pub struct Framebuffer {
     data: Vec<u8>,
     dirty: Option<Rect>,
     inverted: bool,
+    /// Saturation of RGB pixels drawn, in percent (100: as they are).
+    saturation: u16,
 }
 
 impl Framebuffer {
@@ -61,6 +63,7 @@ impl Framebuffer {
             data,
             dirty: None,
             inverted: false,
+            saturation: 100,
         })
     }
 
@@ -167,6 +170,18 @@ impl Framebuffer {
         self.inverted
     }
 
+    /// Draws RGB pixels (pictures) with their saturation at `percent`,
+    /// e.g. stronger for colour e-ink, whose filter mutes colours
+    /// ([`ColorPanel::boost_percent`](quireink_platform::ColorPanel)).
+    /// Grays stay gray.
+    pub fn set_saturation(&mut self, percent: u16) {
+        self.saturation = percent;
+    }
+
+    pub fn saturation(&self) -> u16 {
+        self.saturation
+    }
+
     /// Returns and resets the region changed since the last call.
     pub fn take_dirty(&mut self) -> Option<Rect> {
         self.dirty.take()
@@ -244,6 +259,18 @@ impl Framebuffer {
         self.store(x, y, value);
     }
 
+    /// Sets the pixel at `(x, y)` (inside the band) to `rgb` on colour
+    /// formats; on gray ones to its gray, as [`Framebuffer::put_gray`].
+    pub(crate) fn put_rgb(&mut self, x: u16, y: u16, rgb: [u8; 3]) {
+        if self.format.is_color() {
+            let rgb = saturate(rgb, self.saturation);
+            let value = self.encode(Color::rgb(rgb[0], rgb[1], rgb[2]));
+            self.store(x, y, value);
+        } else {
+            self.put_gray(x, y, Color::rgb(rgb[0], rgb[1], rgb[2]).luma());
+        }
+    }
+
     /// Writes an encoded pixel value.
     fn store(&mut self, x: u16, y: u16, value: u32) {
         let row = usize::from(y - self.top) * self.stride;
@@ -296,9 +323,27 @@ impl Framebuffer {
     }
 }
 
+/// `rgb` with its distance from its gray scaled to `percent`.
+fn saturate(rgb: [u8; 3], percent: u16) -> [u8; 3] {
+    if percent == 100 {
+        return rgb;
+    }
+    let luma = i32::from(Color::rgb(rgb[0], rgb[1], rgb[2]).luma());
+    rgb.map(|c| (luma + (i32::from(c) - luma) * i32::from(percent) / 100).clamp(0, 255) as u8)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn saturation_strengthens_colours_not_grays() {
+        assert_eq!(saturate([200, 100, 100], 100), [200, 100, 100]);
+        let [r, g, b] = saturate([200, 100, 100], 200);
+        assert!(r > 200 && g < 100 && g == b);
+        assert_eq!(saturate([90, 90, 90], 200), [90, 90, 90]);
+        assert_eq!(saturate([255, 0, 0], 200), [255, 0, 0]);
+    }
 
     fn formats() -> &'static [PixelFormat] {
         if cfg!(feature = "color") {

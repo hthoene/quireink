@@ -2,9 +2,10 @@
 //!
 //! Decoders pull bytes from a [`Source`] and push rows of 8-bit gray to an
 //! [`ImageSink`], downscaling while they decode, so memory stays at a few
-//! rows (plus 43 KiB for PNG's inflate state) whatever the image size. Only
-//! brightness is decoded: e-ink shows gray, and colour images are
-//! converted on the fly.
+//! rows (plus 43 KiB for PNG's inflate state) whatever the image size.
+//! Brightness is all e-ink shows, so colour images are converted on the
+//! fly; a sink that wants colour ([`ImageSink::wants_color`], for colour
+//! screens, ADR 0015) gets RGB rows instead ([`ColorFile`]).
 //!
 //! [`GrayFile`] stores decoded images in a simple format (`QIGI`, width
 //! and height as u32, then rows), so readers draw them straight from
@@ -21,6 +22,7 @@
 
 extern crate alloc;
 
+mod color;
 mod gif;
 mod gray;
 mod jpeg;
@@ -30,6 +32,7 @@ mod progressive;
 
 use core::fmt;
 
+pub use color::{ColorFile, ColorWriter};
 pub use gray::{GrayFile, GrayWriter};
 pub use png_write::PngWriter;
 
@@ -81,6 +84,28 @@ pub trait ImageSink {
     fn start(&mut self, width: u32, height: u32) -> Result<(), ImageError>;
     /// The next row, `width` bytes of gray (0 black, 255 white).
     fn row(&mut self, gray: &[u8]) -> Result<(), ImageError>;
+
+    /// Whether rows are wanted in colour ([`ImageSink::row_rgb`]), where
+    /// the image has colour; gray otherwise.
+    fn wants_color(&self) -> bool {
+        false
+    }
+
+    /// The next row in colour, `width` pixels of three bytes (red, green,
+    /// blue). Only for sinks that want colour; otherwise it is passed on
+    /// as gray.
+    fn row_rgb(&mut self, rgb: &[u8]) -> Result<(), ImageError> {
+        let gray: alloc::vec::Vec<u8> = rgb
+            .chunks_exact(3)
+            .map(|p| luma(u32::from(p[0]), u32::from(p[1]), u32::from(p[2])))
+            .collect();
+        self.row(&gray)
+    }
+}
+
+/// The gray of a colour, as e-ink shows it (ITU-R 601).
+pub(crate) fn luma(r: u32, g: u32, b: u32) -> u8 {
+    ((r * 299 + g * 587 + b * 114 + 500) / 1000) as u8
 }
 
 /// Image formats by their first bytes.
@@ -195,10 +220,12 @@ pub(crate) fn zeroed<T: Clone + Default>(len: usize) -> Result<alloc::vec::Vec<T
     Ok(v)
 }
 
-/// Averages `factor`×`factor` blocks of rows into downscaled rows.
+/// Averages `factor`×`factor` blocks of rows into downscaled rows, of
+/// gray or (with three channels) RGB.
 pub(crate) struct Downscaler {
     factor: u32,
     width: u32,
+    channels: usize,
     out_width: u32,
     sums: alloc::vec::Vec<u32>,
     rows: u32,
@@ -206,16 +233,19 @@ pub(crate) struct Downscaler {
 }
 
 impl Downscaler {
-    pub fn new(width: u32, factor: u32) -> Result<Self, ImageError> {
+    /// For rows of `channels` bytes a pixel: 1 (gray) or 3 (RGB).
+    pub fn new(width: u32, factor: u32, channels: usize) -> Result<Self, ImageError> {
         let factor = factor.max(1);
         let out_width = width.div_ceil(factor);
+        let len = out_width as usize * channels;
         Ok(Self {
             factor,
             width,
+            channels,
             out_width,
-            sums: zeroed(out_width as usize)?,
+            sums: zeroed(len)?,
             rows: 0,
-            out: zeroed(out_width as usize)?,
+            out: zeroed(len)?,
         })
     }
 
@@ -223,13 +253,24 @@ impl Downscaler {
         self.out_width
     }
 
-    /// Adds a full-resolution row; emits a downscaled row every `factor`.
-    pub fn row(&mut self, gray: &[u8], sink: &mut dyn ImageSink) -> Result<(), ImageError> {
-        if self.factor == 1 {
-            return sink.row(&gray[..self.width as usize]);
+    fn emit(&self, row: &[u8], sink: &mut dyn ImageSink) -> Result<(), ImageError> {
+        if self.channels == 3 {
+            sink.row_rgb(row)
+        } else {
+            sink.row(row)
         }
-        for (x, &g) in gray.iter().take(self.width as usize).enumerate() {
-            self.sums[x / self.factor as usize] += u32::from(g);
+    }
+
+    /// Adds a full-resolution row; emits a downscaled row every `factor`.
+    pub fn row(&mut self, pixels: &[u8], sink: &mut dyn ImageSink) -> Result<(), ImageError> {
+        let ch = self.channels;
+        if self.factor == 1 {
+            return self.emit(&pixels[..self.width as usize * ch], sink);
+        }
+        let factor = self.factor as usize;
+        for (i, &v) in pixels.iter().take(self.width as usize * ch).enumerate() {
+            let (x, c) = (i / ch, i % ch);
+            self.sums[x / factor * ch + c] += u32::from(v);
         }
         self.rows += 1;
         if self.rows == self.factor {
@@ -247,17 +288,52 @@ impl Downscaler {
     }
 
     fn flush(&mut self, sink: &mut dyn ImageSink) -> Result<(), ImageError> {
-        for (x, out) in self.out.iter_mut().enumerate() {
-            let columns = (self.width - x as u32 * self.factor).min(self.factor);
-            *out = (self.sums[x] / (columns * self.rows)) as u8;
+        let ch = self.channels;
+        for (i, out) in self.out.iter_mut().enumerate() {
+            let x = (i / ch) as u32;
+            let columns = (self.width - x * self.factor).min(self.factor);
+            *out = (self.sums[i] / (columns * self.rows)) as u8;
         }
         self.sums.fill(0);
         self.rows = 0;
-        sink.row(&self.out)
+        let out = core::mem::take(&mut self.out);
+        let result = self.emit(&out, sink);
+        self.out = out;
+        result
     }
 }
 
 /// The smallest integer factor that brings the larger side to `max_side`.
 pub(crate) fn factor_for(width: u32, height: u32, max_side: u32) -> u32 {
     width.max(height).div_ceil(max_side.max(1)).max(1)
+}
+
+/// A decoded image in storage, gray ([`GrayFile`]) or colour
+/// ([`ColorFile`]), whichever the file is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImageFile {
+    pub path: alloc::string::String,
+    pub width: u32,
+    pub height: u32,
+    pub color: bool,
+}
+
+impl ImageFile {
+    /// Opens a decoded image of either kind, checking its size.
+    pub fn open(storage: &dyn quireink_platform::Storage, path: &str) -> Option<ImageFile> {
+        if let Some(gray) = GrayFile::open(storage, path) {
+            return Some(ImageFile {
+                path: gray.path,
+                width: gray.width,
+                height: gray.height,
+                color: false,
+            });
+        }
+        ColorFile::open(storage, path).map(|file| ImageFile {
+            path: file.path,
+            width: file.width,
+            height: file.height,
+            color: true,
+        })
+    }
 }

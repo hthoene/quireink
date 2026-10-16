@@ -131,7 +131,7 @@ fn android_main(app: AndroidApp) {
                         if size != frame
                             && let (Ok(width), Ok(height)) =
                                 (u16::try_from(size.0), u16::try_from(size.1))
-                            && let Ok(new) = Framebuffer::new(width, height, PixelFormat::Gray8)
+                            && let Ok(new) = Framebuffer::new(width, height, running.frame.format())
                         {
                             running.frame = new;
                             let effects = running.kernel.resize(now(), width, height);
@@ -295,6 +295,22 @@ fn start_kernel(
 ) -> Option<Running> {
     let (width, height) = (window.width(), window.height());
     let dpi = app.config().density().unwrap_or(160);
+    // Gray for monochrome e-ink, colour (for pictures) elsewhere.
+    let screen = crate::access::with_activity(app, |env, _| {
+        let mut build = |field: &str| -> jni::errors::Result<String> {
+            let value = env
+                .get_static_field("android/os/Build", field, "Ljava/lang/String;")?
+                .l()?;
+            Ok(env.get_string(&value.into())?.into())
+        };
+        let (manufacturer, model) = (build("MANUFACTURER")?, build("MODEL")?);
+        log::info!("{manufacturer} {model}");
+        Ok(pixels::screen(&manufacturer, &model))
+    });
+    let (format, color) = match screen {
+        Some(pixels::Screen::Color(panel)) => (PixelFormat::Rgb888, panel),
+        _ => (PixelFormat::Gray8, None),
+    };
     let device = DeviceInfo {
         id: "android",
         name: "Android e-reader",
@@ -302,9 +318,9 @@ fn start_kernel(
             width: u16::try_from(width).ok()?,
             height: u16::try_from(height).ok()?,
             dpi: u16::try_from(dpi).unwrap_or(160),
-            format: PixelFormat::Gray8,
+            format,
             rotation: Rotation::Deg0,
-            color: None,
+            color,
         },
         input: InputCaps {
             buttons: true,
@@ -426,12 +442,7 @@ fn start_kernel(
             return None;
         }
     };
-    let frame = Framebuffer::new(
-        device.display.width,
-        device.display.height,
-        PixelFormat::Gray8,
-    )
-    .ok()?;
+    let frame = Framebuffer::new(device.display.width, device.display.height, format).ok()?;
     let _ = kernel.set_status(now, status::read(app, now));
     let effects = kernel.start(now);
     let mut running = Running {

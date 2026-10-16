@@ -6,6 +6,16 @@ change the plugin SDK.
 
 ## [Unreleased]
 
+- Colour pictures on colour screens (ADR 0015): covers, pictures in
+  books, comics, OPDS covers and the sleep screen's pictures are shown
+  in colour on phones and tablets and on colour e-ink (Boox models named
+  "Color" or "C", with colours strengthened for the filter); text and
+  the interface stay gray, monochrome e-ink is unchanged. JPEG (also
+  progressive), PNG and GIF are decoded in colour where asked. Plugin
+  SDK: `ImageSink::wants_color` and `row_rgb`, `ColorFile`,
+  `ColorWriter`, `ImageFile`, `image::picture_from_file`,
+  `OpenOptions::color`, `Formats::options`, `Canvas::draw_rgb_row`,
+  `Framebuffer::set_saturation`, `ColorPanel::boost_percent`.
 - Smaller text by default: menus 9 pt (was 11), status lines 6 pt
   (was 8). Both stay adjustable in the settings.
 - Dictionary: the page of a long entry no longer covers *Online*.

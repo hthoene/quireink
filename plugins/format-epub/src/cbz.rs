@@ -15,7 +15,6 @@ use core::cmp::Ordering;
 use quireink_sdk::document::{
     Align, Block, BlockKind, Document, DocumentError, ImageRef, Locator, Metadata, OffsetMap,
 };
-use quireink_sdk::image::GrayFile;
 use quireink_sdk::xml::{Token, Tokenizer, decode, local_name};
 use quireink_sdk::zip::ZipArchive;
 use quireink_sdk::{Env, Storage};
@@ -37,6 +36,8 @@ pub struct CbzDocument {
     pages: Vec<String>,
     cache: String,
     metadata: Metadata,
+    /// Pages in colour (ADR 0015).
+    color: bool,
 }
 
 /// Whether `name` is a picture QuireInk shows.
@@ -90,6 +91,15 @@ fn fnv(data: &[u8]) -> u64 {
 
 impl CbzDocument {
     pub fn open(storage: &dyn Storage, path: &str) -> Result<Self, DocumentError> {
+        Self::open_options(storage, path, &quireink_sdk::OpenOptions::default())
+    }
+
+    /// Opens a comic as `options` say (pages in colour or gray).
+    pub fn open_options(
+        storage: &dyn Storage,
+        path: &str,
+        options: &quireink_sdk::OpenOptions,
+    ) -> Result<Self, DocumentError> {
         let archive = ZipArchive::open(storage, path).map_err(error)?;
         let mut pages: Vec<String> = Vec::new();
         let mut info = None;
@@ -133,27 +143,34 @@ impl CbzDocument {
             pages,
             cache,
             metadata,
+            color: options.color,
         })
     }
 
     /// Page `index` decoded at most `side` pixels on its longer side into
-    /// `cache`, if it can be.
+    /// the picture `base` (see `pictures`), if it can be.
     fn picture(
         &self,
         storage: &dyn Storage,
         index: usize,
-        cache: &str,
+        base: &str,
         side: u32,
     ) -> Option<ImageRef> {
-        if GrayFile::open(storage, cache).is_none() {
+        if !crate::pictures::has(storage, base, self.color) {
             let name = self.pages.get(index)?;
-            convert::decode_image(storage, &self.archive, name, cache, &self.cache, side).ok()?;
+            let file = crate::pictures::file(base, self.color);
+            convert::decode_image(
+                storage,
+                &self.archive,
+                name,
+                &file,
+                &self.cache,
+                side,
+                self.color,
+            )
+            .ok()?;
         }
-        GrayFile::open(storage, cache).map(|image| ImageRef {
-            path: image.path,
-            width: image.width,
-            height: image.height,
-        })
+        crate::pictures::open(storage, base, self.color)
     }
 }
 
@@ -243,7 +260,7 @@ impl Document for CbzDocument {
         if index >= self.pages.len() || at.offset >= 1 {
             return Ok(None);
         }
-        let cache = format!("{}/p{index}.gray", self.cache);
+        let cache = format!("{}/p{index}", self.cache);
         let image = self.picture(storage, index, &cache, convert::IMAGE_SIDE);
         // A picture that cannot be shown is named instead.
         let (kind, text) = match &image {
@@ -267,7 +284,7 @@ impl Document for CbzDocument {
     }
 
     fn cover(&self, storage: &dyn Storage) -> Result<Option<ImageRef>, DocumentError> {
-        let cache = format!("{}/cover.gray", self.cache);
+        let cache = format!("{}/cover", self.cache);
         Ok(self.picture(storage, 0, &cache, convert::COVER_SIDE))
     }
 }

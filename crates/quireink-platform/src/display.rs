@@ -37,6 +37,14 @@ pub struct ColorPanel {
     pub saturation_percent: u8,
 }
 
+impl ColorPanel {
+    /// How much stronger pictures' colours are drawn, in percent, to make
+    /// up for what the filter mutes: at most twice as strong.
+    pub fn boost_percent(&self) -> u16 {
+        (10_000 / u16::from(self.saturation_percent.max(1))).clamp(100, 200)
+    }
+}
+
 /// Everything the core needs to know about a screen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DisplayInfo {

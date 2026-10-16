@@ -27,7 +27,6 @@ use core::cell::Cell;
 use quireink_sdk::document::{
     Block, Document, DocumentError, ImageRef, Link, Locator, Metadata, TocEntry,
 };
-use quireink_sdk::image::GrayFile;
 use quireink_sdk::xml::{Token, Tokenizer, decode, local_name};
 use quireink_sdk::{Env, Storage};
 
@@ -303,10 +302,11 @@ pub(crate) fn decode_binaries(
     encoding: Encoding,
     wanted: &[(String, String, u32)],
     dir: &str,
+    color: bool,
 ) -> Result<(), DocumentError> {
     let wanted: Vec<&(String, String, u32)> = wanted
         .iter()
-        .filter(|(_, cache, _)| GrayFile::open(storage, cache).is_none())
+        .filter(|(_, cache, _)| quireink_sdk::image::ImageFile::open(storage, cache).is_none())
         .collect();
     if wanted.is_empty() {
         return Ok(());
@@ -336,7 +336,9 @@ pub(crate) fn decode_binaries(
         Token::End { name } if local_name(name) == "binary" => {
             if let Some(at) = current.take() {
                 let (_, cache, side) = wanted[at];
-                if failed.is_none() && convert::decode_file(storage, &temp, cache, *side).is_ok() {
+                if failed.is_none()
+                    && convert::decode_file(storage, &temp, cache, *side, color).is_ok()
+                {
                     done.push(at);
                 }
             }
@@ -368,6 +370,8 @@ pub struct Fb2Document {
     toc: Vec<(u8, String)>,
     cover: Option<String>,
     styles: bool,
+    /// Pictures in colour (ADR 0015).
+    color: bool,
     /// Size of the file: the length until it is converted.
     size: u32,
     length: Cell<u32>,
@@ -378,6 +382,17 @@ impl Fb2Document {
     /// of its own (FictionBook has no style sheets, but the setting keeps
     /// caches apart).
     pub fn open(storage: &dyn Storage, path: &str, styles: bool) -> Result<Self, DocumentError> {
+        let options = quireink_sdk::OpenOptions::default().publisher_styles(styles);
+        Self::open_options(storage, path, &options)
+    }
+
+    /// Opens a FictionBook as `options` say (styles, colour pictures).
+    pub fn open_options(
+        storage: &dyn Storage,
+        path: &str,
+        options: &quireink_sdk::OpenOptions,
+    ) -> Result<Self, DocumentError> {
+        let (styles, color) = (options.publisher_styles, options.color);
         let size = storage.size(path)?;
         let mut head = [0u8; 4096];
         let n = storage.read_at(path, 0, &mut head)?;
@@ -447,6 +462,7 @@ impl Fb2Document {
             toc: found.toc,
             cover: found.cover,
             styles,
+            color,
             size: u32::try_from(size).unwrap_or(u32::MAX - 1),
             length: Cell::new(UNKNOWN),
         })
@@ -468,6 +484,7 @@ impl Fb2Document {
                     &self.paths,
                     Default::default(),
                     self.styles,
+                    self.color,
                 )?
             }
         };
@@ -584,7 +601,7 @@ impl Document for Fb2Document {
             return Ok(None);
         }
         let (length, blocks) = self.converted(storage)?;
-        cached::block_at(storage, &self.paths, length, blocks, at.offset)
+        cached::block_at(storage, &self.paths, length, blocks, at.offset, self.color)
     }
 
     fn toc_len(&self, _: &dyn Storage) -> u32 {
@@ -610,19 +627,17 @@ impl Document for Fb2Document {
         let Some(id) = &self.cover else {
             return Ok(None);
         };
-        let cache = format!("{}/cover.gray", self.paths.dir);
+        let base = format!("{}/cover", self.paths.dir);
+        let cache = crate::pictures::file(&base, self.color);
         decode_binaries(
             storage,
             &self.path,
             self.encoding,
-            &[(id.clone(), cache.clone(), convert::COVER_SIDE)],
+            &[(id.clone(), cache, convert::COVER_SIDE)],
             &self.paths.dir,
+            self.color,
         )?;
-        Ok(GrayFile::open(storage, &cache).map(|image| ImageRef {
-            path: image.path,
-            width: image.width,
-            height: image.height,
-        }))
+        Ok(crate::pictures::open(storage, &base, self.color))
     }
 
     fn links(&self, storage: &dyn Storage, section: u32, from: u32, to: u32) -> Vec<Link> {

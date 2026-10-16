@@ -1,6 +1,8 @@
-//! Baseline JPEG, decoded one row of MCUs at a time. Only the first
-//! component (luma) is transformed; the others are entropy-decoded and
-//! dropped. Progressive JPEG goes on in [`progressive`](crate::progressive).
+//! Baseline JPEG, decoded one row of MCUs at a time. For gray only the
+//! first component (luma) is transformed; the others are entropy-decoded
+//! and dropped. For a sink that wants colour, the chroma components are
+//! transformed too, stretched to luma's resolution and turned into RGB.
+//! Progressive JPEG goes on in [`progressive`](crate::progressive).
 
 use alloc::vec::Vec;
 
@@ -455,11 +457,24 @@ fn scan(
     let row_width = mcus_x * mcu_w;
 
     let factor = factor_for(width, height, max_side);
-    let mut scaler = Downscaler::new(width, factor)?;
+    // Colour where it is wanted and the image has it (luma and chroma).
+    let color = sink.wants_color() && components.len() == 3;
+    let mut scaler = Downscaler::new(width, factor, if color { 3 } else { 1 })?;
     sink.start(scaler.out_width(), height.div_ceil(factor))?;
 
-    // One row of MCUs of luma at full resolution.
+    // One row of MCUs of luma at full resolution, and for colour of each
+    // chroma component stretched to it.
     let mut rows: Vec<u8> = zeroed(row_width * mcu_h)?;
+    let mut chroma: [Vec<u8>; 2] = if color {
+        [zeroed(row_width * mcu_h)?, zeroed(row_width * mcu_h)?]
+    } else {
+        [Vec::new(), Vec::new()]
+    };
+    let mut rgb: Vec<u8> = if color {
+        zeroed(row_width * 3)?
+    } else {
+        Vec::new()
+    };
     let mut block = [0u8; 64];
     let mut bits = Bits {
         reader,
@@ -516,7 +531,7 @@ fn scan(
                             if k > 63 {
                                 return Err(ImageError::Invalid("bad AC"));
                             }
-                            if index == 0 {
+                            if index == 0 || color {
                                 let value = Bits::extend(bits.receive(s)?, s);
                                 coef[usize::from(ZIGZAG[k])] =
                                     value.saturating_mul(i32::from(q[k]));
@@ -525,17 +540,28 @@ fn scan(
                             }
                             k += 1;
                         }
-                        if index != 0 {
+                        if index != 0 && !color {
                             continue;
                         }
                         idct(&coef, &mut block, 8);
-                        // Place the block (stretched if luma is subsampled).
+                        // Place the block, stretched where the component
+                        // has less resolution than the largest.
+                        let (sx, sy) = if index == 0 {
+                            (sx, sy)
+                        } else {
+                            (h_max / component.h, v_max / component.v)
+                        };
+                        let plane = match index {
+                            0 => &mut rows,
+                            1 => &mut chroma[0],
+                            _ => &mut chroma[1],
+                        };
                         let x0 = (mx * h_max + bx * sx) * 8;
                         let y0 = by * sy * 8;
                         for y in 0..8 * sy {
                             for x in 0..8 * sx {
                                 let at = (y0 + y) * row_width + x0 + x;
-                                rows[at] = block[(y / sy) * 8 + x / sx];
+                                plane[at] = block[(y / sy) * 8 + x / sx];
                             }
                         }
                     }
@@ -547,16 +573,52 @@ fn scan(
             if emitted == height {
                 break;
             }
-            scaler.row(&rows[y * row_width..(y + 1) * row_width], sink)?;
+            let luma_row = &rows[y * row_width..(y + 1) * row_width];
+            if color {
+                let at = y * row_width;
+                let (cb, cr) = (
+                    &chroma[0][at..at + row_width],
+                    &chroma[1][at..at + row_width],
+                );
+                for x in 0..row_width {
+                    let pixel = ycbcr_to_rgb(luma_row[x], cb[x], cr[x]);
+                    rgb[x * 3..x * 3 + 3].copy_from_slice(&pixel);
+                }
+                scaler.row(&rgb, sink)?;
+            } else {
+                scaler.row(luma_row, sink)?;
+            }
             emitted += 1;
         }
     }
     scaler.finish(sink)
 }
 
+/// JFIF's YCbCr as RGB.
+pub(crate) fn ycbcr_to_rgb(y: u8, cb: u8, cr: u8) -> [u8; 3] {
+    let y = i32::from(y);
+    let (cb, cr) = (i32::from(cb) - 128, i32::from(cr) - 128);
+    let clamp = |v: i32| v.clamp(0, 255) as u8;
+    [
+        clamp(y + ((91_881 * cr + 32_768) >> 16)),
+        clamp(y - ((22_554 * cb + 46_802 * cr + 32_768) >> 16)),
+        clamp(y + ((116_130 * cb + 32_768) >> 16)),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ycbcr_primaries() {
+        assert_eq!(ycbcr_to_rgb(128, 128, 128), [128, 128, 128]);
+        // Pure red, green and blue as JFIF codes them.
+        let close = |a: [u8; 3], b: [u8; 3]| a.iter().zip(b).all(|(x, y)| x.abs_diff(y) <= 2);
+        assert!(close(ycbcr_to_rgb(76, 85, 255), [255, 0, 0]));
+        assert!(close(ycbcr_to_rgb(150, 44, 21), [0, 255, 0]));
+        assert!(close(ycbcr_to_rgb(29, 255, 107), [0, 0, 255]));
+    }
 
     #[test]
     fn idct_of_a_flat_block_is_flat() {

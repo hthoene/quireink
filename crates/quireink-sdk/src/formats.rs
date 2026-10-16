@@ -25,6 +25,8 @@ pub struct OpenOptions {
     /// ([`Env::stylesheets`](crate::Env)); with the publisher's styles
     /// only.
     pub css: String,
+    /// Pictures in colour, for colour screens (ADR 0015); gray otherwise.
+    pub color: bool,
 }
 
 impl Default for OpenOptions {
@@ -32,6 +34,7 @@ impl Default for OpenOptions {
         Self {
             publisher_styles: true,
             css: String::new(),
+            color: false,
         }
     }
 }
@@ -45,6 +48,12 @@ impl OpenOptions {
     /// With `css` applied after the book's own styles.
     pub fn css(mut self, css: String) -> Self {
         self.css = css;
+        self
+    }
+
+    /// With pictures in colour, or gray.
+    pub fn color(mut self, on: bool) -> Self {
+        self.color = on;
         self
     }
 }
@@ -74,11 +83,25 @@ impl fmt::Debug for FormatSpec {
 #[derive(Debug, Default)]
 pub struct Formats {
     specs: Vec<FormatSpec>,
+    /// The screen shows colour: documents open with colour pictures.
+    color: bool,
 }
 
 impl Formats {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Whether documents open with colour pictures, for colour screens
+    /// (set by the kernel from the device).
+    pub fn set_color(&mut self, on: bool) {
+        self.color = on;
+    }
+
+    /// How documents open here unless asked otherwise: as the book
+    /// intends, with pictures in colour on colour screens.
+    pub fn options(&self) -> OpenOptions {
+        OpenOptions::default().color(self.color)
     }
 
     /// Releases unused capacity once registration is complete.
@@ -125,13 +148,14 @@ impl Formats {
         self.for_path(path).is_some()
     }
 
-    /// Opens `path` with the matching format, as the book intends.
+    /// Opens `path` with the matching format, as the book intends (see
+    /// [`Formats::options`]).
     pub fn open(
         &self,
         storage: &dyn Storage,
         path: &str,
     ) -> Result<Box<dyn Document>, DocumentError> {
-        self.open_with(storage, path, &OpenOptions::default())
+        self.open_with(storage, path, &self.options())
     }
 
     /// Opens `path` with the matching format and `options`.

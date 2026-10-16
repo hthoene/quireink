@@ -123,7 +123,8 @@ pub mod xml {
     pub use quireink_xml::*;
 }
 
-/// Streaming JPEG and PNG decoding to gray (see `quireink-image`).
+/// Streaming JPEG, PNG and GIF decoding to gray or colour (see
+/// `quireink-image`).
 pub mod image {
     pub use quireink_image::*;
 
@@ -158,6 +159,17 @@ pub mod image {
         to: &str,
         side: u32,
     ) -> Option<ImageRef> {
+        picture_from_file(storage, from, to, side, false)
+    }
+
+    /// [`gray_from_file`], or in colour (for colour screens) with `color`.
+    pub fn picture_from_file(
+        storage: &dyn Storage,
+        from: &str,
+        to: &str,
+        side: u32,
+        color: bool,
+    ) -> Option<ImageRef> {
         let mut head = [0u8; 8];
         let n = storage.read_at(from, 0, &mut head).ok()?;
         let format = Format::detect(&head[..n])?;
@@ -166,11 +178,18 @@ pub mod image {
             path: from,
             offset: 0,
         };
-        let mut writer = GrayWriter::new(storage, to);
-        decode(format, &mut source, side, &mut writer)
-            .and_then(|()| writer.finish())
-            .ok()?;
-        GrayFile::open(storage, to).map(|file| ImageRef {
+        if color {
+            let mut writer = ColorWriter::new(storage, to);
+            decode(format, &mut source, side, &mut writer)
+                .and_then(|()| writer.finish())
+                .ok()?;
+        } else {
+            let mut writer = GrayWriter::new(storage, to);
+            decode(format, &mut source, side, &mut writer)
+                .and_then(|()| writer.finish())
+                .ok()?;
+        }
+        ImageFile::open(storage, to).map(|file| ImageRef {
             path: file.path,
             width: file.width,
             height: file.height,

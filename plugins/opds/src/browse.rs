@@ -264,7 +264,7 @@ impl BrowseScreen {
                 continue;
             };
             let kept = cover_path(&url);
-            if let Some(file) = quireink_sdk::image::GrayFile::open(env.storage, &kept) {
+            if let Some(file) = quireink_sdk::image::ImageFile::open(env.storage, &kept) {
                 self.covers[i] = Some(ImageRef {
                     path: file.path,
                     width: file.width,
@@ -306,7 +306,14 @@ impl BrowseScreen {
         let image = (200..300)
             .contains(&status(params))
             .then(|| {
-                quireink_sdk::image::gray_from_file(env.storage, &tmp, &cover_path(&url), side)
+                let color = env.device.display.format.is_color();
+                quireink_sdk::image::picture_from_file(
+                    env.storage,
+                    &tmp,
+                    &cover_path(&url),
+                    side,
+                    color,
+                )
             })
             .flatten();
         let _ = env.storage.remove(&tmp);

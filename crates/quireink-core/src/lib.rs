@@ -447,6 +447,9 @@ impl KernelBuilder {
         kernel.shared.menus.set_sleep(kernel.shared.sleep);
         kernel.shared.menus.set_rotation(self.rotation);
         kernel.shared.menus.set_colors(self.colors);
+        // Colour screens open documents with colour pictures (ADR 0015).
+        let color = kernel.shared.device.display.format.is_color();
+        kernel.shared.formats.set_color(color);
 
         // Passwords and keys.
         if let Ok(data) = quireink_sdk::read_file(
@@ -582,6 +585,9 @@ impl KernelBuilder {
                 .settings
                 .bool(core_settings::NIGHT_MODE.as_str()),
         );
+        if let Some(panel) = kernel.shared.device.display.color {
+            kernel.framebuffer.set_saturation(panel.boost_percent());
+        }
         kernel.shrink_to_fit();
         kernel.shared.slots = kernel.registry.bound_slots();
         Ok(kernel)
@@ -1488,6 +1494,7 @@ impl Kernel {
             };
             if let Ok(mut framebuffer) = Framebuffer::banded(width, height, rows, display.format) {
                 framebuffer.set_inverted(self.framebuffer.is_inverted());
+                framebuffer.set_saturation(self.framebuffer.saturation());
                 self.framebuffer = framebuffer;
                 self.shared.device.display.width = width;
                 self.shared.device.display.height = height;

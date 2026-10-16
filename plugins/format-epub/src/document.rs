@@ -6,7 +6,6 @@ use core::cell::Cell;
 use quireink_sdk::document::{
     Block, Document, DocumentError, EmbeddedFont, ImageRef, Link, Locator, Metadata, TocEntry,
 };
-use quireink_sdk::image::GrayFile;
 use quireink_sdk::zip::ZipArchive;
 use quireink_sdk::{Env, Storage};
 
@@ -40,6 +39,8 @@ pub struct EpubDocument {
     chapters: String,
     /// Whether the book's CSS applies.
     styles: bool,
+    /// Pictures in colour (ADR 0015).
+    color: bool,
     /// Archive path of the cover image.
     cover: Option<String>,
     /// One's own stylesheets for this book (see [`user_css`]), applied
@@ -116,7 +117,7 @@ impl EpubDocument {
         path: &str,
         styles: bool,
     ) -> Result<Self, DocumentError> {
-        Self::open_styled(storage, path, styles, "")
+        Self::open_styled(storage, path, styles, "", false)
     }
 
     /// Opens a book as `options` say: with its styles or not, and with
@@ -126,7 +127,13 @@ impl EpubDocument {
         path: &str,
         options: &quireink_sdk::OpenOptions,
     ) -> Result<Self, DocumentError> {
-        Self::open_styled(storage, path, options.publisher_styles, &options.css)
+        Self::open_styled(
+            storage,
+            path,
+            options.publisher_styles,
+            &options.css,
+            options.color,
+        )
     }
 
     fn open_styled(
@@ -134,6 +141,7 @@ impl EpubDocument {
         path: &str,
         styles: bool,
         plugin_css: &str,
+        color: bool,
     ) -> Result<Self, DocumentError> {
         let archive = ZipArchive::open(storage, path).map_err(package::error)?;
         let cache = alloc::format!("{}/{:016x}", Env::plugin_dir(PLUGIN.as_str()), fnv(path));
@@ -179,6 +187,7 @@ impl EpubDocument {
             cache,
             chapters,
             styles,
+            color,
             user_css,
             pages: core::cell::RefCell::new(None),
         })
@@ -237,7 +246,7 @@ impl EpubDocument {
                     archive: &self.archive,
                     entry: &entry,
                 };
-                convert::convert(storage, &source, &paths, rules, self.styles)?
+                convert::convert(storage, &source, &paths, rules, self.styles, self.color)?
             }
         };
         if let Some(slot) = self.lengths.get(section as usize) {
@@ -344,22 +353,19 @@ impl Document for EpubDocument {
         let Some(source) = &self.cover else {
             return Ok(None);
         };
-        let path = alloc::format!("{}/cover.gray", self.cache);
-        if GrayFile::open(storage, &path).is_none() {
+        let base = alloc::format!("{}/cover", self.cache);
+        if !crate::pictures::has(storage, &base, self.color) {
             convert::decode_image(
                 storage,
                 &self.archive,
                 source,
-                &path,
+                &crate::pictures::file(&base, self.color),
                 &self.cache,
                 convert::COVER_SIDE,
+                self.color,
             )?;
         }
-        Ok(GrayFile::open(storage, &path).map(|image| ImageRef {
-            path: image.path,
-            width: image.width,
-            height: image.height,
-        }))
+        Ok(crate::pictures::open(storage, &base, self.color))
     }
 
     fn sections(&self) -> u32 {
@@ -483,7 +489,7 @@ impl Document for EpubDocument {
             return Ok(None);
         }
         let (paths, length, blocks) = self.chapter(storage, at.section)?;
-        cached::block_at(storage, &paths, length, blocks, at.offset)
+        cached::block_at(storage, &paths, length, blocks, at.offset, self.color)
     }
 
     fn links(&self, storage: &dyn Storage, section: u32, from: u32, to: u32) -> Vec<Link> {

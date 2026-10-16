@@ -1,8 +1,9 @@
 //! GIF: the first picture of the file (the first frame of an animation),
 //! on the logical screen it belongs to, decoded to gray.
 //!
-//! Colours go through the global or local colour table to gray;
-//! transparent pixels and the screen around the picture are white. The
+//! Colours go through the global or local colour table, to gray or, for
+//! a sink that wants colour, to RGB; transparent pixels and the screen
+//! around the picture are white. The
 //! LZW codes are decoded as they come, with a table of at most 4096
 //! entries (about 20 KiB). Pictures stored in order come out row by row;
 //! interlaced ones are gathered in a buffer of their size first, which
@@ -10,7 +11,7 @@
 
 use alloc::vec::Vec;
 
-use crate::{Downscaler, ImageError, ImageSink, Reader, factor_for, zeroed};
+use crate::{Downscaler, ImageError, ImageSink, Reader, factor_for, luma, zeroed};
 
 /// The most codes LZW in GIF uses (12 bits).
 const MAX_CODES: usize = 4096;
@@ -20,16 +21,13 @@ const WHITE: u8 = 255;
 /// damaged size would take long to fill.
 const MAX_PIXELS: u64 = 1 << 26;
 
-/// The gray of each colour of a colour table of `entries` colours.
-fn palette(reader: &mut Reader<'_>, entries: usize) -> Result<[u8; 256], ImageError> {
-    let mut gray = [0u8; 256];
-    for slot in gray.iter_mut().take(entries) {
-        let mut rgb = [0u8; 3];
-        reader.fill(&mut rgb)?;
-        let [r, g, b] = rgb.map(u32::from);
-        *slot = ((r * 299 + g * 587 + b * 114 + 500) / 1000) as u8;
+/// The colours of a colour table of `entries` colours.
+fn palette(reader: &mut Reader<'_>, entries: usize) -> Result<[[u8; 3]; 256], ImageError> {
+    let mut colors = [[0u8; 3]; 256];
+    for slot in colors.iter_mut().take(entries) {
+        reader.fill(slot)?;
     }
-    Ok(gray)
+    Ok(colors)
 }
 
 /// Skips data sub-blocks up to their terminator.
@@ -252,7 +250,7 @@ fn picture(
     reader: &mut Reader<'_>,
     width: u32,
     height: u32,
-    global: Option<[u8; 256]>,
+    global: Option<[[u8; 3]; 256]>,
     transparent: Option<u8>,
     max_side: u32,
     sink: &mut dyn ImageSink,
@@ -269,8 +267,19 @@ fn picture(
         global.ok_or(ImageError::Invalid("GIF without colours"))?
     };
     if let Some(index) = transparent {
-        colors[usize::from(index)] = WHITE;
+        colors[usize::from(index)] = [WHITE; 3];
     }
+    let color = sink.wants_color();
+    let channels = if color { 3 } else { 1 };
+    let grays = colors.map(|[r, g, b]| luma(u32::from(r), u32::from(g), u32::from(b)));
+    // Pixel `x` of a row in colour `index`.
+    let paint = |row: &mut [u8], x: usize, index: u8| {
+        if color {
+            row[x * 3..x * 3 + 3].copy_from_slice(&colors[usize::from(index)]);
+        } else {
+            row[x] = grays[usize::from(index)];
+        }
+    };
     let mut lzw = Lzw::new(reader.byte()?)?;
     let mut bits = Bits {
         reader,
@@ -283,9 +292,9 @@ fn picture(
     let right = (left + w).min(width);
     let bottom = (top + h).min(height);
     let factor = factor_for(width, height, max_side);
-    let mut scaler = Downscaler::new(width, factor)?;
+    let mut scaler = Downscaler::new(width, factor, channels)?;
     sink.start(scaler.out_width(), height.div_ceil(factor))?;
-    let mut row: Vec<u8> = zeroed(width as usize)?;
+    let mut row: Vec<u8> = zeroed(width as usize * channels)?;
     row.fill(WHITE);
     let blank = row.clone();
     // Interlaced: every row of the picture first.
@@ -316,7 +325,7 @@ fn picture(
             if interlaced {
                 gathered[(r * w + x) as usize] = index;
             } else if left + x < right {
-                row[(left + x) as usize] = colors[usize::from(index)];
+                paint(&mut row, (left + x) as usize, index);
             }
             x += 1;
             if x == w {
@@ -351,7 +360,7 @@ fn picture(
             }
             for px in 0..(right.saturating_sub(left)) {
                 let index = gathered[(pr * w + px) as usize];
-                row[(left + px) as usize] = colors[usize::from(index)];
+                paint(&mut row, (left + px) as usize, index);
             }
             scaler.row(&row, sink)?;
         }
