@@ -25,6 +25,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use quireink_sdk::builtin::{actions, groups, menus, params, slots};
+use quireink_sdk::json;
 use quireink_sdk::secrets::SecretChange;
 use quireink_sdk::ui::{self, UiStyle};
 use quireink_sdk::{
@@ -55,6 +56,24 @@ const LIBRARY: &str = "files.root";
 /// Calibre refuses to send to a device it thinks full.
 const SPACE: u64 = 64 << 30;
 
+/// What Calibre's metadata of a book says of it, for the library.
+fn provided(metadata: &str) -> quireink_sdk::library::Provided {
+    let text = |key: &str| json::raw_member(metadata, key).and_then(json::unquote);
+    let list = |key: &str| {
+        json::raw_member(metadata, key)
+            .map(json::string_array)
+            .unwrap_or_default()
+    };
+    quireink_sdk::library::Provided {
+        title: text("title"),
+        author: list("authors").into_iter().next(),
+        series: text("series"),
+        series_index: json::raw_member(metadata, "series_index")
+            .filter(|n| *n != "null")
+            .map(|n| n.trim_end_matches(".0").into()),
+        tags: list("tags"),
+    }
+}
 /// The Calibre plugin.
 #[derive(Debug, Default)]
 pub struct Calibre;
@@ -280,6 +299,11 @@ impl CalibreScreen {
                         let _ = env.storage.remove(&coming.path);
                         if env.storage.rename(&coming.part, &coming.path).is_ok() {
                             library::remember(env.storage, &coming.lpath, &coming.metadata);
+                            quireink_sdk::library::provide(
+                                env.storage,
+                                &coming.path,
+                                provided(&coming.metadata),
+                            );
                             self.received += 1;
                         }
                     }

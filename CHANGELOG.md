@@ -8,6 +8,9 @@ change the plugin SDK.
 
 ## [0.2.0] - 2026-10-16
 
+- Books from a catalog (OPDS) or from Calibre keep the title, author,
+  series and tags the source gives, where the book names none itself
+  (text files, PDFs): `library::provide`.
 - *Say what is chosen* (System, where the device speaks): says the row
   or button the buttons move to, with a switch's state, for using
   QuireInk without looking at the screen.

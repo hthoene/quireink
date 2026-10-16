@@ -38,6 +38,8 @@ const COVER: Id = Id::new_static("opds.cover");
 const ENTRY: &str = "entry";
 /// Parameter: the file name a download gets.
 const NAME: &str = "name";
+/// Parameter: the authors of a download, as the catalog names them.
+const AUTHORS: &str = "authors";
 
 fn feed_path() -> String {
     format!(
@@ -402,7 +404,9 @@ impl BrowseScreen {
             let name = book_name(entry, &book.url, ext);
             let params = Params::new()
                 .with(URL, book.url.clone())
-                .with(NAME, name.clone());
+                .with(NAME, name.clone())
+                .with(params::TITLE, entry.title.clone())
+                .with(AUTHORS, entry.authors.clone());
             cx.command(Command::Http(request(
                 &self.catalog,
                 &book.url,
@@ -440,6 +444,17 @@ impl BrowseScreen {
             let message = env.i18n.tr("opds.cannot-save").to_string();
             return self.say(message, cx);
         }
+        // What the catalog says of it, for books that say nothing.
+        let first = |authors: &str| authors.split(" & ").next().map(String::from);
+        quireink_sdk::library::provide(
+            env.storage,
+            &target,
+            quireink_sdk::library::Provided {
+                title: params.get(params::TITLE).map(String::from),
+                author: params.get(AUTHORS).and_then(first),
+                ..Default::default()
+            },
+        );
         self.message = None;
         let text = env.i18n.format(
             "opds.saved",
