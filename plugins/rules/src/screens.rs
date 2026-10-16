@@ -1,8 +1,10 @@
 //! The list of rules, and the list to pick an action or a switch from.
 //!
 //! Adding a rule asks, one after the other: when (a choice; for a time of
-//! day, the time on the keyboard), what (a choice: run an action, turn a
-//! switch on or off), then which action or switch ([`PickScreen`]).
+//! day the time on the keyboard and the days, for a repeat the minutes,
+//! for the battery the percentage, for a switch which one), what (a
+//! choice: run an action, turn a switch on or off), then which action or
+//! switch ([`PickScreen`]).
 
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
@@ -16,13 +18,39 @@ use quireink_sdk::{
     Screen, SettingKind,
 };
 
-use crate::rule::{self, Effect, Rule, Trigger};
+use crate::rule::{self, EVERY_DAY, Effect, Rule, Trigger, WEEKDAYS, WEEKENDS};
 use crate::{CHOICE, PICK_SCREEN, effect_text, trigger_text};
 
 /// Replies: a trigger, a time, an effect, an action or switch picked, a
 /// rule's option.
 const TRIGGER_CHOSEN: Id = Id::new_static("rules.trigger-chosen");
 const TIME_ENTERED: Id = Id::new_static("rules.time-entered");
+const DAYS_CHOSEN: Id = Id::new_static("rules.days-chosen");
+const EVERY_ENTERED: Id = Id::new_static("rules.every-entered");
+const BATTERY_ENTERED: Id = Id::new_static("rules.battery-entered");
+/// The switch a trigger watches was picked.
+const TRIGGER_PICKED: Id = Id::new_static("rules.trigger-picked");
+/// The triggers offered, in this order.
+const TRIGGERS: [&str; 13] = [
+    "start",
+    "time",
+    "every",
+    "book",
+    "book-closed",
+    "book-finished",
+    "resume",
+    "sleep",
+    "battery",
+    "charging",
+    "unplugged",
+    "switch-on",
+    "switch-off",
+];
+/// The days a time of day may apply: every day, weekdays, weekends, or
+/// one day (Monday first).
+const DAYS: [&str; 10] = [
+    "every", "weekdays", "weekends", "1", "2", "3", "4", "5", "6", "0",
+];
 const EFFECT_CHOSEN: Id = Id::new_static("rules.effect-chosen");
 const PICKED: Id = Id::new_static("rules.picked");
 const OPTION_CHOSEN: Id = Id::new_static("rules.option-chosen");
@@ -31,9 +59,13 @@ const ACTION: &str = "action";
 const SWITCH: &str = "switch";
 
 /// A rule being added: when, then what kind of effect.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 struct Draft {
     trigger: Option<Trigger>,
+    /// The time of day entered, until its days are chosen.
+    minute: Option<u16>,
+    /// The switch to watch is turned on (`true`) or off.
+    watch_on: bool,
     /// `action`, `switch-on` or `switch-off`.
     effect: Option<&'static str>,
 }
@@ -118,7 +150,7 @@ impl RulesScreen {
                     env.i18n.tr("rules.when"),
                     "",
                     "rules.trigger.",
-                    &["start", "time", "book", "resume"],
+                    &TRIGGERS,
                 ));
             }
             None => {}
@@ -130,7 +162,7 @@ impl RulesScreen {
         let Some(Row::Rule(i)) = self.rows().get(index).copied() else {
             return self.activate(index, cx);
         };
-        let title = trigger_text(&env, self.rules[i].trigger);
+        let title = trigger_text(&env, &self.rules[i].trigger);
         cx.command(choice::open(
             CHOICE,
             OPTION_CHOSEN,
@@ -182,7 +214,7 @@ impl Screen for RulesScreen {
             |canvas, index, rect, focused| match rows[index] {
                 Row::Rule(i) => {
                     let rule = &rules[i];
-                    let title = trigger_text(env, rule.trigger);
+                    let title = trigger_text(env, &rule.trigger);
                     let note = effect_text(env, &rule.effect);
                     ui::draw_switch_row(canvas, env, &style, rect, focused, &title, &note, rule.on);
                 }
@@ -280,18 +312,35 @@ impl Screen for RulesScreen {
     fn on_event(&mut self, event: &Id, params: &Params, cx: &mut Cx<'_, '_>) {
         let env = *cx.env();
         let option = params.get(choice::OPTION).unwrap_or_default();
+        let ask = |cx: &mut Cx<'_, '_>, title: &str, text: &str, reply: Id| {
+            cx.command(Command::OpenSlot(
+                slots::KEYBOARD,
+                Params::new()
+                    .with(params::TITLE, env.i18n.tr(title).to_string())
+                    .with(params::TEXT, text.to_string())
+                    .with(params::REPLY, reply.as_str()),
+            ));
+        };
         if *event == TRIGGER_CHOSEN {
             self.draft.trigger = match option {
                 "start" => Some(Trigger::Start),
                 "book" => Some(Trigger::BookOpened),
+                "book-closed" => Some(Trigger::BookClosed),
+                "book-finished" => Some(Trigger::BookFinished),
                 "resume" => Some(Trigger::Resume),
-                "time" => {
-                    cx.command(Command::OpenSlot(
-                        slots::KEYBOARD,
+                "sleep" => Some(Trigger::Sleep),
+                "charging" => Some(Trigger::Charging),
+                "unplugged" => Some(Trigger::Unplugged),
+                "time" => return ask(cx, "rules.time-title", "22:00", TIME_ENTERED),
+                "every" => return ask(cx, "rules.every-title", "30", EVERY_ENTERED),
+                "battery" => return ask(cx, "rules.battery-title", "20", BATTERY_ENTERED),
+                "switch-on" | "switch-off" => {
+                    self.draft.watch_on = option == "switch-on";
+                    cx.command(Command::OpenScreen(
+                        PICK_SCREEN,
                         Params::new()
-                            .with(params::TITLE, env.i18n.tr("rules.time-title").to_string())
-                            .with(params::TEXT, "22:00")
-                            .with(params::REPLY, TIME_ENTERED.as_str()),
+                            .with(params::MODE, SWITCH)
+                            .with(params::REPLY, TRIGGER_PICKED.as_str()),
                     ));
                     return;
                 }
@@ -301,11 +350,61 @@ impl Screen for RulesScreen {
         } else if *event == TIME_ENTERED {
             match rule::parse_time(params.get(params::TEXT).unwrap_or_default()) {
                 Some(minute) => {
-                    self.draft.trigger = Some(Trigger::Time(minute));
-                    self.ask_effect(cx);
+                    self.draft.minute = Some(minute);
+                    cx.command(choice::open(
+                        CHOICE,
+                        DAYS_CHOSEN,
+                        env.i18n.tr("rules.days-title"),
+                        "",
+                        "rules.days.",
+                        &DAYS,
+                    ));
                 }
                 None => cx.command(Command::Notify(env.i18n.tr("rules.bad-time").to_string())),
             }
+        } else if *event == DAYS_CHOSEN {
+            let days = match option {
+                "every" => EVERY_DAY,
+                "weekdays" => WEEKDAYS,
+                "weekends" => WEEKENDS,
+                day => match day.parse::<u8>() {
+                    Ok(d) if d < 7 => 1 << d,
+                    _ => return,
+                },
+            };
+            if let Some(minute) = self.draft.minute.take() {
+                self.draft.trigger = Some(Trigger::Time { minute, days });
+                self.ask_effect(cx);
+            }
+        } else if *event == EVERY_ENTERED || *event == BATTERY_ENTERED {
+            let number = params
+                .get(params::TEXT)
+                .and_then(|t| t.trim().trim_end_matches('%').trim().parse::<u16>().ok());
+            let trigger = match number {
+                Some(m) if *event == EVERY_ENTERED && (1..=24 * 60).contains(&m) => {
+                    Trigger::Every(m)
+                }
+                Some(p) if *event == BATTERY_ENTERED && (1..=100).contains(&p) => {
+                    Trigger::BatteryBelow(p as u8)
+                }
+                _ => {
+                    let text = env.i18n.tr("rules.bad-number").to_string();
+                    cx.command(Command::Notify(text));
+                    return;
+                }
+            };
+            self.draft.trigger = Some(trigger);
+            self.ask_effect(cx);
+        } else if *event == TRIGGER_PICKED {
+            let Some(id) = params.get(params::ID).and_then(|id| Id::parse(id).ok()) else {
+                return;
+            };
+            self.draft.trigger = Some(if self.draft.watch_on {
+                Trigger::SwitchOn(id)
+            } else {
+                Trigger::SwitchOff(id)
+            });
+            self.ask_effect(cx);
         } else if *event == EFFECT_CHOSEN {
             let (effect, kind) = match option {
                 "action" => ("action", ACTION),
@@ -322,7 +421,7 @@ impl Screen for RulesScreen {
             ));
         } else if *event == PICKED {
             let (Some(trigger), Some(kind), Some(id)) = (
-                self.draft.trigger,
+                self.draft.trigger.clone(),
                 self.draft.effect,
                 params.get(params::ID).and_then(|id| Id::parse(id).ok()),
             ) else {

@@ -9,17 +9,40 @@ use quireink_sdk::{Env, Id, Storage};
 
 use crate::PLUGIN;
 
+/// Days of the week as bits, Sunday the lowest (as `LocalTime::weekday`).
+pub(crate) const EVERY_DAY: u8 = 0b111_1111;
+/// Monday to Friday.
+pub(crate) const WEEKDAYS: u8 = 0b011_1110;
+/// Saturday and Sunday.
+pub(crate) const WEEKENDS: u8 = 0b100_0001;
+
 /// When a rule applies.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Trigger {
     /// QuireInk has started.
     Start,
-    /// Every day at this minute of the day.
-    Time(u16),
-    /// A book was opened.
+    /// At this minute of the day, on the days set ([`EVERY_DAY`] …).
+    Time {
+        minute: u16,
+        days: u8,
+    },
+    /// Every so many minutes, from the start.
+    Every(u16),
+    /// A book was opened, closed, read to its last page.
     BookOpened,
-    /// The device woke up.
+    BookClosed,
+    BookFinished,
+    /// The device woke up, or goes to sleep.
     Resume,
+    Sleep,
+    /// The battery's charge fell below this percentage.
+    BatteryBelow(u8),
+    /// Charging began, or ended.
+    Charging,
+    Unplugged,
+    /// A switch (an on/off setting) was turned on, or off.
+    SwitchOn(Id),
+    SwitchOff(Id),
 }
 
 /// What a rule does.
@@ -40,23 +63,65 @@ pub(crate) struct Rule {
 }
 
 impl Trigger {
-    /// As written in the file: `start`, `time 22:00`, `book`, `resume`.
-    fn text(self) -> String {
+    /// As written in the file: `start`, `time 22:00`, `time 07:00 62`,
+    /// `every 30`, `book`, `book-closed`, `book-finished`, `resume`,
+    /// `sleep`, `battery-below 20`, `charging`, `unplugged`,
+    /// `switch-on <id>`, `switch-off <id>`.
+    fn text(&self) -> String {
         match self {
             Trigger::Start => String::from("start"),
-            Trigger::Time(minute) => format!("time {}", clock(minute)),
+            Trigger::Time { minute, days } if *days == EVERY_DAY => {
+                format!("time {}", clock(*minute))
+            }
+            Trigger::Time { minute, days } => format!("time {} {days}", clock(*minute)),
+            Trigger::Every(minutes) => format!("every {minutes}"),
             Trigger::BookOpened => String::from("book"),
+            Trigger::BookClosed => String::from("book-closed"),
+            Trigger::BookFinished => String::from("book-finished"),
             Trigger::Resume => String::from("resume"),
+            Trigger::Sleep => String::from("sleep"),
+            Trigger::BatteryBelow(percent) => format!("battery-below {percent}"),
+            Trigger::Charging => String::from("charging"),
+            Trigger::Unplugged => String::from("unplugged"),
+            Trigger::SwitchOn(id) => format!("switch-on {id}"),
+            Trigger::SwitchOff(id) => format!("switch-off {id}"),
         }
     }
 
     fn parse(text: &str) -> Option<Trigger> {
-        match text.trim() {
-            "start" => Some(Trigger::Start),
-            "book" => Some(Trigger::BookOpened),
-            "resume" => Some(Trigger::Resume),
-            other => parse_time(other.strip_prefix("time")?).map(Trigger::Time),
-        }
+        let text = text.trim();
+        let (word, rest) = text.split_once(' ').unwrap_or((text, ""));
+        let rest = rest.trim();
+        Some(match word {
+            "start" => Trigger::Start,
+            "book" => Trigger::BookOpened,
+            "book-closed" => Trigger::BookClosed,
+            "book-finished" => Trigger::BookFinished,
+            "resume" => Trigger::Resume,
+            "sleep" => Trigger::Sleep,
+            "charging" => Trigger::Charging,
+            "unplugged" => Trigger::Unplugged,
+            "time" => {
+                let (time, days) = rest.split_once(' ').unwrap_or((rest, ""));
+                let days = match days.trim() {
+                    "" => EVERY_DAY,
+                    days => days.parse::<u8>().ok().filter(|d| d & EVERY_DAY != 0)? & EVERY_DAY,
+                };
+                Trigger::Time {
+                    minute: parse_time(time)?,
+                    days,
+                }
+            }
+            "every" => Trigger::Every(rest.parse::<u16>().ok().filter(|&m| m > 0)?),
+            "battery-below" => Trigger::BatteryBelow(
+                rest.parse::<u8>()
+                    .ok()
+                    .filter(|&p| (1..=100).contains(&p))?,
+            ),
+            "switch-on" => Trigger::SwitchOn(Id::parse(rest).ok()?),
+            "switch-off" => Trigger::SwitchOff(Id::parse(rest).ok()?),
+            _ => return None,
+        })
     }
 }
 
@@ -136,20 +201,54 @@ mod tests {
     fn rules_are_kept() {
         let storage = MemoryStorage::new();
         assert!(load(&storage).is_empty());
-        let rules = [
-            Rule {
-                trigger: Trigger::Time(22 * 60),
-                effect: Effect::Switch(Id::new_static("core.night-mode"), true),
-                on: true,
+        let night = Id::new_static("core.night-mode");
+        let rules: Vec<Rule> = [
+            Trigger::Time {
+                minute: 22 * 60,
+                days: EVERY_DAY,
             },
-            Rule {
-                trigger: Trigger::Start,
-                effect: Effect::Action(Id::new_static("opds.sync")),
-                on: false,
+            Trigger::Time {
+                minute: 7 * 60,
+                days: WEEKDAYS,
             },
-        ];
+            Trigger::Start,
+            Trigger::Every(30),
+            Trigger::BookOpened,
+            Trigger::BookClosed,
+            Trigger::BookFinished,
+            Trigger::Resume,
+            Trigger::Sleep,
+            Trigger::BatteryBelow(20),
+            Trigger::Charging,
+            Trigger::Unplugged,
+            Trigger::SwitchOn(night.clone()),
+            Trigger::SwitchOff(night.clone()),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(i, trigger)| Rule {
+            trigger,
+            effect: if i % 2 == 0 {
+                Effect::Switch(night.clone(), true)
+            } else {
+                Effect::Action(Id::new_static("opds.sync"))
+            },
+            on: i % 3 != 0,
+        })
+        .collect();
         save(&storage, &rules);
         assert_eq!(load(&storage), rules);
+        // Written before days existed: every day.
+        assert_eq!(
+            Trigger::parse("time 22:00"),
+            Some(Trigger::Time {
+                minute: 1320,
+                days: EVERY_DAY
+            })
+        );
+        assert_eq!(Trigger::parse("battery-below 0"), None);
+        assert_eq!(Trigger::parse("every 0"), None);
+        assert_eq!(Trigger::parse("time 22:00 0"), None);
     }
 
     #[test]

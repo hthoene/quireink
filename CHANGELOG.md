@@ -6,6 +6,15 @@ change the plugin SDK.
 
 ## [Unreleased]
 
+- Rules know many more moments: at a time of day on chosen days (every
+  day, Monday to Friday, at weekends, one day), every so many minutes,
+  when a book is closed or read to its end, when the device goes to
+  sleep, when the battery falls below a percentage, when charging begins
+  or ends, and when a switch is turned on or off.
+- Plugin SDK: events `core.book-closed` and `core.book-finished` (the
+  reader emits them), and `Screen::on_close`, called when a screen is
+  closed.
+
 - Gestures as on phones: up from the bottom edge goes home, down from the
   top edge opens the quick panel, in from a side goes back (while reading
   it turns the page). The quick panel holds night mode, the light,
