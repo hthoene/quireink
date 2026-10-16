@@ -81,11 +81,12 @@ const CASES: &[Case] = &[
         name: "boox-home-arranged",
         profile: "boox-go-7",
         book: None,
+        // Placed in the grid: the clock and the date side by side, the
+        // tools in a corner, empty cells between.
         sets: &[
-            "home.page-1=home.status, core.fill, home.clock, core.space, home.date, core.fill, home.tools",
-            "home.clock.align=core.align.center",
-            "home.date.align=core.align.center",
-            "home.status.align=core.align.right",
+            "home.page-1=home.clock 0/0 2x1, home.date 2/0 2x1, tool:core.library 0/4 1x1, tool:core.settings 3/4 1x1",
+            "home.clock.date=false",
+            "home.date.align=core.align.right",
         ],
         script: "",
         colour: 0,
@@ -126,9 +127,9 @@ const CASES: &[Case] = &[
         name: "boox-widget-editor",
         profile: "boox-go-7",
         book: None,
-        // The pencil, then the second widget.
-        sets: &["home.page-1=home.status, home.clock, home.date"],
-        script: "tap:1185:1635,wait:300,tap:600:246,wait:300",
+        // A long press shows the grid; a tap on the clock its options.
+        sets: &[],
+        script: "long-tap:600:1400,wait:300,tap:600:120,wait:300",
         colour: 0,
     },
     Case {

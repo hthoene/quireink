@@ -143,8 +143,9 @@ pub(crate) fn register(r: &mut dyn Registrar) -> Result<(), RegisterError> {
             }
             let pages: [&str; 4] = ["home.page-1", "home.page-2", "home.page-3", "home.page-4"];
             let shown = pages.iter().any(|page| {
+                // Also placed in a grid: `stats.today 0/2 4x1`.
                 quireink_sdk::status::item_ids(env.settings.text(page))
-                    .any(|id| id == TODAY.as_str())
+                    .any(|item| item.split_whitespace().next() == Some(TODAY.as_str()))
             });
             if let Some(SettingValue::Text(list)) = env.settings.get(pages[0])
                 && !shown
@@ -152,7 +153,7 @@ pub(crate) fn register(r: &mut dyn Registrar) -> Result<(), RegisterError> {
                 let mut ids: alloc::vec::Vec<&str> = quireink_sdk::status::item_ids(list).collect();
                 let at = ids
                     .iter()
-                    .position(|id| *id == "home.continue")
+                    .position(|item| item.split_whitespace().next() == Some("home.continue"))
                     .map_or(ids.len(), |i| i + 1);
                 let today = TODAY;
                 ids.insert(at, today.as_str());
