@@ -22,9 +22,9 @@ use quireink_sdk::{
     Screen, Storage, files,
 };
 
-use crate::books;
-use crate::listing::{Entry, Listing};
-use crate::{PLUGIN, ROOT};
+use crate::ROOT;
+use quireink_sdk::library;
+use quireink_sdk::library::catalog::{self, Record, Walk};
 
 /// The view of authors (`mode` = `authors`), series (`series`) or tags
 /// (`tags`).
@@ -35,9 +35,6 @@ pub(crate) const MODE_TAGS: &str = "tags";
 pub(crate) const MODE_FAVOURITES: &str = "favourites";
 /// The books matching a search (`search`, the words as `text`).
 pub(crate) const MODE_SEARCH: &str = "search";
-/// Between a book's tags in the catalog.
-const TAG_SEPARATOR: char = '\u{1f}';
-
 /// What books are listed under.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Shelf {
@@ -63,198 +60,18 @@ impl Shelf {
 }
 /// Names held at most.
 const MAX_NAMES: usize = 2000;
-/// Entries looked at, and books opened, in one step of making the catalog.
-const STEP_ENTRIES: usize = 12;
-/// Pause between steps, so the screen stays responsive.
+/// Pause between steps of making the catalog, so the screen stays
+/// responsive.
 const STEP_DELAY_MS: u64 = 30;
 
-fn catalog_path() -> String {
-    format!("{}/catalog.txt", Env::plugin_dir(PLUGIN.as_str()))
-}
-
-fn building_path() -> String {
-    format!("{}/catalog.tmp", Env::plugin_dir(PLUGIN.as_str()))
-}
-
-/// A book in the catalog.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct Line {
-    pub path: String,
-    pub author: String,
-    pub title: String,
-    pub series: String,
-    pub number: String,
-    /// Separated by [`TAG_SEPARATOR`].
-    pub tags: String,
-}
-
-impl Line {
-    fn parse(text: &str) -> Option<Line> {
-        let mut fields = text.split('\t');
-        let path = fields.next().filter(|p| !p.is_empty())?.to_string();
-        let mut next = || fields.next().unwrap_or("").to_string();
-        Some(Line {
-            path,
-            author: next(),
-            title: next(),
-            series: next(),
-            number: next(),
-            tags: next(),
-        })
-    }
-
-    fn text(&self) -> String {
-        let clean = |s: &str| s.replace(['\t', '\n', '\r'], " ");
-        format!(
-            "{}\t{}\t{}\t{}\t{}\t{}\n",
-            clean(&self.path),
-            clean(&self.author),
-            clean(&self.title),
-            clean(&self.series),
-            clean(&self.number),
-            clean(&self.tags)
-        )
-    }
-
-    /// What it is listed under in a view: its author, its series, or
-    /// each of its tags.
-    fn keys(&self, shelf: Shelf) -> Vec<&str> {
-        match shelf {
-            Shelf::Authors => alloc::vec![self.author.as_str()],
-            Shelf::Series => alloc::vec![self.series.as_str()],
-            Shelf::Tags => self
-                .tags
-                .split(TAG_SEPARATOR)
-                .filter(|t| !t.is_empty())
-                .collect(),
-            Shelf::Favourites | Shelf::Search => Vec::new(),
-        }
-    }
-
-    /// Whether all of the words of `query` (lowercase) are in its title,
-    /// author, series, tags or file name.
-    fn matches(&self, query: &[String]) -> bool {
-        let text = format!(
-            "{} {} {} {} {}",
-            self.title,
-            self.author,
-            self.series,
-            self.tags.replace(TAG_SEPARATOR, " "),
-            files::name(&self.path)
-        )
-        .to_lowercase();
-        query.iter().all(|word| text.contains(word.as_str()))
-    }
-}
-
-/// Calls `f` with each book of the catalog, reading it in pieces.
-fn each_line(storage: &dyn Storage, path: &str, f: &mut dyn FnMut(Line)) {
-    let mut buf = [0u8; 2048];
-    let mut rest: Vec<u8> = Vec::new();
-    let mut offset = 0u64;
-    while let Ok(n) = storage.read_at(path, offset, &mut buf) {
-        if n == 0 {
-            break;
-        }
-        offset += n as u64;
-        rest.extend_from_slice(&buf[..n]);
-        while let Some(end) = rest.iter().position(|&b| b == b'\n') {
-            let line: Vec<u8> = rest.drain(..=end).collect();
-            if let Some(line) = Line::parse(String::from_utf8_lossy(&line).trim_end()) {
-                f(line);
-            }
-        }
-    }
-    if let Some(line) = Line::parse(String::from_utf8_lossy(&rest).trim_end()) {
-        f(line);
-    }
-}
-
-/// Making the catalog anew: the folders still to walk, and where the
-/// current one is.
-#[derive(Debug, Default)]
-struct Walk {
-    dirs: Vec<String>,
-    dir: Option<String>,
-    last: Option<Entry>,
-    /// Books found so far.
-    found: usize,
-}
-
-impl Walk {
-    fn start(env: &Env<'_>) -> Walk {
-        let root = env
-            .settings
-            .text(ROOT.as_str())
-            .trim_matches('/')
-            .to_string();
-        let _ = env.storage.write(&building_path(), &[]);
-        Walk {
-            dirs: Vec::from([root]),
-            ..Walk::default()
-        }
-    }
-
-    /// One step: a few entries of a folder, at most one book opened;
-    /// `true` when the catalog is complete.
-    fn step(&mut self, env: &Env<'_>) -> bool {
-        let Some(dir) = self.dir.clone().or_else(|| self.dirs.pop()) else {
-            // Done: the new catalog replaces the old one.
-            let _ = files::move_to(env.storage, &building_path(), &catalog_path());
-            return true;
-        };
-        self.dir = Some(dir.clone());
-        let listing = Listing {
-            storage: env.storage,
-            formats: env.formats,
-            dir: &dir,
-            folders_only: false,
-            rank: None,
-        };
-        let entries = listing.after(self.last.as_ref(), STEP_ENTRIES);
-        if entries.is_empty() {
-            self.dir = None;
-            self.last = None;
-            return false;
-        }
-        for entry in entries {
-            let path = files::join(&dir, &entry.name);
-            let mut opened = false;
-            if entry.is_dir {
-                self.dirs.push(path);
-            } else {
-                let cached = books::load(env.storage, &path).filter(|b| b.indexed);
-                let book = cached.unwrap_or_else(|| {
-                    opened = true;
-                    books::index(env, &path)
-                });
-                let title = book.title.unwrap_or_else(|| {
-                    let name = entry.name.as_str();
-                    name.rsplit_once('.').map_or(name, |(n, _)| n).to_string()
-                });
-                let line = Line {
-                    path,
-                    author: book.author.unwrap_or_default(),
-                    title,
-                    series: book.series.unwrap_or_default(),
-                    number: book.series_index.unwrap_or_default(),
-                    tags: book
-                        .tags
-                        .iter()
-                        .map(|t| t.replace(TAG_SEPARATOR, " "))
-                        .collect::<Vec<_>>()
-                        .join(&TAG_SEPARATOR.to_string()),
-                };
-                let _ = env.storage.append(&building_path(), line.text().as_bytes());
-                self.found += 1;
-            }
-            self.last = Some(entry);
-            // Opening a book takes a moment: the rest in the next step.
-            if opened {
-                break;
-            }
-        }
-        false
+/// What a book is listed under in a view: its author, its series, or
+/// each of its tags.
+fn keys(record: &Record, shelf: Shelf) -> Vec<&str> {
+    match shelf {
+        Shelf::Authors => alloc::vec![record.author.as_str()],
+        Shelf::Series => alloc::vec![record.series.as_str()],
+        Shelf::Tags => record.tags().collect(),
+        Shelf::Favourites | Shelf::Search => Vec::new(),
     }
 }
 
@@ -262,8 +79,8 @@ impl Walk {
 /// has, alphabetically.
 fn names(storage: &dyn Storage, shelf: Shelf) -> Vec<(String, usize)> {
     let mut names: Vec<(String, usize)> = Vec::new();
-    each_line(storage, &catalog_path(), &mut |line| {
-        for key in line.keys(shelf) {
+    catalog::each(storage, &mut |line| {
+        for key in keys(&line, shelf) {
             // Books without series are no series; those without author
             // are listed under "Unknown author".
             if shelf == Shelf::Series && key.is_empty() {
@@ -294,60 +111,32 @@ fn format_of(path: &str) -> String {
         .unwrap_or_default()
 }
 
-/// The books of the catalog matching `query`, by title.
-fn search(storage: &dyn Storage, query: &str) -> Vec<Line> {
-    let words: Vec<String> = query
-        .to_lowercase()
-        .split_whitespace()
-        .map(String::from)
-        .collect();
-    let mut found = Vec::new();
-    if words.is_empty() {
-        return found;
-    }
-    each_line(storage, &catalog_path(), &mut |line| {
-        if found.len() < MAX_NAMES && line.matches(&words) {
-            found.push(line);
-        }
-    });
-    found.sort_by_key(|l| l.title.to_lowercase());
-    found
-}
-
 /// The favourite books still there, as catalog lines from the details
 /// the library keeps.
-fn favourites(env: &Env<'_>) -> Vec<Line> {
-    books::favourites(env.storage)
+fn favourites(env: &Env<'_>) -> Vec<Record> {
+    library::favourites(env.storage)
         .into_iter()
         .filter(|path| env.storage.size(path).is_ok())
         .map(|path| {
-            let book = books::load(env.storage, &path).unwrap_or_default();
-            let name = files::name(&path);
-            Line {
-                title: book
-                    .title
-                    .unwrap_or_else(|| name.rsplit_once('.').map_or(name, |(n, _)| n).to_string()),
-                author: book.author.unwrap_or_default(),
-                series: book.series.unwrap_or_default(),
-                number: book.series_index.unwrap_or_default(),
-                tags: String::new(),
-                path,
-            }
+            Record::of(
+                &path,
+                &library::book(env.storage, &path).unwrap_or_default(),
+            )
         })
         .collect()
 }
 
 /// The books of author, series or tag `name`: a series by its numbers,
 /// the others by title.
-fn books_of(storage: &dyn Storage, shelf: Shelf, name: &str) -> Vec<Line> {
+fn books_of(storage: &dyn Storage, shelf: Shelf, name: &str) -> Vec<Record> {
     let series = shelf == Shelf::Series;
     let mut books = Vec::new();
-    each_line(storage, &catalog_path(), &mut |line| {
-        if line.keys(shelf).contains(&name) {
+    catalog::each(storage, &mut |line| {
+        if keys(&line, shelf).contains(&name) {
             books.push(line);
         }
     });
-    let number = |l: &Line| l.number.parse::<f32>().unwrap_or(f32::MAX);
+    let number = |l: &Record| l.number.parse::<f32>().unwrap_or(f32::MAX);
     books.sort_by(|a, b| {
         let by_number = if series {
             number(a).total_cmp(&number(b))
@@ -366,7 +155,7 @@ pub(crate) struct ShelfScreen {
     shelf: Shelf,
     names: Vec<(String, usize)>,
     /// The author or series chosen, with its books.
-    chosen: Option<(String, Vec<Line>)>,
+    chosen: Option<(String, Vec<Record>)>,
     /// Where the list of names was, to return there.
     names_focus: usize,
     /// The catalog being made anew, until it is complete.
@@ -390,7 +179,7 @@ impl ShelfScreen {
                     .unwrap_or_default()
                     .trim()
                     .to_string();
-                let found = search(env.storage, &query);
+                let found = catalog::search(env.storage, &query);
                 Some((query, found))
             }
             _ => None,
@@ -474,7 +263,9 @@ impl Screen for ShelfScreen {
             .draw(canvas, env, &style, &title, None, self.list.paging(len));
         if len == 0 {
             let message = match &self.walk {
-                Some(walk) => env.i18n.plural("files.collecting", walk.found as i64, &[]),
+                Some(walk) => env
+                    .i18n
+                    .plural("files.collecting", walk.found() as i64, &[]),
                 None if self.shelf == Shelf::Series => env.i18n.tr("files.no-series").to_string(),
                 None if self.shelf == Shelf::Tags => env.i18n.tr("files.no-tags").to_string(),
                 _ if self.shelf == Shelf::Favourites => {
@@ -543,7 +334,7 @@ impl Screen for ShelfScreen {
         }
         if self.walk.is_none() && !self.walked {
             let env = *cx.env();
-            self.walk = Some(Walk::start(&env));
+            self.walk = Some(Walk::start(env.storage, env.settings.text(ROOT.as_str())));
             cx.wake_at(env.now);
         }
     }
@@ -567,7 +358,7 @@ impl Screen for ShelfScreen {
         self.names = names(env.storage, self.shelf);
         if let Some((name, books)) = &mut self.chosen {
             *books = if self.shelf == Shelf::Search {
-                search(env.storage, name)
+                catalog::search(env.storage, name)
             } else {
                 books_of(env.storage, self.shelf, name)
             };
@@ -648,34 +439,35 @@ mod tests {
     #[test]
     fn catalog_lines_and_views() {
         let storage = MemoryStorage::new();
-        let lines = [
+        let books = [
             (
                 "b/2.epub",
                 "Ann",
                 "Second",
                 "Tales",
                 "2",
-                "Fantasy\u{1f}Kids",
+                &["Fantasy", "Kids"][..],
             ),
-            ("b/1.epub", "Ann", "First", "Tales", "1", "Fantasy"),
-            ("b/x.epub", "bob", "Alone", "", "", ""),
-            ("b/y.txt", "", "Nobody's", "", "", ""),
+            ("b/1.epub", "Ann", "First", "Tales", "1", &["Fantasy"]),
+            ("b/x.epub", "bob", "Alone", "", "", &[]),
+            ("b/y.txt", "", "Nobody's", "", "", &[]),
         ];
-        let mut text = String::new();
-        for (path, author, title, series, number, tags) in lines {
-            text.push_str(
-                &Line {
-                    path: path.into(),
-                    author: author.into(),
-                    title: title.into(),
-                    series: series.into(),
-                    number: number.into(),
-                    tags: tags.into(),
-                }
-                .text(),
-            );
-        }
-        storage.write(&catalog_path(), text.as_bytes()).unwrap();
+        let records: Vec<Record> = books
+            .iter()
+            .map(|(path, author, title, series, number, tags)| {
+                let some = |s: &str| (!s.is_empty()).then(|| String::from(s));
+                let book = library::Book {
+                    author: some(author),
+                    title: some(title),
+                    series: some(series),
+                    series_index: some(number),
+                    tags: tags.iter().map(|t| String::from(*t)).collect(),
+                    ..library::Book::default()
+                };
+                Record::of(path, &book)
+            })
+            .collect();
+        catalog::write(&storage, &records);
         let authors = names(&storage, Shelf::Authors);
         assert_eq!(
             authors,
@@ -692,13 +484,13 @@ mod tests {
         );
         assert_eq!(books_of(&storage, Shelf::Tags, "Kids")[0].title, "Second");
         // Searching: every word, anywhere, in any case.
-        let found: Vec<String> = search(&storage, "ann TALES")
+        let found: Vec<String> = catalog::search(&storage, "ann TALES")
             .into_iter()
             .map(|l| l.title)
             .collect();
         assert_eq!(found, ["First", "Second"]);
-        assert_eq!(search(&storage, "kids")[0].title, "Second");
-        assert!(search(&storage, "nothing").is_empty());
+        assert_eq!(catalog::search(&storage, "kids")[0].title, "Second");
+        assert!(catalog::search(&storage, "nothing").is_empty());
         assert_eq!(format_of("b/x.epub"), "EPUB");
         assert_eq!(format_of("b/y.FB2.zip"), "FB2");
         let tales = books_of(&storage, Shelf::Series, "Tales");

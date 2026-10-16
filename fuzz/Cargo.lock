@@ -86,11 +86,11 @@ dependencies = [
 
 [[package]]
 name = "quireink-config"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "quireink-document"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "quireink-platform",
 ]
@@ -104,30 +104,31 @@ dependencies = [
  "quireink-image",
  "quireink-plugin-format-epub",
  "quireink-plugin-format-txt",
+ "quireink-plugin-koreader",
  "quireink-sdk",
 ]
 
 [[package]]
 name = "quireink-graphics"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "quireink-platform",
 ]
 
 [[package]]
 name = "quireink-hyphen"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "quireink-i18n"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "quireink-config",
 ]
 
 [[package]]
 name = "quireink-image"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "miniz_oxide",
  "quireink-platform",
@@ -135,7 +136,7 @@ dependencies = [
 
 [[package]]
 name = "quireink-layout"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "quireink-document",
  "quireink-text",
@@ -143,25 +144,33 @@ dependencies = [
 
 [[package]]
 name = "quireink-platform"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "quireink-plugin-format-epub"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
+ "miniz_oxide",
  "quireink-sdk",
 ]
 
 [[package]]
 name = "quireink-plugin-format-txt"
-version = "0.1.0"
+version = "0.1.1"
+dependencies = [
+ "quireink-sdk",
+]
+
+[[package]]
+name = "quireink-plugin-koreader"
+version = "0.1.1"
 dependencies = [
  "quireink-sdk",
 ]
 
 [[package]]
 name = "quireink-sdk"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "quireink-config",
  "quireink-document",
@@ -171,14 +180,22 @@ dependencies = [
  "quireink-image",
  "quireink-layout",
  "quireink-platform",
+ "quireink-sqlite",
  "quireink-text",
  "quireink-xml",
  "quireink-zip",
 ]
 
 [[package]]
+name = "quireink-sqlite"
+version = "0.1.1"
+dependencies = [
+ "quireink-platform",
+]
+
+[[package]]
 name = "quireink-text"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "quireink-graphics",
  "quireink-platform",
@@ -186,11 +203,11 @@ dependencies = [
 
 [[package]]
 name = "quireink-xml"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "quireink-zip"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "miniz_oxide",
  "quireink-platform",

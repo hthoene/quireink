@@ -21,10 +21,8 @@
 
 extern crate alloc;
 
-mod books;
 mod folders;
 mod info;
-mod listing;
 mod shelves;
 
 use alloc::borrow::Cow;
@@ -33,12 +31,12 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use books::Book;
-use listing::{Entry, Listing, UNRANKED};
 use quireink_sdk::builtin::{
     actions as core_actions, events, groups, params, settings as core_settings, slots,
 };
 use quireink_sdk::files;
+use quireink_sdk::library::listing::{Entry, Listing, UNRANKED};
+use quireink_sdk::library::{self, Book};
 use quireink_sdk::ui::{self, ListChange, ListView, UiStyle};
 use quireink_sdk::{
     Arg, Canvas, Color, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Manifest, MenuEntry,
@@ -184,15 +182,6 @@ impl Plugin for Files {
             .advanced()
             .description("files.setting.archive.help"),
         )?;
-        r.subscribe(
-            events::BOOK_MOVED,
-            Box::new(|env, params, _| {
-                if let (Some(from), Some(to)) = (params.get(params::FROM), params.get(params::PATH))
-                {
-                    books::moved(env.storage, from, to);
-                }
-            }),
-        )?;
         r.add_setting(
             SettingSpec::new(
                 VIEW,
@@ -289,14 +278,6 @@ impl Plugin for Files {
                 order,
             })?;
         }
-        r.subscribe(
-            events::BOOK_OPENED,
-            Box::new(|env, params, _| books::record(env, params, true)),
-        )?;
-        r.subscribe(
-            events::PAGE_TURNED,
-            Box::new(|env, params, _| books::record(env, params, false)),
-        )?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/en.ini")))?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/de.ini")))?;
         Ok(())
@@ -381,7 +362,7 @@ impl Browser {
         } else {
             format!("{}/", self.dir)
         };
-        self.recent = books::load_opened(env.storage)
+        self.recent = library::opened_books(env.storage)
             .into_iter()
             .enumerate()
             .filter_map(|(rank, path)| {
@@ -407,7 +388,7 @@ impl Browser {
             .into_iter()
             .map(|entry| {
                 let book = (!entry.is_dir)
-                    .then(|| books::load(env.storage, &self.path_of(&entry)))
+                    .then(|| library::book(env.storage, &self.path_of(&entry)))
                     .flatten();
                 (entry, book)
             })
@@ -521,7 +502,7 @@ impl Browser {
         }
         let env = *cx.env();
         let path = self.path_of(&entry);
-        let favourite = books::favourites(env.storage).contains(&path);
+        let favourite = library::favourites(env.storage).contains(&path);
         let finished = book.as_ref().and_then(|b| b.progress) == Some(100);
         let mut options = alloc::vec![
             "open",
@@ -565,7 +546,7 @@ impl Browser {
             )),
             "favourite" | "unfavourite" => {
                 let favourite = option == "favourite";
-                books::set_favourite(env.storage, path, favourite);
+                library::set_favourite(env.storage, path, favourite);
                 let key = if favourite {
                     "files.favourite-added"
                 } else {
@@ -574,7 +555,7 @@ impl Browser {
                 cx.command(Command::Notify(env.i18n.tr(key).to_string()));
             }
             "finished" | "unfinished" => {
-                books::set_finished(env.storage, path, option == "finished");
+                library::set_finished(env.storage, path, option == "finished");
                 self.load(&env);
                 cx.request_redraw();
             }
@@ -941,7 +922,7 @@ impl Screen for Browser {
             return;
         };
         let path = self.path_of(&self.page[slot].0);
-        self.page[slot].1 = Some(books::index(&env, &path));
+        self.page[slot].1 = Some(library::index(&env, &path));
         let index = self.first + slot;
         if index / rows == self.list.page() {
             cx.request_redraw_area(self.list.row_rect(index % rows));

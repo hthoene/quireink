@@ -16,6 +16,7 @@ quireink-plugin-format-epub = { path = "../plugins/format-epub" }
 quireink-plugin-format-txt = { path = "../plugins/format-txt" }
 quireink-hyphen = { path = "../crates/quireink-hyphen" }
 quireink-image = { path = "../crates/quireink-image" }
+quireink-plugin-koreader = { path = "../plugins/koreader" }
 
 # Not part of the main workspace.
 [workspace]
@@ -51,6 +52,13 @@ bench = false
 [[bin]]
 name = "image"
 path = "fuzz_targets/image.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "lua"
+path = "fuzz_targets/lua.rs"
 test = false
 doc = false
 bench = false

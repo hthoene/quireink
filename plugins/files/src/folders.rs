@@ -23,7 +23,7 @@ use quireink_sdk::{
     SettingValue,
 };
 
-use crate::listing::{Entry, Listing};
+use quireink_sdk::library::listing::{Entry, Listing};
 
 /// The setting the chosen folder is written to.
 pub(crate) const ID: &str = "id";

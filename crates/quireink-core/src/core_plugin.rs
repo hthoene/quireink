@@ -7,9 +7,10 @@ use alloc::boxed::Box;
 use alloc::vec::Vec;
 
 use quireink_sdk::builtin::{
-    actions, fonts, groups, keymap_presets, menus, params, screens, setting_sections, settings,
-    settings_sections, slots, status_items,
+    actions, events, fonts, groups, keymap_presets, menus, params, screens, setting_sections,
+    settings, settings_sections, slots, status_items,
 };
+use quireink_sdk::library;
 use quireink_sdk::time::{self, AUTO, CLOCK_12H, CLOCK_24H, TIME_ZONES};
 use quireink_sdk::widgets::{self, WidgetSpec};
 use quireink_sdk::{
@@ -152,6 +153,25 @@ impl Plugin for CorePlugin {
                 }),
             ),
         ];
+        // The library service follows the reading, whichever plugins
+        // show it.
+        r.subscribe(
+            events::BOOK_OPENED,
+            Box::new(|env, params, _| library::record(env, params, true)),
+        )?;
+        r.subscribe(
+            events::PAGE_TURNED,
+            Box::new(|env, params, _| library::record(env, params, false)),
+        )?;
+        r.subscribe(
+            events::BOOK_MOVED,
+            Box::new(|env, params, _| {
+                if let (Some(from), Some(to)) = (params.get(params::FROM), params.get(params::PATH))
+                {
+                    library::moved(env.storage, from, to);
+                }
+            }),
+        )?;
         for (id, title, handler) in handled {
             r.add_action(ActionSpec {
                 id,

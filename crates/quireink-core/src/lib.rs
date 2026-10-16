@@ -461,6 +461,8 @@ impl KernelBuilder {
             kernel.shared.secrets = quireink_sdk::secrets::Secrets::decode(&text);
         }
 
+        quireink_sdk::library::take_over_old(kernel.shared.storage.as_ref());
+
         // The configuration file on the device, then the shell's overrides.
         let stored = read_config(kernel.shared.storage.as_ref());
         let configs: Vec<&str> = [stored.as_deref(), self.user_config.as_deref()]

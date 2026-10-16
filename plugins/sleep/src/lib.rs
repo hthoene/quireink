@@ -26,13 +26,14 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use quireink_sdk::builtin::{events, groups, params, slots};
+use quireink_sdk::builtin::{events, groups, slots};
 use quireink_sdk::document::ImageRef;
+use quireink_sdk::library;
 use quireink_sdk::ui::{self, UiStyle};
 use quireink_sdk::{
     Canvas, Color, Command, Cx, Env, Handled, Id, Manifest, MenuNeed, Params, Plugin, Priority,
     Rect, RefreshMode, RegisterError, Registrar, SDK_VERSION, Screen, ScreenSpec, SettingKind,
-    SettingSpec, SettingValue, Storage, Version,
+    SettingSpec, SettingValue, Version,
 };
 
 pub const PLUGIN: Id = Id::new_static("sleep");
@@ -122,27 +123,6 @@ impl Plugin for Sleep {
         for item in [SHOW, FOLDER, WIDGET_LIST] {
             r.set_menu_need(item, MenuNeed::Sleep)?;
         }
-        // The book read last, for its cover.
-        r.subscribe(
-            events::BOOK_OPENED,
-            Box::new(|env, params, _| {
-                if let Some(path) = params.get(params::PATH) {
-                    let _ = env.storage.write(&data("book.txt"), path.as_bytes());
-                }
-            }),
-        )?;
-        r.subscribe(
-            events::BOOK_MOVED,
-            Box::new(|env, params, _| {
-                let (Some(from), Some(to)) = (params.get(params::FROM), params.get(params::PATH))
-                else {
-                    return;
-                };
-                if last_book(env.storage).as_deref() == Some(from) {
-                    let _ = env.storage.write(&data("book.txt"), to.as_bytes());
-                }
-            }),
-        )?;
         r.add_screen(ScreenSpec {
             id: SCREEN,
             title: Cow::Borrowed("sleep.title"),
@@ -155,38 +135,13 @@ impl Plugin for Sleep {
     }
 }
 
-fn last_book(storage: &dyn Storage) -> Option<String> {
-    let data = quireink_sdk::read_file(storage, &data("book.txt"), 1024).ok()?;
-    String::from_utf8(data).ok().filter(|p| !p.is_empty())
-}
-
-/// The cover of the book read last. Where it is is kept, so the book
-/// is opened for it only once (memory is short while a book is open).
+/// The cover of the book read last, as the library knows it: the book is
+/// opened for it only once (memory is short while a book is open).
 fn cover(env: &Env<'_>) -> Option<ImageRef> {
-    let path = last_book(env.storage)?;
-    let kept = quireink_sdk::read_file(env.storage, &data("cover.txt"), 2048)
-        .ok()
-        .and_then(|d| String::from_utf8(d).ok())
-        .and_then(|text| {
-            let mut f = text.splitn(4, '\t');
-            let (book, width, height, image) = (f.next()?, f.next()?, f.next()?, f.next()?);
-            if book != path || !env.storage.exists(image) {
-                return None;
-            }
-            Some(ImageRef {
-                path: image.to_string(),
-                width: width.parse().ok()?,
-                height: height.parse().ok()?,
-            })
-        });
-    if kept.is_some() {
-        return kept;
-    }
-    let document = env.formats.open(env.storage, &path).ok()?;
-    let image = document.cover(env.storage).ok().flatten()?;
-    let line = format!("{path}\t{}\t{}\t{}", image.width, image.height, image.path);
-    let _ = env.storage.write(&data("cover.txt"), line.as_bytes());
-    Some(image)
+    let path = library::opened_books(env.storage).into_iter().next()?;
+    library::indexed(env, &path)
+        .cover
+        .filter(|image| env.storage.exists(&image.path))
 }
 
 /// The next picture of the folder, decoded to fit the screen.
