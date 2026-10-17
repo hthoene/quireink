@@ -1122,6 +1122,22 @@ impl Kernel {
         }
     }
 
+    /// Draws the whole screen anew and passes it to `out` as
+    /// [`Kernel::render`] does, while nothing on it changes: for a shell
+    /// that sends a screenshot elsewhere, e.g. over USB. While changes wait
+    /// to be rendered it does nothing and returns `false`.
+    pub fn capture(&mut self, out: &mut dyn FnMut(u16, FrameView<'_>)) -> bool {
+        if self.unrendered.is_some() {
+            return false;
+        }
+        let rendered = self.rendered;
+        self.unrendered = Some(self.framebuffer.bounds());
+        self.render(out);
+        // What the panel was last sent stays what rerender sends again.
+        self.rendered = rendered;
+        true
+    }
+
     /// The framebuffer, for tests of a kernel that holds the whole screen.
     #[cfg(test)]
     pub(crate) fn frame(&self) -> FrameView<'_> {

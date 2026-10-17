@@ -47,6 +47,16 @@ cargo run --release
 flashes the X4 and shows its log. Books go on a microSD card formatted
 with FAT32, e.g. in `Books`.
 
+## Remote control
+
+Over USB, [`tools/x4-remote.py`](../../tools/x4-remote.py) presses the
+X4's buttons, takes screenshots and prints what the screen shows, with
+the steps of the emulator's scripts:
+
+```sh
+python tools/x4-remote.py --script "page-forward,right,describe" --screenshot out/x4.png
+```
+
 ## What works, what is to come
 
 - The screen (black and white, fast and full refreshes), the seven

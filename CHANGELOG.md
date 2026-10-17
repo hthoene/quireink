@@ -11,6 +11,10 @@ change the plugin SDK.
 - X4: SD cards with a partition table (MBR or GPT), as nearly all come,
   are read; before, only cards with the file system from the first block
   were. A card in exFAT is named as such in the log.
+- X4: remote control over USB for testing on the device:
+  `tools/x4-remote.py` presses its buttons, takes screenshots and tells
+  what the screen shows, with the steps of the emulator's scripts.
+  `Kernel::capture` draws the whole screen for a shell to send elsewhere.
 
 ## [0.3.0] - 2026-10-16
 

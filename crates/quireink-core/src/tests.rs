@@ -1880,6 +1880,18 @@ fn bands_pass_whole_aligned_rows_and_again() {
     );
     // Drawn again the same, e.g. for the controller's memory of the frame shown.
     assert_eq!(passed(&mut kernel, true), parts);
+
+    // Captured: the whole screen in bands, and what was rendered last
+    // stays what is drawn again.
+    let mut captured = Vec::new();
+    assert!(kernel.capture(&mut |top, rows| captured.push((top, rows.height))));
+    assert_eq!(captured.first(), Some(&(0, 16)));
+    let height = captured.iter().map(|(_, h)| *h).sum::<u16>();
+    assert_eq!(height, kernel.framebuffer.bounds().height);
+    assert_eq!(passed(&mut kernel, true), parts);
+    // With changes waiting, nothing is captured.
+    kernel.unrendered = Some(Rect::new(0, 0, 10, 10));
+    assert!(!kernel.capture(&mut |_, _| panic!("captured with changes waiting")));
 }
 
 #[test]

@@ -18,6 +18,7 @@
 extern crate alloc;
 
 mod card;
+mod remote;
 
 use alloc::boxed::Box;
 use core::cell::RefCell;
@@ -176,6 +177,10 @@ fn main() -> ! {
     let mut power = Input::new(p.GPIO3, InputConfig::default().with_pull(Pull::Up));
     let usb = Input::new(p.GPIO20, InputConfig::default());
     let mut debouncer = Debouncer::new();
+    // Commands from a computer on USB; the log goes out the same way.
+    let mut remote = remote::Remote::new(p.USB_DEVICE);
+    // A button pressed over USB, and when to let it go.
+    let mut remote_release: Option<(&'static str, Instant)> = None;
     // Woken by the power button, it is still down: it counts once released.
     let mut power_armed = false;
 
@@ -256,6 +261,52 @@ fn main() -> ! {
             };
             let effects = kernel.handle(now(), InputEvent::Button { name, state });
             sleep |= apply(&mut kernel, &mut display, effects, &mut wake_at);
+        }
+
+        if let Some(command) = remote.poll() {
+            match command {
+                remote::Command::Press(name, ms) if remote_release.is_none() => {
+                    let pressed = ButtonState::Pressed;
+                    let effects = kernel.handle(
+                        now(),
+                        InputEvent::Button {
+                            name,
+                            state: pressed,
+                        },
+                    );
+                    sleep |= apply(&mut kernel, &mut display, effects, &mut wake_at);
+                    remote_release = Some((name, Instant(now().0 + ms)));
+                }
+                remote::Command::Press(..) => esp_println::println!("QI:BUSY"),
+                remote::Command::Shot => {
+                    remote::shot(&mut kernel);
+                }
+                remote::Command::Describe => remote::describe(&mut kernel),
+                remote::Command::Screen => {
+                    let id = kernel.active_screen().map_or("", |id| id.as_str());
+                    esp_println::println!("QI:SCREEN {id}");
+                }
+                remote::Command::Heap => {
+                    esp_println::println!(
+                        "QI:HEAP {} {}",
+                        esp_alloc::HEAP.used(),
+                        esp_alloc::HEAP.free()
+                    );
+                }
+            }
+        }
+        if let Some((name, _)) = remote_release.filter(|(_, at)| *at <= now()) {
+            remote_release = None;
+            let released = ButtonState::Released;
+            let effects = kernel.handle(
+                now(),
+                InputEvent::Button {
+                    name,
+                    state: released,
+                },
+            );
+            sleep |= apply(&mut kernel, &mut display, effects, &mut wake_at);
+            esp_println::println!("QI:OK");
         }
 
         if wake_at.is_some_and(|due| due <= now()) {
