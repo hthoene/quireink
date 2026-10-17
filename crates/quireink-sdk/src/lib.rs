@@ -87,7 +87,7 @@ pub use menus::{MenuEntry, MenuItem, MenuNeed, MenuSection, Menus};
 pub use params::Params;
 pub use plugin::{Manifest, Plugin, Priority, RegisterError, Registrar, SlotSpec};
 pub use plugins::{PluginInfo, PluginState, Plugins, RequiredFor};
-pub use screen::{Cx, Handled, Hint, Output, Screen, ScreenFactory, ScreenSpec};
+pub use screen::{Cx, Handled, Hint, Hints, Output, Screen, ScreenFactory, ScreenSpec};
 pub use settings::{
     Level, SettingError, SettingGroupSpec, SettingKind, SettingSpec, SettingValue, Settings,
 };

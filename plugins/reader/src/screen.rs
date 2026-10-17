@@ -26,6 +26,9 @@ use quireink_sdk::status::context as status_context;
 
 /// Pages laid out per background step; small enough to keep input snappy.
 const PAGES_PER_STEP: usize = 8;
+/// On small devices, where laying out a page takes half a second (the X4),
+/// one: buttons wait no longer than that.
+const PAGES_PER_STEP_SMALL: usize = 1;
 /// Pause between background steps.
 const STEP_DELAY_MS: u64 = 2;
 /// Pages remembered for going back before the index covers them.
@@ -1702,9 +1705,13 @@ impl Book {
                 None => Locator::START,
             },
         };
-        let mut starts = Vec::with_capacity(PAGES_PER_STEP);
+        let per_step = match env.device.memory {
+            quireink_sdk::MemoryClass::Small => PAGES_PER_STEP_SMALL,
+            _ => PAGES_PER_STEP,
+        };
+        let mut starts = Vec::with_capacity(per_step);
         let mut done = false;
-        for _ in 0..PAGES_PER_STEP {
+        for _ in 0..per_step {
             let Ok(page) = self.layout(env, next) else {
                 // Unreadable: give up indexing, reading still works.
                 return false;

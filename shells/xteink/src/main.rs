@@ -228,7 +228,7 @@ fn main() -> ! {
                     }
                     if let Some(command) = remote.poll()
                         && let Some((name, _)) =
-                            remote::answer(&mut kernel, &DEVICE.display, command)
+                            remote.answer(&mut kernel, &DEVICE.display, command)
                     {
                         esp_println::println!("QI:OK");
                         if name == quireink_platform::buttons::POWER {
@@ -291,12 +291,14 @@ fn main() -> ! {
             } else {
                 ButtonState::Released
             };
+            let started = now();
             let effects = kernel.handle(now(), InputEvent::Button { name, state });
+            info!("{name}: {} ms", now().since(started));
             sleep |= apply(&mut kernel, &mut display, effects, &mut wake_at);
         }
 
         if let Some(command) = remote.poll()
-            && let Some((name, ms)) = remote::answer(&mut kernel, &DEVICE.display, command)
+            && let Some((name, ms)) = remote.answer(&mut kernel, &DEVICE.display, command)
         {
             if remote_release.is_some() {
                 esp_println::println!("QI:BUSY");
@@ -316,6 +318,7 @@ fn main() -> ! {
         if let Some((name, _)) = remote_release.filter(|(_, at)| *at <= now()) {
             remote_release = None;
             let released = ButtonState::Released;
+            let started = now();
             let effects = kernel.handle(
                 now(),
                 InputEvent::Button {
@@ -323,12 +326,18 @@ fn main() -> ! {
                     state: released,
                 },
             );
+            info!("{name}: {} ms", now().since(started));
             sleep |= apply(&mut kernel, &mut display, effects, &mut wake_at);
             esp_println::println!("QI:OK");
         }
 
         if wake_at.is_some_and(|due| due <= now()) {
+            let started = now();
             let effects = kernel.tick(now());
+            let took = now().since(started);
+            if took > 50 {
+                info!("tick: {took} ms");
+            }
             sleep |= apply(&mut kernel, &mut display, effects, &mut wake_at);
         }
         delay.delay_millis(POLL_MS as u32);
@@ -364,14 +373,17 @@ where
             Planes::BOTH
         };
         let mut failed = None;
+        let started = now();
         kernel.render(&mut |top, rows| {
             if let Err(e) = display.write_rows(top, rows, planes) {
                 failed = Some(e);
             }
         });
+        let drawn = now();
         if let Err(e) = display.refresh(refresh, false) {
             failed = Some(e);
         }
+        let shown = now();
         if refresh == Refresh::Fast {
             // The frame now shown, for the next fast refresh to compare.
             kernel.rerender(&mut |top, rows| {
@@ -383,6 +395,12 @@ where
         if let Some(e) = failed {
             warn!("display: {e:?}");
         }
+        info!(
+            "frame: drawn in {} ms, shown in {} ms, sent again in {} ms",
+            drawn.since(started),
+            shown.since(drawn),
+            now().since(shown)
+        );
     }
     for warning in kernel.take_warnings() {
         warn!("{warning}");

@@ -123,6 +123,8 @@ impl Plugin for Sleep {
         for item in [SHOW, FOLDER, WIDGET_LIST] {
             r.set_menu_need(item, MenuNeed::Sleep)?;
         }
+        // Asleep, the buttons do nothing but wake the device.
+        r.set_screen_hints(SCREEN, quireink_sdk::Hints::Hidden)?;
         r.add_screen(ScreenSpec {
             id: SCREEN,
             title: Cow::Borrowed("sleep.title"),

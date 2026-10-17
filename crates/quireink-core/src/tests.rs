@@ -2194,6 +2194,7 @@ impl Plugin for SizedPlugin {
             })?;
             r.bind_slot(slot, id, Priority::DEFAULT)?;
         }
+        r.set_screen_hints(Id::new_static("sized.reader"), quireink_sdk::Hints::OnPress)?;
         Ok(())
     }
 }
@@ -2233,8 +2234,25 @@ fn a_row_of_hints_names_the_buttons_below_the_screen() {
     assert_eq!(made.borrow().last(), Some(&("reader", 90)));
     assert_eq!(made.borrow().len(), 2);
     assert_eq!(kernel.hint_row(), None);
+    // A button of the row shows the row over the page for a while; a side
+    // button does not.
+    press(&mut kernel, 50, "page-forward");
+    assert_eq!(kernel.hint_row(), None);
+    let effects = press(&mut kernel, 100, "confirm");
+    let over = Rect::new(0, above, 90, 90 - above);
+    assert_eq!(kernel.hint_row(), Some(over));
+    assert!(effects.wake_at().is_some());
+    render(&mut kernel);
+    // Recognized as the button is let go, 50 ms after it went down.
+    kernel.tick(Instant(150 + 4000));
+    assert_eq!(kernel.hint_row(), None);
+    // Gone, the page is drawn there again.
+    assert_eq!(kernel.unrendered.map(|r| r.bottom()), Some(90));
+    kernel.apply(Command::ShowHints);
+    kernel.finish();
+    assert_eq!(kernel.hint_row(), Some(over));
     // Back from it, the home screen has the part above the row again.
-    press(&mut kernel, 100, "back");
+    press(&mut kernel, 5000, "back");
     assert_eq!(kernel.content().height, above);
     assert_eq!(kernel.hints[0], Hint::Hidden);
 

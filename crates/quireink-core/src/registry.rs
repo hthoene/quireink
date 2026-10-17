@@ -26,6 +26,8 @@ struct SlotCandidate {
 pub(crate) struct Registry {
     pub(crate) screens: VecMap<Id, ScreenSpec>,
     pub(crate) slots: VecMap<Id, SlotSpec>,
+    /// When screens show the row of hints, where they said.
+    pub(crate) hints: VecMap<Id, quireink_sdk::Hints>,
     candidates: Vec<SlotCandidate>,
     /// Slot bindings from the user's configuration.
     user_bindings: VecMap<Id, Id>,
@@ -36,6 +38,7 @@ impl Registry {
     pub(crate) fn shrink_to_fit(&mut self) {
         self.screens.shrink_to_fit();
         self.slots.shrink_to_fit();
+        self.hints.shrink_to_fit();
         self.candidates.shrink_to_fit();
         self.user_bindings.shrink_to_fit();
     }
@@ -43,6 +46,11 @@ impl Registry {
     /// The screen bound to `slot`: the user's choice if that screen exists,
     /// otherwise the candidate with the highest priority (the later
     /// registration wins a tie).
+    /// When `screen` shows the row of hints.
+    pub(crate) fn hints_of(&self, screen: &Id) -> quireink_sdk::Hints {
+        self.hints.get(screen).copied().unwrap_or_default()
+    }
+
     /// Every slot some screen is bound to.
     pub(crate) fn bound_slots(&self) -> Vec<Id> {
         let mut slots: Vec<Id> = Vec::new();
@@ -111,6 +119,7 @@ pub(crate) struct Staging {
     pub(crate) menu_sections: Vec<quireink_sdk::MenuSection>,
     pub(crate) icons: Vec<(Id, Cow<'static, str>)>,
     pub(crate) menu_needs: Vec<(Id, quireink_sdk::MenuNeed)>,
+    pub(crate) screen_hints: Vec<(Id, quireink_sdk::Hints)>,
     pub(crate) keymap_presets: Vec<(Id, Cow<'static, str>)>,
     pub(crate) setting_defaults: Vec<(Id, Cow<'static, str>)>,
     pub(crate) status_items: Vec<StatusItemSpec>,
@@ -369,6 +378,15 @@ impl Registrar for PluginRegistrar<'_> {
         need: quireink_sdk::MenuNeed,
     ) -> Result<(), RegisterError> {
         self.staging.menu_needs.push((item, need));
+        Ok(())
+    }
+
+    fn set_screen_hints(
+        &mut self,
+        screen: Id,
+        hints: quireink_sdk::Hints,
+    ) -> Result<(), RegisterError> {
+        self.staging.screen_hints.push((screen, hints));
         Ok(())
     }
 

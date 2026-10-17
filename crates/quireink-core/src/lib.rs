@@ -68,8 +68,9 @@ use quireink_sdk::builtin::{
 };
 use quireink_sdk::{
     Actions, Command, Cx, Direction, Env, EventHandler, Fonts, Formats, Gesture, GestureKind,
-    Handled, Hint, Hyphenation, Id, Manifest, Menus, Metrics, Output, Params, Plugin, PluginInfo,
-    PluginState, Plugins, RegisterError, RequiredFor, SDK_VERSION, Screen, Settings, StatusItems,
+    Handled, Hint, Hints, Hyphenation, Id, Manifest, Menus, Metrics, Output, Params, Plugin,
+    PluginInfo, PluginState, Plugins, RegisterError, RequiredFor, SDK_VERSION, Screen, Settings,
+    StatusItems,
 };
 
 use crate::core_plugin::{CORE, CorePlugin};
@@ -87,6 +88,8 @@ pub use quireink_sdk as sdk;
 
 /// Commands may trigger further commands; this bounds runaway loops.
 const MAX_COMMAND_ROUNDS: usize = 16;
+/// How long the row of hints shows on a screen that has it on a press.
+const HINTS_MS: u64 = 4000;
 /// Default memory for glyphs rasterized at runtime.
 const DEFAULT_GLYPH_CACHE: usize = 32 * 1024;
 
@@ -442,6 +445,7 @@ impl KernelBuilder {
             button_row: self.button_row,
             hint_height: 0,
             hints: Vec::new(),
+            hints_until: None,
             last_activity: Instant(0),
             scope: None,
             requests: Vec::new(),
@@ -644,8 +648,8 @@ struct ActiveScreen {
     id: Id,
     /// The slot it was opened for, if any.
     slot: Option<Id>,
-    /// Made for the screen above the row of hints (when the row shows);
-    /// overlays are made as the full screen below them.
+    /// Made for the part above the row of hints (when the row shows), as
+    /// it asked ([`Hints::Shown`]).
     hinted: bool,
     /// What it was opened with, e.g. the book.
     params: Params,
@@ -710,6 +714,8 @@ pub struct Kernel {
     hint_height: u16,
     /// What the row shows, as it was last drawn.
     hints: Vec<Hint>,
+    /// Until when the row shows over a screen that has it only on a press.
+    hints_until: Option<Instant>,
     /// When the device was last used (input, a page turned), for sleeping
     /// by itself ([`settings::SLEEP_AFTER`](core_settings::SLEEP_AFTER)).
     last_activity: Instant,
@@ -1013,6 +1019,7 @@ impl Kernel {
     /// Advances time, e.g. when a requested [`Effect::WakeAt`] is due.
     pub fn tick(&mut self, now: Instant) -> Effects {
         self.now = now;
+        self.hide_hints();
         if self.sleep_due().is_some_and(|at| at <= now) {
             self.last_activity = now;
             // Busy: reading aloud, downloading, serving. Else asleep.
@@ -1191,6 +1198,11 @@ impl Kernel {
 
     pub fn device(&self) -> &DeviceInfo {
         &self.shared.device
+    }
+
+    /// The device's storage, e.g. for a shell that copies files onto it.
+    pub fn storage(&self) -> &dyn Storage {
+        self.shared.storage.as_ref()
     }
 
     pub fn settings(&self) -> &Settings {
@@ -1932,6 +1944,9 @@ impl Kernel {
         for (item, need) in staging.menu_needs.drain(..) {
             self.shared.menus.set_need(item, need);
         }
+        for (screen, hints) in staging.screen_hints.drain(..) {
+            self.registry.hints.insert(screen, hints);
+        }
         for item in staging.status_items.drain(..) {
             self.shared.status_items.add(item);
         }
@@ -2228,6 +2243,9 @@ impl Kernel {
     fn recognized(&mut self, recognized: Recognized) {
         match recognized {
             Recognized::Button { name, long } => {
+                if self.button_row.contains(&name) {
+                    self.show_hints();
+                }
                 let name = Cow::Borrowed(name);
                 self.route_key(if long {
                     InputKey::LongButton(name)
@@ -2390,6 +2408,7 @@ impl Kernel {
         // After a screenshot is drawn, a message says where it went.
         let shot = self.screenshot.is_some().then(|| self.now.add_millis(300));
         effects.wake_at = [
+            self.hints_until,
             input,
             self.screen_timer,
             notice,
@@ -2534,6 +2553,7 @@ impl Kernel {
                 );
                 self.output.commands.extend(out);
             }
+            Command::ShowHints => self.show_hints(),
             Command::Back => {
                 if self.stack.len() > 1 {
                     self.close_above(self.stack.len() - 2);
@@ -2591,22 +2611,11 @@ impl Kernel {
         };
         // Made as the full screen it opens over, which an overlay shares;
         // a full screen that wants the other size is made again for it.
-        // The reader is a full screen and keeps all of it.
-        let wanted = slot.as_ref() != Some(&slots::READER);
-        let mut hinted = if wanted {
-            self.base_hinted().unwrap_or(true)
-        } else {
-            false
-        };
+        // Made once, at the size it asked for: above the row of hints, or
+        // all of the screen.
+        let hinted = self.registry.hints_of(&id) == Hints::Shown;
         self.shared.device.display.height = self.content_height(hinted);
-        let mut screen = (spec.factory)(&self.shared.env(self.now), params);
-        if hinted != wanted && screen.region(&self.shared.env(self.now)).is_none() {
-            // The first one goes before the second is made.
-            drop(screen);
-            hinted = wanted;
-            self.shared.device.display.height = self.content_height(hinted);
-            screen = (spec.factory)(&self.shared.env(self.now), params);
-        }
+        let screen = (spec.factory)(&self.shared.env(self.now), params);
         self.stack.push(ActiveScreen {
             id,
             slot,
@@ -2729,23 +2738,50 @@ impl Kernel {
         Rect::new(0, 0, display.width, display.height)
     }
 
-    /// The row of hints, while it shows.
+    /// The row of hints, while it shows: below a screen that keeps it, or
+    /// over the bottom of one that has it on a press, for a while.
     fn hint_row(&self) -> Option<Rect> {
         let panel = self.framebuffer.bounds();
         let top = self.shared.device.display.height;
-        (top < panel.height).then(|| Rect::new(0, top, panel.width, panel.height - top))
+        if top < panel.height {
+            return Some(Rect::new(0, top, panel.width, panel.height - top));
+        }
+        let height = self.hint_height.min(panel.height / 2);
+        (height > 0 && self.hints_until.is_some_and(|until| self.now < until))
+            .then(|| Rect::new(0, panel.height - height, panel.width, height))
     }
 
-    /// Whether the full screen shown (below any overlays) has the row of
-    /// hints below it; `None` without screens.
-    fn base_hinted(&self) -> Option<bool> {
+    /// When the full screen shown has the row of hints.
+    fn base_hints(&self) -> Hints {
         let env = self.shared.env(self.now);
         self.stack
             .iter()
             .rev()
             .find(|s| s.screen.region(&env).is_none())
-            .or(self.stack.first())
-            .map(|s| s.hinted)
+            .map_or(Hints::Shown, |s| self.registry.hints_of(&s.id))
+    }
+
+    /// Shows the row for a while over a screen that has it on a press.
+    fn show_hints(&mut self) {
+        if self.hint_height == 0 || self.base_hints() != Hints::OnPress {
+            return;
+        }
+        self.hints_until = Some(self.now.add_millis(HINTS_MS));
+        self.hints.clear();
+        self.output.request_refresh(RefreshMode::Fast);
+    }
+
+    /// Takes the row away again once its time is over: the screen below
+    /// is drawn there again.
+    fn hide_hints(&mut self) {
+        if !self.hints_until.is_some_and(|until| until <= self.now) {
+            return;
+        }
+        self.hints_until = None;
+        let panel = self.framebuffer.bounds();
+        let height = self.hint_height.min(panel.height / 2);
+        self.invalidate(Rect::new(0, panel.height - height, panel.width, height));
+        self.output.request_refresh(RefreshMode::Fast);
     }
 
     /// The height screens have: all of the screen's, or the part above
@@ -2756,11 +2792,12 @@ impl Kernel {
         panel - row.min(panel / 2)
     }
 
-    /// Sizes the content for the full screen shown, after screens closed;
-    /// all of the screen is drawn again if that changed it.
+    /// Sizes the content for the screen on top, after screens closed; all
+    /// of the screen is drawn again if that changed it.
     fn sync_content(&mut self) {
+        self.hints_until = None;
         let before = self.shared.device.display.height;
-        if let Some(hinted) = self.base_hinted() {
+        if let Some(hinted) = self.stack.last().map(|s| s.hinted) {
             self.shared.device.display.height = self.content_height(hinted);
         }
         if self.shared.device.display.height != before {
@@ -2806,7 +2843,6 @@ impl Kernel {
             let Some(spec) = self.registry.screens.get(&self.stack[i].id) else {
                 continue;
             };
-            // As it was made first: an overlay as the full screen below it.
             self.shared.device.display.height = self.content_height(self.stack[i].hinted);
             let env = self.shared.env(now);
             let active = &mut self.stack[i];

@@ -11,11 +11,15 @@
 //! - `describe`: what it shows, a `QI:PART <role> <x> <y> <width> <height>
 //!   <state> <label>` for each row, button or heading (state: `-`, or
 //!   `focused`, `on`, `off` joined by `+`), then `QI:END`;
-//! - `heap`: `QI:HEAP <used> <free>`, in bytes.
+//! - `heap`: `QI:HEAP <used> <free>`, in bytes;
+//! - `put <size> <path>`: a file for the storage (the SD card), answered
+//!   with `QI:READY`; then lines `data <hex>` until all its bytes came, and
+//!   `QI:OK <size>` once it is written.
 //!
 //! Any other line is answered with `QI:ERR <line>`.
 
 use alloc::string::String;
+use alloc::vec::Vec;
 use core::fmt::Write;
 
 use esp_hal::peripherals::USB_DEVICE;
@@ -24,8 +28,12 @@ use quireink_core::Kernel;
 use quireink_platform::{DisplayInfo, FrameView};
 use quireink_x4::buttons;
 
-/// A line is never longer.
-const MAX_LINE: usize = 64;
+/// A line is never longer: `data` and 512 bytes in hexadecimal.
+const MAX_LINE: usize = 1100;
+/// A file is written in pieces this large.
+const CHUNK: usize = 4096;
+/// Without data for this long, a file is given up.
+const QUIET_MS: u64 = 5000;
 
 /// What the computer asked for.
 pub enum Command {
@@ -35,6 +43,8 @@ pub enum Command {
     Screen,
     Describe,
     Heap,
+    /// A file of so many bytes for that path.
+    Put(usize, String),
 }
 
 /// Reads commands from USB, a line at a time.
@@ -43,14 +53,14 @@ pub enum Command {
 /// the unit when it starts, which cuts the connection the log goes out on.
 pub struct Remote {
     _usb: USB_DEVICE<'static>,
-    line: String,
+    line: Vec<u8>,
 }
 
 impl Remote {
     pub fn new(usb: USB_DEVICE<'static>) -> Self {
         Self {
             _usb: usb,
-            line: String::new(),
+            line: Vec::new(),
         }
     }
 
@@ -64,25 +74,100 @@ impl Remote {
             .then(|| regs.ep1().read().rdwr_byte().bits())
     }
 
-    /// The next command, once a whole line has come.
-    pub fn poll(&mut self) -> Option<Command> {
+    /// The next whole line that came, if one did.
+    fn next_line(&mut self) -> Option<Vec<u8>> {
         while let Some(byte) = self.read_byte() {
             match byte {
-                b'\n' | b'\r' => {
-                    if self.line.is_empty() {
-                        continue;
-                    }
-                    let line = core::mem::take(&mut self.line);
-                    match parse(line.trim()) {
-                        Some(command) => return Some(command),
-                        None => println!("QI:ERR {line}"),
-                    }
-                }
-                _ if self.line.len() < MAX_LINE => self.line.push(char::from(byte)),
+                b'\n' | b'\r' if self.line.is_empty() => {}
+                b'\n' | b'\r' => return Some(core::mem::take(&mut self.line)),
+                _ if self.line.len() < MAX_LINE => self.line.push(byte),
                 _ => {}
             }
         }
         None
+    }
+
+    /// The next command, once a whole line has come.
+    pub fn poll(&mut self) -> Option<Command> {
+        let line = self.next_line()?;
+        let line = String::from_utf8_lossy(&line);
+        let command = parse(line.trim());
+        if command.is_none() {
+            println!("QI:ERR {line}");
+        }
+        command
+    }
+
+    /// Answers a command that only asks (the screen, a screenshot, what it
+    /// shows, the heap) or brings a file; a button press it gives back for
+    /// the caller to make.
+    pub fn answer(
+        &mut self,
+        kernel: &mut Kernel,
+        display: &DisplayInfo,
+        command: Command,
+    ) -> Option<(&'static str, u64)> {
+        match command {
+            Command::Press(name, ms) => return Some((name, ms)),
+            Command::Shot => {
+                shot(kernel, display);
+            }
+            Command::Describe => describe(kernel),
+            Command::Screen => {
+                let id = kernel.active_screen().map_or("", |id| id.as_str());
+                println!("QI:SCREEN {id}");
+            }
+            Command::Heap => {
+                println!(
+                    "QI:HEAP {} {}",
+                    esp_alloc::HEAP.used(),
+                    esp_alloc::HEAP.free()
+                );
+            }
+            Command::Put(size, path) => self.receive(kernel, size, &path),
+        }
+        None
+    }
+
+    /// Writes a file of `size` bytes to `path` from the lines `data <hex>`
+    /// that follow, a piece at a time.
+    fn receive(&mut self, kernel: &Kernel, size: usize, path: &str) {
+        let storage = kernel.storage();
+        if let Err(e) = storage.write(path, &[]) {
+            return println!("QI:ERR {path}: {e:?}");
+        }
+        println!("QI:READY");
+        let millis = || {
+            esp_hal::time::Instant::now()
+                .duration_since_epoch()
+                .as_millis()
+        };
+        let mut piece = Vec::with_capacity(CHUNK);
+        let (mut got, mut last) = (0, millis());
+        while got < size {
+            let Some(line) = self.next_line() else {
+                if millis() - last > QUIET_MS {
+                    return println!("QI:ERR {path}: {got} of {size} bytes came");
+                }
+                continue;
+            };
+            last = millis();
+            let Some(hex) = line.strip_prefix(b"data ") else {
+                return println!("QI:ERR {path}: not data");
+            };
+            for pair in hex.as_chunks::<2>().0 {
+                let digit = |c: u8| char::from(c).to_digit(16).unwrap_or(0) as u8;
+                piece.push(digit(pair[0]) << 4 | digit(pair[1]));
+            }
+            got += hex.len() / 2;
+            if piece.len() >= CHUNK || got >= size {
+                if let Err(e) = storage.append(path, &piece) {
+                    return println!("QI:ERR {path}: {e:?}");
+                }
+                piece.clear();
+            }
+        }
+        println!("QI:OK {got}");
     }
 }
 
@@ -95,6 +180,13 @@ fn parse(line: &str) -> Option<Command> {
         "screen" => Command::Screen,
         "describe" => Command::Describe,
         "heap" => Command::Heap,
+        "put" => {
+            let size = words.next()?.parse().ok()?;
+            // The path is the rest of the line, spaces and all.
+            let (_, rest) = line.split_once(' ')?;
+            let path = rest.trim_start().split_once(' ')?.1.trim();
+            return (!path.is_empty()).then(|| Command::Put(size, String::from(path)));
+        }
         _ => return None,
     };
     words.next().is_none().then_some(command)
@@ -103,34 +195,6 @@ fn parse(line: &str) -> Option<Command> {
 /// The X4's button of that name.
 fn button(name: &str) -> Option<&'static str> {
     buttons::ALL.iter().find(|b| **b == name).copied()
-}
-
-/// Answers a command that only asks (the screen, a screenshot, what it
-/// shows, the heap); a button press it gives back for the caller to make.
-pub fn answer(
-    kernel: &mut Kernel,
-    display: &DisplayInfo,
-    command: Command,
-) -> Option<(&'static str, u64)> {
-    match command {
-        Command::Press(name, ms) => return Some((name, ms)),
-        Command::Shot => {
-            shot(kernel, display);
-        }
-        Command::Describe => describe(kernel),
-        Command::Screen => {
-            let id = kernel.active_screen().map_or("", |id| id.as_str());
-            println!("QI:SCREEN {id}");
-        }
-        Command::Heap => {
-            println!(
-                "QI:HEAP {} {}",
-                esp_alloc::HEAP.used(),
-                esp_alloc::HEAP.free()
-            );
-        }
-    }
-    None
 }
 
 /// Sends the whole screen, `display` (screens may have less of it); `false`

@@ -6,6 +6,7 @@ shells/xteink/src/remote.rs.
 Usage:
   python tools/x4-remote.py [--port COM10] [--script STEPS] [--screenshot FILE]
   python tools/x4-remote.py --log 30     (the X4's log for 30 seconds)
+  python tools/x4-remote.py --put book.epub books/book.epub   (a file onto its card)
 
 STEPS, separated by commas:
   page-forward       a short press of a button (back, confirm, left, right,
@@ -62,6 +63,8 @@ class X4:
     def __init__(self, port):
         self.port = port
         self.buffer = b""
+        # The X4's log is printed, too.
+        self.verbose = False
 
     def line(self, deadline):
         """The next line from the X4, or None once the deadline passed."""
@@ -78,6 +81,10 @@ class X4:
         self.port.reset_input_buffer()
         self.buffer = b""
         self.port.write(command.encode() + b"\n")
+        return self.expect(command, until)
+
+    def expect(self, command, until):
+        """The X4's answers to `command` up to the one starting with `until`."""
         answers = []
         deadline = time.monotonic() + TIMEOUT_S
         while True:
@@ -85,6 +92,8 @@ class X4:
             if line is None:
                 sys.exit(f"{command}: no answer from the X4")
             if not line.startswith("QI:"):
+                if self.verbose:
+                    print(line)
                 continue
             answer = line[3:]
             if answer.startswith(("ERR", "BUSY")):
@@ -92,6 +101,17 @@ class X4:
             answers.append(answer)
             if answer.startswith(until):
                 return answers
+
+    def put(self, local, path):
+        """Copies the file `local` to `path` on the X4's card."""
+        data = Path(local).read_bytes()
+        self.ask(f"put {len(data)} {path}", "READY")
+        started = time.monotonic()
+        for at in range(0, len(data), 512):
+            self.port.write(b"data " + data[at : at + 512].hex().encode() + b"\n")
+        self.expect(f"put {path}", "OK")
+        seconds = time.monotonic() - started
+        print(f"{path}: {len(data) // 1000} KB in {seconds:.1f} s")
 
     def press(self, button, ms):
         self.ask(f"hold {button} {ms}", "OK")
@@ -170,14 +190,19 @@ def main():
     parser.add_argument("--script", default="")
     parser.add_argument("--screenshot")
     parser.add_argument("--log", type=float, metavar="SECONDS")
+    parser.add_argument("-v", "--verbose", action="store_true", help="print the X4's log too")
+    parser.add_argument("--put", nargs=2, action="append", default=[], metavar=("FILE", "PATH"))
     args = parser.parse_args()
     port = open_port(args.port or find_port())
     x4 = X4(port)
+    x4.verbose = args.verbose
     if args.log:
         deadline = time.monotonic() + args.log
         while (line := x4.line(deadline)) is not None:
             print(line)
         return
+    for local, path in args.put:
+        x4.put(local, path)
     for step in filter(None, (s.strip() for s in args.script.split(","))):
         run(x4, step)
     if args.screenshot:

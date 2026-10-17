@@ -34,6 +34,23 @@ impl fmt::Debug for ScreenSpec {
     }
 }
 
+/// When a screen shows the row of hints for the buttons below it, on
+/// devices that have such a row (see
+/// [`Registrar::set_screen_hints`](crate::Registrar::set_screen_hints)).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Hints {
+    /// Always, below it: the screen has the part above the row. Also for
+    /// menus over a screen without it.
+    #[default]
+    Shown,
+    /// For a few seconds after one of the buttons in the row was pressed
+    /// (or [`Command::ShowHints`](crate::Command::ShowHints)), over its
+    /// bottom edge: the screen has all of the screen, e.g. the reader.
+    OnPress,
+    /// Never.
+    Hidden,
+}
+
 /// How the row of hints below the screen labels a button under it (see
 /// [`Screen::hint`]).
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -18,9 +18,16 @@ change the plugin SDK.
 - What the buttons do, at the bottom of the screen: where buttons lie in
   a row below it (the X4's four), a row above them names what each does
   on the screen shown: *Back*, *Select*, arrows, or a screen's own word.
-  Not in the reader, which keeps the whole page; switched off under
-  Controls › *Show what the buttons do*. Screens name their buttons with
-  `Screen::hint`, shells give the row with `KernelBuilder::button_row`.
+  The reader keeps the whole page: there the row shows for a few seconds
+  after a button of the row is pressed. Switched off under Controls ›
+  *Show what the buttons do*. Screens say when they show it
+  (`Registrar::set_screen_hints`, `Command::ShowHints`) and name their
+  buttons (`Screen::hint`); shells give the row with
+  `KernelBuilder::button_row`.
+- X4: books and other files go onto the card over USB
+  (`tools/x4-remote.py --put`); code may use all 8 MB of flash the chip
+  maps, not 4 shared with the fonts; the reader counts pages one at a
+  time in the background, so buttons answer within half a second.
 - X4: on USB power, sleep shows the sleep screen and keeps the USB
   connection, so a computer can still read the log and wake it.
 
