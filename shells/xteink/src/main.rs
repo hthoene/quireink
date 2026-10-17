@@ -98,6 +98,13 @@ const DEVICE: DeviceInfo = DeviceInfo {
     memory: MemoryClass::Small,
 };
 
+/// Microseconds since start, for measuring what plugins take.
+fn micros() -> u64 {
+    esp_hal::time::Instant::now()
+        .duration_since_epoch()
+        .as_micros()
+}
+
 fn now() -> Instant {
     Instant(
         esp_hal::time::Instant::now()
@@ -221,6 +228,7 @@ fn main() -> ! {
 
     let builder = Kernel::builder(DEVICE)
         .storage_boxed(Box::new(traced::Traced(storage)))
+        .clock(micros)
         .glyph_cache(0)
         .frame_rows(FRAME_ROWS)
         .row_align(8)
@@ -300,12 +308,13 @@ fn main() -> ! {
         let at = now();
         if status_read.is_none_or(|read| at.since(read) >= STATUS_MS) {
             status_read = Some(at);
-            let percent = battery::percent(input::millivolts());
+            let millivolts = input::millivolts();
             let status = SystemStatus {
                 clock: None,
                 battery: Some(Battery {
-                    percent,
+                    percent: battery::percent(millivolts),
                     charging: usb.is_high(),
+                    millivolts: Some(millivolts),
                 }),
             };
             let effects = kernel.set_status(at, status);
@@ -455,6 +464,7 @@ where
             failed = Some(e);
         }
         let shown = now();
+        kernel.panel_busy(shown.since(drawn));
         {
             // After every refresh, both memories again hold the frame now
             // shown, as the stock firmware does: the refresh may leave the

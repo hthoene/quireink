@@ -397,6 +397,7 @@ fn start_kernel(
         Vec::new()
     };
     let mut builder = Kernel::builder(device)
+        .clock(micros)
         .plugin_dir("plugins")
         .network(true)
         .system_clipboard(true)
@@ -704,4 +705,13 @@ impl Storage for Volumes {
     fn sync(&self) -> Result<(), StorageError> {
         self.0.sync()
     }
+}
+
+/// Microseconds since start, for measuring what plugins take.
+fn micros() -> u64 {
+    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    START
+        .get_or_init(std::time::Instant::now)
+        .elapsed()
+        .as_micros() as u64
 }

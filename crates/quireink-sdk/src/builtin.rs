@@ -263,6 +263,10 @@ pub mod events {
     pub const RESUME: Id = Id::new_static("core.resume");
     /// The battery or the time zone changed; status lines redraw.
     pub const STATUS_CHANGED: Id = Id::new_static("core.status-changed");
+    /// The battery was measured again ([`Env::status`](crate::Env::status)),
+    /// about once a minute where the device measures it: for plugins that
+    /// record its use. Nothing need be drawn anew.
+    pub const BATTERY_MEASURED: Id = Id::new_static("core.battery-measured");
 }
 
 /// Status items of the kernel (see [`status`](crate::status)).

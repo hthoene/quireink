@@ -36,4 +36,7 @@ pub struct Battery {
     /// Charge from 0 to 100.
     pub percent: u8,
     pub charging: bool,
+    /// Its voltage, where the device measures it: finer than the percent,
+    /// for measuring what uses the battery.
+    pub millivolts: Option<u16>,
 }

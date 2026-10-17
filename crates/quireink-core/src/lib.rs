@@ -41,6 +41,7 @@ mod core_plugin;
 mod data_plugin;
 mod input;
 mod keymap;
+mod meter;
 mod net;
 mod refresh;
 mod registry;
@@ -228,6 +229,7 @@ pub struct KernelBuilder {
     frame_rows: Option<u16>,
     row_align: u16,
     storage: Option<Box<dyn Storage>>,
+    clock: Option<fn() -> u64>,
     setting_defaults: Vec<(String, String)>,
     plugin_dirs: Vec<String>,
     font_dirs: Vec<String>,
@@ -280,6 +282,13 @@ impl KernelBuilder {
     /// (e.g. the SD card, or none without one).
     pub fn storage_boxed(mut self, storage: Box<dyn Storage>) -> Self {
         self.storage = Some(storage);
+        self
+    }
+
+    /// A monotonic clock in microseconds, for measuring the time each
+    /// plugin's code takes ([`quireink_sdk::usage::PluginUsage`]).
+    pub fn clock(mut self, clock: fn() -> u64) -> Self {
+        self.clock = Some(clock);
         self
     }
 
@@ -392,8 +401,14 @@ impl KernelBuilder {
         let rows = self.frame_rows.unwrap_or(display.height);
         let framebuffer = Framebuffer::banded(display.width, display.height, rows, display.format)
             .map_err(KernelError::Graphics)?;
+        let meter = meter::Meter::new(self.clock);
+        let storage = Box::new(meter::Metered {
+            inner: self.storage.unwrap_or_else(|| Box::new(NoStorage)),
+            meter: meter.clone(),
+        });
         let mut kernel = Kernel {
             shared: Shared {
+                meter,
                 device: self.device,
                 settings: Settings::new(),
                 translator: Translator::new(),
@@ -404,6 +419,7 @@ impl KernelBuilder {
                 actions: Actions::new(),
                 plugins: Plugins::new(),
                 status: SystemStatus::default(),
+                usage: quireink_sdk::usage::Usage::default(),
                 status_items: StatusItems::new(),
                 widgets: quireink_sdk::widgets::Widgets::new(),
                 services: quireink_sdk::services::Services::new(),
@@ -420,7 +436,7 @@ impl KernelBuilder {
                 screens: Vec::new(),
                 font_dirs: Vec::new(),
                 secrets: Default::default(),
-                storage: self.storage.unwrap_or_else(|| Box::new(NoStorage)),
+                storage,
                 keymap: Keymap::default(),
             },
             pending: None,
@@ -452,6 +468,7 @@ impl KernelBuilder {
             hints_until: None,
             pictures_shown: false,
             last_activity: Instant(0),
+            shown_since: Instant(0),
             scope: None,
             requests: Vec::new(),
             copied: None,
@@ -682,7 +699,7 @@ pub struct Kernel {
     /// Every key map source, to rebuild the key map when the preset changes.
     keymap_sources: Vec<(Origin, Cow<'static, str>)>,
     keymap_presets: Vec<(Id, Cow<'static, str>)>,
-    subscriptions: Vec<(Id, EventHandler)>,
+    subscriptions: Vec<(Id, Id, EventHandler)>,
     /// When the active screen wants `on_timer`.
     screen_timer: Option<Instant>,
     /// Events plugins asked for at a time ([`Command::Schedule`]).
@@ -730,6 +747,8 @@ pub struct Kernel {
     /// When the device was last used (input, a page turned), for sleeping
     /// by itself ([`settings::SLEEP_AFTER`](core_settings::SLEEP_AFTER)).
     last_activity: Instant,
+    /// Since when the screen on top has been counted as shown.
+    shown_since: Instant,
     /// The active settings scope: its file and the screen that set it.
     scope: Option<(String, Option<usize>)>,
     /// HTTP requests for the shell to make.
@@ -806,6 +825,7 @@ impl Kernel {
             frame_rows: None,
             row_align: 1,
             storage: None,
+            clock: None,
             setting_defaults: Vec::new(),
             plugin_dirs: Vec::new(),
             font_dirs: Vec::new(),
@@ -867,6 +887,8 @@ impl Kernel {
     /// Opens the home slot and emits [`events::STARTED`]. Call once after
     /// building.
     pub fn start(&mut self, now: Instant) -> Effects {
+        // The kernel's work, but for the plugins' it calls.
+        let _running = self.shared.meter.enter(meter::CORE);
         self.now = now;
         self.last_activity = now;
         self.output.commands.push(Command::open_slot(slots::HOME));
@@ -878,8 +900,10 @@ impl Kernel {
 
     /// Handles an input event.
     pub fn handle(&mut self, now: Instant, event: InputEvent) -> Effects {
+        let _running = self.shared.meter.enter(meter::CORE);
         self.now = now;
         self.last_activity = now;
+        self.shared.usage.inputs = self.shared.usage.inputs.saturating_add(1);
         // Plugins' input filters come first.
         let verdict = {
             let env = self.shared.env(now);
@@ -1003,6 +1027,7 @@ impl Kernel {
     /// plenty). Status lines redraw when what they show changed
     /// ([`events::STATUS_CHANGED`]).
     pub fn set_status(&mut self, now: Instant, status: SystemStatus) -> Effects {
+        let _running = self.shared.meter.enter(meter::CORE);
         self.now = now;
         let old = self.shared.status;
         self.shared.status = status;
@@ -1012,10 +1037,18 @@ impl Kernel {
             (Some(a), Some(b)) => (a.unix_millis_at(now) - b.unix_millis_at(now)).abs() > 30_000,
             (a, b) => a.is_some() != b.is_some(),
         };
-        if old.battery != status.battery || offset(&old) != offset(&status) || jumped {
+        // What status lines show: not the voltage, which moves a little at
+        // every reading.
+        let shown = |s: &SystemStatus| s.battery.map(|b| (b.percent, b.charging));
+        if shown(&old) != shown(&status) || offset(&old) != offset(&status) || jumped {
             self.output
                 .commands
                 .push(Command::Emit(events::STATUS_CHANGED, Params::new()));
+        }
+        if status.battery.is_some() {
+            self.output
+                .commands
+                .push(Command::Emit(events::BATTERY_MEASURED, Params::new()));
         }
         self.finish()
     }
@@ -1032,6 +1065,7 @@ impl Kernel {
 
     /// Advances time, e.g. when a requested [`Effect::WakeAt`] is due.
     pub fn tick(&mut self, now: Instant) -> Effects {
+        let _running = self.shared.meter.enter(meter::CORE);
         self.now = now;
         self.hide_hints();
         if self.sleep_due().is_some_and(|at| at <= now) {
@@ -1100,6 +1134,8 @@ impl Kernel {
         let Some(region) = self.unrendered.take() else {
             return;
         };
+        // The kernel's, but for the screens' own drawing.
+        let _running = self.shared.meter.enter(meter::CORE);
         let bounds = self.framebuffer.bounds();
         // Rows are passed whole: drawn in bands, the rest of a row would be
         // left from another band. And aligned as the shell asks.
@@ -1222,6 +1258,12 @@ impl Kernel {
     }
 
     /// The device's storage, e.g. for a shell that copies files onto it.
+    /// The panel took `millis` for a refresh: shells that know say so
+    /// ([`Usage::panel_ms`](quireink_sdk::usage::Usage::panel_ms)).
+    pub fn panel_busy(&mut self, millis: u64) {
+        self.shared.usage.panel_ms = self.shared.usage.panel_ms.saturating_add(millis);
+    }
+
     pub fn storage(&self) -> &dyn Storage {
         self.shared.storage.as_ref()
     }
@@ -1631,6 +1673,7 @@ impl Kernel {
 
     /// Delivers the answer to a request from [`Kernel::take_requests`].
     pub fn http_response(&mut self, now: Instant, response: HttpResponse) -> Effects {
+        let _running = self.shared.meter.enter(meter::CORE);
         self.now = now;
         if let Some(at) = self.awaiting.iter().position(|(id, ..)| *id == response.id) {
             let (_, reply, params, save_to) = self.awaiting.remove(at);
@@ -1679,6 +1722,7 @@ impl Kernel {
 
     /// What happened with a socket or a broadcast.
     pub fn socket_event(&mut self, now: Instant, event: SocketEvent) -> Effects {
+        let _running = self.shared.meter.enter(meter::CORE);
         self.now = now;
         let mut out = Vec::new();
         self.sockets.event(event, &*self.shared.storage, &mut out);
@@ -1689,7 +1733,9 @@ impl Kernel {
     /// The device goes to sleep or the app to the background; plugins hear
     /// [`events::SUSPEND`].
     pub fn suspend(&mut self, now: Instant) -> Effects {
+        let _running = self.shared.meter.enter(meter::CORE);
         self.now = now;
+        self.shared.usage.sleeps = self.shared.usage.sleeps.saturating_add(1);
         self.output
             .commands
             .push(Command::Emit(events::SUSPEND, Params::new()));
@@ -1727,8 +1773,11 @@ impl Kernel {
 
     /// Back from [`Kernel::suspend`].
     pub fn resume(&mut self, now: Instant) -> Effects {
+        let _running = self.shared.meter.enter(meter::CORE);
         self.now = now;
         self.last_activity = now;
+        // The time asleep is no screen's.
+        self.shown_since = now;
         self.output
             .commands
             .push(Command::Emit(events::RESUME, Params::new()));
@@ -2354,6 +2403,7 @@ impl Kernel {
             Some(spec) => {
                 if let Some(handler) = &spec.handler {
                     let env = self.shared.env(self.now);
+                    let _running = self.shared.meter.enter(action.namespace());
                     handler(&env, &mut self.output.commands);
                 }
             }
@@ -2377,6 +2427,12 @@ impl Kernel {
 
     fn finish(&mut self) -> Effects {
         self.run_commands();
+        // The time since, to the screen on top; the numbers for plugins.
+        let top = self.stack.last().map_or(meter::CORE, |s| s.id.namespace());
+        let shown = self.now.since(self.shown_since);
+        self.shared.meter.shown(top, shown);
+        self.shown_since = self.now;
+        self.shared.meter.snapshot(&mut self.shared.usage.plugins);
         // A screen that set a scope may have closed.
         self.check_scope_owner();
         self.run_commands();
@@ -2427,6 +2483,11 @@ impl Kernel {
             let env = self.shared.env(self.now);
             let refresh = self.shared.refresh_filters.apply(&env, refresh, screen);
             effects.refresh = Some((refresh.region, refresh.mode));
+            self.shared.usage.refreshed(refresh.mode, refresh.region);
+            let top = self.stack.last().map_or(meter::CORE, |s| s.id.namespace());
+            self.shared
+                .meter
+                .refreshed(top, refresh.mode, refresh.region);
         }
         if let Some(at) = self.output.wake_at.take() {
             self.screen_timer = Some(self.screen_timer.map_or(at, |t| t.min(at)));
@@ -2505,7 +2566,10 @@ impl Kernel {
                     self.last_activity = self.now;
                 }
                 let env = self.shared.env(self.now);
-                for (_, handler) in self.subscriptions.iter().filter(|(id, _)| *id == event) {
+                for (_, plugin, handler) in
+                    self.subscriptions.iter().filter(|(id, ..)| *id == event)
+                {
+                    let _running = self.shared.meter.enter(plugin.as_str());
                     handler(&env, &params, &mut self.output.commands);
                 }
                 for index in 0..self.stack.len() {
@@ -2644,7 +2708,9 @@ impl Kernel {
         // all of the screen.
         let hinted = self.registry.hints_of(&id) == Hints::Shown;
         self.shared.device.display.height = self.content_height(hinted);
+        let running = self.shared.meter.enter(id.namespace());
         let screen = (spec.factory)(&self.shared.env(self.now), params);
+        drop(running);
         self.stack.push(ActiveScreen {
             id,
             slot,
@@ -2668,7 +2734,9 @@ impl Kernel {
         };
         let env = self.shared.env(self.now);
         let params = Params::new().with(builtin_params::TEXT, text);
+        let running = self.shared.meter.enter(id.namespace());
         let screen = (spec.factory)(&env, &params);
+        drop(running);
         let seconds = self
             .shared
             .settings
@@ -2875,6 +2943,7 @@ impl Kernel {
             self.shared.device.display.height = self.content_height(self.stack[i].hinted);
             let env = self.shared.env(now);
             let active = &mut self.stack[i];
+            let _running = self.shared.meter.enter(active.id.namespace());
             active.screen = (spec.factory)(&env, &active.params);
         }
         self.hints.clear();
@@ -2987,6 +3056,7 @@ impl Kernel {
             let Some(area) = own.unwrap_or(bounds).intersection(&region) else {
                 continue;
             };
+            let _running = self.shared.meter.enter(active.id.namespace());
             active.screen.draw(&mut canvas.clipped(area), &env);
         }
         if let Some(row) = row
@@ -3014,8 +3084,10 @@ impl Kernel {
             return Handled::No;
         };
         let env = self.shared.env(self.now);
+        let running = self.shared.meter.enter(active.id.namespace());
         let mut cx = Cx::new(&env, &mut self.output);
         let handled = f(active.screen.as_mut(), &mut cx);
+        drop(running);
         // `request_redraw` means the caller's own region. A screen below an
         // overlay is still partly visible (e.g. the page behind a menu that
         // changes a reading setting); one below a full screen is redrawn
@@ -3419,6 +3491,8 @@ struct Shared {
     actions: Actions,
     plugins: Plugins,
     status: SystemStatus,
+    /// What the device did since start (see [`quireink_sdk::usage`]).
+    usage: quireink_sdk::usage::Usage,
     status_items: StatusItems,
     widgets: quireink_sdk::widgets::Widgets,
     services: quireink_sdk::services::Services,
@@ -3448,6 +3522,8 @@ struct Shared {
     secrets: quireink_sdk::secrets::Secrets,
     storage: Box<dyn Storage>,
     keymap: Keymap,
+    /// What each plugin takes.
+    meter: alloc::rc::Rc<meter::Meter>,
 }
 
 impl Shared {
@@ -3465,6 +3541,7 @@ impl Shared {
             actions: &self.actions,
             plugins: &self.plugins,
             status: &self.status,
+            usage: &self.usage,
             status_items: &self.status_items,
             widgets: &self.widgets,
             services: &self.services,

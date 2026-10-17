@@ -66,6 +66,7 @@ mod settings;
 pub mod status;
 pub mod time;
 pub mod ui;
+pub mod usage;
 mod version;
 pub mod web;
 pub mod widgets;

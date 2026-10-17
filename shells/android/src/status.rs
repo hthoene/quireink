@@ -72,11 +72,14 @@ fn battery(env: &mut JNIEnv<'_>, activity: &JObject<'_>) -> jni::errors::Result<
         .i()
     };
     let (level, scale, status) = (extra("level")?, extra("scale")?, extra("status")?);
+    let voltage = extra("voltage")?;
     if level < 0 || scale <= 0 {
         return Ok(None);
     }
     Ok(Some(Battery {
         percent: (level * 100 / scale).clamp(0, 100) as u8,
         charging: status == CHARGING,
+        // In millivolts; some devices report volts.
+        millivolts: u16::try_from(voltage).ok().filter(|mv| *mv > 1000),
     }))
 }

@@ -6,6 +6,25 @@ change the plugin SDK.
 
 ## [Unreleased]
 
+- Battery use (new plugin, under Tools): records the battery about once
+  a minute while the device is awake, with what it did, and shows the
+  charge now, this time awake (pages, refreshes), the use on battery an
+  hour awake and for 100 pages, how long it lasts at that pace, the recent
+  times awake, and which plugins were shown and kept the processor busy.
+  The records are CSV files in `.quireink/plugins/battery` (`log.csv`,
+  and `plugins.csv` every ten minutes awake), for analysis on a computer.
+- What each plugin takes: the kernel measures the time each plugin's code
+  runs (screens drawing and handling input, event and action handlers),
+  the time its screens are shown with the refreshes then, and the storage
+  it reads and writes; plugins see it in `Env::usage`
+  (`quireink_sdk::usage`), with the refreshes, input and sleeps of the
+  whole device. Shells give a clock for it (`KernelBuilder::clock`) and
+  say how long the panel refreshed (`Kernel::panel_busy`).
+- The battery's voltage where the device measures it
+  (`Battery::millivolts`: the X4, Android), and an event each time the
+  battery is measured (`events::BATTERY_MEASURED`); status lines redraw
+  only when the percent or charging changes.
+- X4 remote: `--get` copies a file off the card (e.g. the battery logs).
 - A new icon: the capital Q of Besley in ink on e-paper, as on
   quireink.org (its source is `shells/android/icon.svg`).
 - X4: SD cards with a partition table (MBR or GPT), as nearly all come,

@@ -33,6 +33,9 @@ pub struct Env<'a> {
     /// The time of day and the battery, as far as the device knows them
     /// (see [`time`](crate::time) for the local time).
     pub status: &'a SystemStatus,
+    /// What the device did since QuireInk started: refreshes, input (see
+    /// [`usage`](crate::usage)).
+    pub usage: &'a crate::usage::Usage,
     /// Items for status lines, from every plugin.
     pub status_items: &'a StatusItems,
     /// Filters of book text before it is laid out, from every plugin.

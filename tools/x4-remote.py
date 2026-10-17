@@ -7,6 +7,7 @@ Usage:
   python tools/x4-remote.py [--port COM10] [--script STEPS] [--screenshot FILE]
   python tools/x4-remote.py --log 30     (the X4's log for 30 seconds)
   python tools/x4-remote.py --put book.epub books/book.epub   (a file onto its card)
+  python tools/x4-remote.py --get .quireink/plugins/battery/log.csv log.csv   (one off it)
   python tools/x4-remote.py --profile --script "page-forward,wait:2000"
       (where the time goes during the steps: the functions the processor
       was in most, from the firmware's symbols; needs rustup's llvm-tools)
@@ -122,6 +123,13 @@ class X4:
         self.expect(f"put {path}", "OK")
         seconds = time.monotonic() - started
         print(f"{path}: {len(data) // 1000} KB in {seconds:.1f} s")
+
+    def get(self, path, local):
+        """Copies the file `path` on the X4's card to `local`."""
+        answers = self.ask(f"get {path}", "END")
+        data = b"".join(bytes.fromhex(a.split(" ", 1)[1]) for a in answers if a.startswith("DATA "))
+        Path(local).write_bytes(data)
+        print(f"{path}: {len(data)} bytes to {local}")
 
     def press(self, button, ms):
         self.ask(f"hold {button} {ms}", "OK")
@@ -301,6 +309,7 @@ def main():
     parser.add_argument("--profile", action="store_true", help="where the time goes during the steps")
     parser.add_argument("--trace", action="store_true", help="what the steps do on the storage")
     parser.add_argument("--put", nargs=2, action="append", default=[], metavar=("FILE", "PATH"))
+    parser.add_argument("--get", nargs=2, action="append", default=[], metavar=("PATH", "FILE"))
     args = parser.parse_args()
     port = open_port(args.port or find_port())
     x4 = X4(port)
@@ -312,6 +321,8 @@ def main():
         return
     for local, path in args.put:
         x4.put(local, path)
+    for path, local in args.get:
+        x4.get(path, local)
     if args.profile:
         x4.ask("profile start", "OK")
     if args.trace:

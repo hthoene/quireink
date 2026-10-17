@@ -25,7 +25,9 @@
 //!   controller holds, nothing sent (`QI:OK`): whether it holds the frame;
 //! - `put <size> <path>`: a file for the storage (the SD card), answered
 //!   with `QI:READY`; then lines `data <hex>` until all its bytes came, and
-//!   `QI:OK <size>` once it is written.
+//!   `QI:OK <size>` once it is written;
+//! - `get <path>`: a file of the storage, as `QI:SIZE <size>`, then
+//!   `QI:DATA <hex>` lines and `QI:END` (e.g. the battery's log).
 //!
 //! Any other line is answered with `QI:ERR <line>`.
 
@@ -66,6 +68,7 @@ pub enum Command {
     Refresh(bool),
     /// A file of so many bytes for that path.
     Put(usize, String),
+    Get(String),
 }
 
 /// Reads commands from USB, a line at a time.
@@ -148,6 +151,7 @@ impl Remote {
                 );
             }
             Command::Put(size, path) => self.receive(kernel, size, &path),
+            Command::Get(path) => send(kernel, &path),
             Command::Profile(true) => {
                 crate::input::profile(true);
                 println!("QI:OK");
@@ -240,6 +244,33 @@ impl Remote {
     }
 }
 
+/// Sends the file `path` of the storage.
+fn send(kernel: &Kernel, path: &str) {
+    let storage = kernel.storage();
+    let Ok(size) = storage.size(path) else {
+        return println!("QI:ERR {path}: not found");
+    };
+    println!("QI:SIZE {size}");
+    let mut buf = [0u8; 256];
+    let mut line = String::with_capacity(buf.len() * 2);
+    let mut at = 0u64;
+    while at < size {
+        let Ok(n) = storage.read_at(path, at, &mut buf) else {
+            return println!("QI:ERR {path}: not readable");
+        };
+        if n == 0 {
+            break;
+        }
+        line.clear();
+        for byte in &buf[..n] {
+            let _ = write!(line, "{byte:02x}");
+        }
+        println!("QI:DATA {line}");
+        at += n as u64;
+    }
+    println!("QI:END");
+}
+
 fn parse(line: &str) -> Option<Command> {
     let mut words = line.split_ascii_whitespace();
     let command = match words.next()? {
@@ -276,6 +307,11 @@ fn parse(line: &str) -> Option<Command> {
             "stop" => Command::Profile(false),
             _ => return None,
         },
+        "get" => {
+            let (_, path) = line.split_once(' ')?;
+            let path = path.trim();
+            return (!path.is_empty()).then(|| Command::Get(String::from(path)));
+        }
         "put" => {
             let size = words.next()?.parse().ok()?;
             // The path is the rest of the line, spaces and all.

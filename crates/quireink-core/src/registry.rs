@@ -114,7 +114,8 @@ pub(crate) struct Staging {
     pub(crate) formats: Vec<FormatSpec>,
     pub(crate) hyphenation: Vec<HyphenationSpec>,
     pub(crate) setting_groups: Vec<SettingGroupSpec>,
-    pub(crate) subscriptions: Vec<(Id, EventHandler)>,
+    /// Events, the plugins that hear them, and their handlers.
+    pub(crate) subscriptions: Vec<(Id, Id, EventHandler)>,
     pub(crate) menu_entries: Vec<MenuEntry>,
     pub(crate) menu_sections: Vec<quireink_sdk::MenuSection>,
     pub(crate) icons: Vec<(Id, Cow<'static, str>)>,
@@ -391,7 +392,9 @@ impl Registrar for PluginRegistrar<'_> {
     }
 
     fn subscribe(&mut self, event: Id, handler: EventHandler) -> Result<(), RegisterError> {
-        self.staging.subscriptions.push((event, handler));
+        self.staging
+            .subscriptions
+            .push((event, self.plugin.clone(), handler));
         Ok(())
     }
 
