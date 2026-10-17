@@ -37,7 +37,7 @@ use esp_hal::time::Rate;
 use log::{info, warn};
 use quireink_core::{Effects, Kernel};
 use quireink_fat::fatfs::{FileSystem, FsOptions};
-use quireink_fat::{BlockDisk, FatStorage};
+use quireink_fat::{BlockDisk, FatStorage, VolumeError};
 use quireink_platform::{
     Battery, ButtonState, DeviceInfo, DisplayInfo, InputCaps, InputEvent, Instant, MemoryClass,
     PixelFormat, RefreshMode, Rotation, SystemStatus,
@@ -124,13 +124,19 @@ fn main() -> ! {
                 match size {
                     Ok(bytes) => {
                         info!("SD card: {} MB", bytes >> 20);
-                        match BlockDisk::new(card::Card(sd))
-                            .ok()
-                            .and_then(|disk| FileSystem::new(disk, FsOptions::new()).ok())
-                        {
-                            Some(fs) => Box::new(FatStorage::new(Box::leak(Box::new(fs)))),
-                            None => {
-                                warn!("SD card: no FAT file system");
+                        let fs = BlockDisk::volume(card::Card(sd)).and_then(|disk| {
+                            FileSystem::new(disk, FsOptions::new()).map_err(|_| VolumeError::NoFat)
+                        });
+                        match fs {
+                            Ok(fs) => Box::new(FatStorage::new(Box::leak(Box::new(fs)))),
+                            Err(e) => {
+                                match e {
+                                    VolumeError::ExFat => {
+                                        warn!("SD card: exFAT; QuireInk reads FAT32")
+                                    }
+                                    VolumeError::NoFat => warn!("SD card: no FAT file system"),
+                                    VolumeError::Disk => warn!("SD card: not readable"),
+                                }
                                 Box::new(quireink_platform::NoStorage)
                             }
                         }

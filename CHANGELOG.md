@@ -8,6 +8,9 @@ change the plugin SDK.
 
 - A new icon: the capital Q of Besley in ink on e-paper, as on
   quireink.org (its source is `shells/android/icon.svg`).
+- X4: SD cards with a partition table (MBR or GPT), as nearly all come,
+  are read; before, only cards with the file system from the first block
+  were. A card in exFAT is named as such in the log.
 
 ## [0.3.0] - 2026-10-16
 

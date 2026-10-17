@@ -14,7 +14,7 @@ extern crate alloc;
 
 mod disk;
 
-pub use disk::{BLOCK, BlockDisk, Blocks, DiskError};
+pub use disk::{BLOCK, BlockDisk, Blocks, DiskError, VolumeError};
 
 use alloc::format;
 use alloc::string::{String, ToString};
@@ -362,6 +362,83 @@ mod tests {
         assert_eq!(s.read_at("Books/A long name.txt", 1000, &mut buf), Ok(700));
         assert_eq!(&buf[..], &text[1000..1700]);
         assert_eq!(s.size("Books/A long name.txt"), Ok(3000));
+    }
+
+    /// A card of `blocks` blocks with a FAT volume formatted at block
+    /// `first` and `table` written into its first blocks.
+    fn card_with(blocks: usize, first: usize, table: &[(usize, &[u8])]) -> Card {
+        let mut volume = StdIoWrapper::from(Cursor::new(vec![0u8; (blocks - first) * BLOCK]));
+        fatfs::format_volume(&mut volume, FormatVolumeOptions::new()).unwrap();
+        let mut data = vec![0u8; blocks * BLOCK];
+        data[first * BLOCK..].copy_from_slice(&volume.into_inner().into_inner());
+        for (at, bytes) in table {
+            data[*at..*at + bytes.len()].copy_from_slice(bytes);
+        }
+        Card { data }
+    }
+
+    /// A partition table entry of an MBR (`kind` e.g. 0x0C, FAT32).
+    fn mbr_entry(kind: u8, first: u32, count: u32) -> [u8; 16] {
+        let mut entry = [0u8; 16];
+        entry[4] = kind;
+        entry[8..12].copy_from_slice(&first.to_le_bytes());
+        entry[12..16].copy_from_slice(&count.to_le_bytes());
+        entry
+    }
+
+    fn opens(card: Card) -> Result<(), VolumeError> {
+        let disk = BlockDisk::volume(card)?;
+        let fs = FileSystem::new(disk, FsOptions::new()).unwrap();
+        let s = FatStorage::new(Box::leak(Box::new(fs)));
+        s.write("Books/a.txt", b"found").unwrap();
+        assert_eq!(s.size("Books/a.txt"), Ok(5));
+        Ok(())
+    }
+
+    #[test]
+    fn volumes_found_in_partitions() {
+        let blocks = 8192;
+        // The file system from the first block, without a table.
+        assert_eq!(opens(card_with(blocks, 0, &[])), Ok(()));
+        // An MBR, as on most cards, its partition after an empty one.
+        let first = 2048;
+        let entry = mbr_entry(0x0C, first as u32, (blocks - first) as u32);
+        let table = [(446 + 16, &entry[..]), (510, &[0x55, 0xAA][..])];
+        assert_eq!(opens(card_with(blocks, first, &table)), Ok(()));
+        // A GPT: a protective MBR, the header in block 1, entries in 2.
+        let protective = mbr_entry(0xEE, 1, (blocks - 1) as u32);
+        let mut header = [0u8; 92];
+        header[..8].copy_from_slice(b"EFI PART");
+        header[72..80].copy_from_slice(&2u64.to_le_bytes());
+        header[80..84].copy_from_slice(&4u32.to_le_bytes());
+        header[84..88].copy_from_slice(&128u32.to_le_bytes());
+        let mut entry = [0u8; 48];
+        entry[..16].copy_from_slice(&[0xA2; 16]);
+        entry[32..40].copy_from_slice(&(first as u64).to_le_bytes());
+        entry[40..48].copy_from_slice(&((blocks - 1) as u64).to_le_bytes());
+        let table = [
+            (446, &protective[..]),
+            (510, &[0x55, 0xAA][..]),
+            (BLOCK, &header[..]),
+            (2 * BLOCK + 128, &entry[..]),
+        ];
+        assert_eq!(opens(card_with(blocks, first, &table)), Ok(()));
+        // exFAT, as cards above 32 GB come.
+        let mut card = card_with(
+            blocks,
+            first,
+            &[
+                (446, &mbr_entry(0x07, 2048, 6144)[..]),
+                (510, &[0x55, 0xAA][..]),
+            ],
+        );
+        card.data[first * BLOCK + 3..first * BLOCK + 11].copy_from_slice(b"EXFAT   ");
+        assert_eq!(opens(card).unwrap_err(), VolumeError::ExFat);
+        // Nothing at all.
+        let card = Card {
+            data: vec![0; blocks * BLOCK],
+        };
+        assert_eq!(opens(card).unwrap_err(), VolumeError::NoFat);
     }
 
     #[test]
