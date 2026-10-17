@@ -119,9 +119,10 @@ pub(crate) struct CachePaths {
     pub end: String,
 }
 
-/// Images are decoded at most this large (longer side, in pixels); readers
-/// scale them to the page.
-pub(crate) const IMAGE_SIDE: u32 = 1600;
+/// Images are decoded at most this large (longer side, in pixels) where the
+/// screen does not say (see `OpenOptions::image_side`); readers scale them
+/// to the page.
+pub(crate) const IMAGE_SIDE: u32 = quireink_sdk::IMAGE_SIDE;
 /// Longest side of a decoded cover: enough for the library and home screen.
 pub(crate) const COVER_SIDE: u32 = 300;
 
@@ -1227,6 +1228,7 @@ pub(crate) fn convert(
     rules: Rules,
     styles: bool,
     color: bool,
+    side: u32,
 ) -> Result<u32, DocumentError> {
     let name = match source {
         Source::Zip { entry, .. } => entry.name.as_str(),
@@ -1357,7 +1359,7 @@ pub(crate) fn convert(
         for (path, base) in &images {
             if !crate::pictures::has(storage, base, color) {
                 let file = crate::pictures::file(base, color);
-                let _ = decode_image(storage, archive, path, &file, &paths.dir, IMAGE_SIDE, color);
+                let _ = decode_image(storage, archive, path, &file, &paths.dir, side, color);
             }
         }
     }
@@ -1366,7 +1368,7 @@ pub(crate) fn convert(
     {
         let wanted: Vec<(String, String, u32)> = images
             .into_iter()
-            .map(|(id, base)| (id, crate::pictures::file(&base, color), IMAGE_SIDE))
+            .map(|(id, base)| (id, crate::pictures::file(&base, color), side))
             .collect();
         let _ = crate::fb2::decode_binaries(storage, path, *encoding, &wanted, &paths.dir, color);
     }

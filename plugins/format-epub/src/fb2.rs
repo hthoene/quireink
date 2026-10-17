@@ -374,6 +374,8 @@ pub struct Fb2Document {
     styles: bool,
     /// Pictures in colour (ADR 0015).
     color: bool,
+    /// Pictures decoded at most this large (longer side, in pixels).
+    image_side: u32,
     /// Size of the file: the length until it is converted.
     size: u32,
     length: Cell<u32>,
@@ -395,6 +397,7 @@ impl Fb2Document {
         options: &quireink_sdk::OpenOptions,
     ) -> Result<Self, DocumentError> {
         let (styles, color) = (options.publisher_styles, options.color);
+        let image_side = options.image_side;
         let size = storage.size(path)?;
         let mut head = [0u8; 4096];
         let n = storage.read_at(path, 0, &mut head)?;
@@ -467,6 +470,7 @@ impl Fb2Document {
             cover: found.cover,
             styles,
             color,
+            image_side,
             size: u32::try_from(size).unwrap_or(u32::MAX - 1),
             length: Cell::new(UNKNOWN),
         })
@@ -489,6 +493,7 @@ impl Fb2Document {
                     Default::default(),
                     self.styles,
                     self.color,
+                    self.image_side,
                 )?
             }
         };

@@ -59,6 +59,11 @@ change the plugin SDK.
   runs out of memory while converted.
 - X4: the full refresh against ghosts takes the shorter waveform of a warm
   panel (1.6 s instead of 3.5); the slow one only after starting.
+- Pictures of books are decoded no larger than the screen shows them
+  (`OpenOptions::image_side`, from the device): a quarter of the pixels
+  on the X4, whose first opening of a book with a large cover takes 15 s
+  instead of 22, its cover page drawn in 1.2 s instead of 3.4. Pictures
+  are dithered in whole numbers.
 - X4 remote: `--profile` shows where the time goes (the functions the
   processor was in, every 5 ms), `--trace` what is read and written.
 - X4: on USB power, sleep shows the sleep screen and keeps the USB

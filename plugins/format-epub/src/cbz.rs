@@ -38,6 +38,8 @@ pub struct CbzDocument {
     metadata: Metadata,
     /// Pages in colour (ADR 0015).
     color: bool,
+    /// Pages decoded at most this large (longer side, in pixels).
+    image_side: u32,
 }
 
 /// Whether `name` is a picture QuireInk shows.
@@ -144,6 +146,7 @@ impl CbzDocument {
             cache,
             metadata,
             color: options.color,
+            image_side: options.image_side,
         })
     }
 
@@ -261,7 +264,7 @@ impl Document for CbzDocument {
             return Ok(None);
         }
         let cache = format!("{}/p{index}", self.cache);
-        let image = self.picture(storage, index, &cache, convert::IMAGE_SIDE);
+        let image = self.picture(storage, index, &cache, self.image_side);
         // A picture that cannot be shown is named instead.
         let (kind, text) = match &image {
             Some(_) => (BlockKind::Image, String::new()),

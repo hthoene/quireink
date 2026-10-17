@@ -27,7 +27,13 @@ pub struct OpenOptions {
     pub css: String,
     /// Pictures in colour, for colour screens (ADR 0015); gray otherwise.
     pub color: bool,
+    /// The longer side, in pixels, pictures are decoded to at most: the
+    /// screen's, so a small device does not decode what it cannot show.
+    pub image_side: u32,
 }
+
+/// The longer side of pictures where the screen does not say otherwise.
+pub const IMAGE_SIDE: u32 = 1600;
 
 impl Default for OpenOptions {
     fn default() -> Self {
@@ -35,6 +41,7 @@ impl Default for OpenOptions {
             publisher_styles: true,
             css: String::new(),
             color: false,
+            image_side: IMAGE_SIDE,
         }
     }
 }
@@ -54,6 +61,12 @@ impl OpenOptions {
     /// With pictures in colour, or gray.
     pub fn color(mut self, on: bool) -> Self {
         self.color = on;
+        self
+    }
+
+    /// With pictures decoded to at most `side` pixels on their longer side.
+    pub fn image_side(mut self, side: u32) -> Self {
+        self.image_side = side;
         self
     }
 }
@@ -85,6 +98,8 @@ pub struct Formats {
     specs: Vec<FormatSpec>,
     /// The screen shows colour: documents open with colour pictures.
     color: bool,
+    /// The screen's longer side, if set.
+    image_side: Option<u32>,
 }
 
 impl Formats {
@@ -98,10 +113,18 @@ impl Formats {
         self.color = on;
     }
 
+    /// The screen's longer side, in pixels: pictures are decoded no larger
+    /// (set by the kernel from the device).
+    pub fn set_image_side(&mut self, side: u32) {
+        self.image_side = Some(side);
+    }
+
     /// How documents open here unless asked otherwise: as the book
-    /// intends, with pictures in colour on colour screens.
+    /// intends, with pictures in colour on colour screens, as large as the
+    /// screen shows them.
     pub fn options(&self) -> OpenOptions {
-        OpenOptions::default().color(self.color)
+        let side = self.image_side.map_or(IMAGE_SIDE, |s| s.min(IMAGE_SIDE));
+        OpenOptions::default().color(self.color).image_side(side)
     }
 
     /// Releases unused capacity once registration is complete.

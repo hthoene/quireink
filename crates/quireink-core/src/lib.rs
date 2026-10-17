@@ -479,6 +479,10 @@ impl KernelBuilder {
         // Colour screens open documents with colour pictures (ADR 0015).
         let color = kernel.shared.device.display.format.is_color();
         kernel.shared.formats.set_color(color);
+        // Pictures no larger than the screen shows them.
+        let display = kernel.shared.device.display;
+        let side = u32::from(display.width.max(display.height));
+        kernel.shared.formats.set_image_side(side);
 
         // Passwords and keys.
         if let Ok(data) = quireink_sdk::read_file(

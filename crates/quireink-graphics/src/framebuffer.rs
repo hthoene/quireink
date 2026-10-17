@@ -293,11 +293,13 @@ impl Framebuffer {
         /// 4×4 Bayer matrix.
         const BAYER: [[u8; 4]; 4] = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
         let gray = match self.format.gray_levels() {
+            // The threshold's offset, ((t + 0.5) / 16 - 0.5) of a level's
+            // step (255 / (levels - 1)), in whole numbers: chips without
+            // floating point reckon it for every pixel of a picture.
             Some(levels @ 2..=16) => {
-                let step = 255.0 / f32::from(levels - 1);
-                let threshold = f32::from(BAYER[usize::from(y % 4)][usize::from(x % 4)]);
-                let offset = ((threshold + 0.5) / 16.0 - 0.5) * step;
-                (f32::from(gray) + offset).clamp(0.0, 255.0) as u8
+                let threshold = i32::from(BAYER[usize::from(y % 4)][usize::from(x % 4)]);
+                let offset = (2 * threshold - 15) * 255 / (32 * i32::from(levels - 1));
+                (i32::from(gray) + offset).clamp(0, 255) as u8
             }
             _ => gray,
         };

@@ -41,6 +41,8 @@ pub struct EpubDocument {
     styles: bool,
     /// Pictures in colour (ADR 0015).
     color: bool,
+    /// Pictures decoded at most this large (longer side, in pixels).
+    image_side: u32,
     /// Archive path of the cover image.
     cover: Option<String>,
     /// One's own stylesheets for this book (see [`user_css`]), applied
@@ -208,7 +210,7 @@ impl EpubDocument {
         path: &str,
         styles: bool,
     ) -> Result<Self, DocumentError> {
-        Self::open_styled(storage, path, styles, "", false)
+        Self::open_styled(storage, path, styles, "", false, convert::IMAGE_SIDE)
     }
 
     /// Opens a book as `options` say: with its styles or not, and with
@@ -224,6 +226,7 @@ impl EpubDocument {
             options.publisher_styles,
             &options.css,
             options.color,
+            options.image_side,
         )
     }
 
@@ -233,6 +236,7 @@ impl EpubDocument {
         styles: bool,
         plugin_css: &str,
         color: bool,
+        image_side: u32,
     ) -> Result<Self, DocumentError> {
         let archive = ZipArchive::open(storage, path).map_err(package::error)?;
         let cache = alloc::format!("{}/{:016x}", Env::plugin_dir(PLUGIN.as_str()), fnv(path));
@@ -279,6 +283,7 @@ impl EpubDocument {
             chapters,
             styles,
             color,
+            image_side,
             user_css,
             pages: core::cell::RefCell::new(None),
             known: core::cell::RefCell::new(None),
@@ -338,7 +343,15 @@ impl EpubDocument {
                     archive: &self.archive,
                     entry: &entry,
                 };
-                convert::convert(storage, &source, &paths, rules, self.styles, self.color)?
+                convert::convert(
+                    storage,
+                    &source,
+                    &paths,
+                    rules,
+                    self.styles,
+                    self.color,
+                    self.image_side,
+                )?
             }
         };
         if let Some(slot) = self.lengths.get(section as usize) {

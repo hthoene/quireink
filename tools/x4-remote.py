@@ -46,7 +46,7 @@ USB_ID = (0x303A, 0x1001)
 # As the emulator: comfortably above the long-press threshold.
 LONG_MS = 1200
 # A command that takes longer has failed.
-TIMEOUT_S = 20
+TIMEOUT_S = 60
 
 
 def find_port():
