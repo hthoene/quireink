@@ -85,7 +85,8 @@ change the plugin SDK.
   (`ZipArchive::reader`, an `EntryReader`), not inflated to a temporary
   file first; with memory short for both, as before. JPEGs decode a third
   faster: Huffman codes looked up by their first 8 bits, bits taken a few
-  bytes at a time, the inverse DCT in 32-bit numbers, and blocks of one
+  bytes at a time, the inverse DCT in 32-bit numbers (at half size with 6 multiplications
+  a line instead of 16), and blocks of one
   level filled at once. Pictures are read and written several blocks of a
   card at a time (rows drawn in chunks of 8 KB).
 - X4: the SPI bus uses DMA for transfers of 32 bytes and more.

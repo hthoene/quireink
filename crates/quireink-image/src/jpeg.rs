@@ -258,6 +258,9 @@ const COEFFICIENT: i32 = 4095;
 /// Inverse DCT of the `n`×`n` lowest frequencies of a block, which gives
 /// the block at `n`/8 of its size (`n` = 8, 4, 2 or 1).
 pub(crate) fn idct_scaled(coef: &[i32; 64], n: usize, out: &mut [u8], stride: usize) {
+    if n == 4 {
+        return idct4(coef, out, stride);
+    }
     let c = match n {
         8 => &C8,
         4 => &C4,
@@ -290,6 +293,33 @@ pub(crate) fn idct_scaled(coef: &[i32; 64], n: usize, out: &mut [u8], stride: us
             // Scales: 2^12 · 2^12 / 2^10 = 2^14, plus the level shift.
             let value = ((sum + (1 << 13)) >> 14) + 128;
             out[y * stride + x] = value.clamp(0, 255) as u8;
+        }
+    }
+}
+
+/// [`C4`] applied to four frequencies, with 6 multiplications instead of
+/// 16 (the same sums, so the same numbers).
+fn idct4_line(f: [i32; 4]) -> [i32; 4] {
+    let even = (f[0] + f[2]) * 1448;
+    let odd = (f[0] - f[2]) * 1448;
+    let a = f[1] * 1892 + f[3] * 784;
+    let b = f[1] * 784 - f[3] * 1892;
+    [even + a, odd + b, odd - b, even - a]
+}
+
+/// [`idct_scaled`] at half the size (`n` = 4), the most common.
+fn idct4(coef: &[i32; 64], out: &mut [u8], stride: usize) {
+    let mut tmp = [[0i32; 4]; 4];
+    for (v, row) in tmp.iter_mut().enumerate() {
+        let f = core::array::from_fn(|u| coef[v * 8 + u].clamp(-COEFFICIENT, COEFFICIENT));
+        if f != [0; 4] {
+            *row = idct4_line(f).map(|sum| sum >> 10);
+        }
+    }
+    for x in 0..4 {
+        let column = idct4_line([tmp[0][x], tmp[1][x], tmp[2][x], tmp[3][x]]);
+        for (y, sum) in column.into_iter().enumerate() {
+            out[y * stride + x] = (((sum + (1 << 13)) >> 14) + 128).clamp(0, 255) as u8;
         }
     }
 }
@@ -689,6 +719,35 @@ pub(crate) fn ycbcr_to_rgb(y: u8, cb: u8, cr: u8) -> [u8; 3] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn half_size_idct_as_the_general_one() {
+        // Any coefficients: the shortcut gives the general sums' numbers.
+        let mut seed = 7u32;
+        for _ in 0..500 {
+            let mut coef = [0i32; 64];
+            for c in coef.iter_mut() {
+                seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+                *c = (seed >> 16) as i32 % 3000 - 1500;
+            }
+            let (mut fast, mut general) = ([0u8; 16], [0u8; 16]);
+            idct4(&coef, &mut fast, 4);
+            let c = &C4;
+            let mut tmp = [0i32; 64];
+            for v in 0..4 {
+                for x in 0..4 {
+                    tmp[v * 8 + x] = (0..4).map(|u| coef[v * 8 + u] * c[u][x]).sum::<i32>() >> 10;
+                }
+            }
+            for x in 0..4 {
+                for y in 0..4 {
+                    let sum: i32 = (0..4).map(|v| tmp[v * 8 + x] * c[v][y]).sum();
+                    general[y * 4 + x] = (((sum + (1 << 13)) >> 14) + 128).clamp(0, 255) as u8;
+                }
+            }
+            assert_eq!(fast, general);
+        }
+    }
 
     #[test]
     fn ycbcr_primaries() {
