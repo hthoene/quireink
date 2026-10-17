@@ -11,7 +11,7 @@ use crate::{ImageError, ImageSink};
 const MAGIC: &[u8; 4] = b"QIGI";
 const HEADER: u64 = 12;
 /// Rows are appended in chunks of about this size.
-const FLUSH: usize = 2048;
+const FLUSH: usize = 8192;
 
 /// A decoded image in storage.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,6 +38,19 @@ impl GrayFile {
         })
     }
 
+    /// Reads rows from `y` on into `out`, as many whole ones as fit and
+    /// the image has: in one read, which a card serves faster than row by
+    /// row. The rows read, 0 if none could be.
+    pub fn read_rows(&self, storage: &dyn Storage, y: u32, out: &mut [u8]) -> u32 {
+        let width = self.width as usize;
+        let rows = (out.len() / width.max(1)).min(self.height.saturating_sub(y) as usize);
+        let at = HEADER + u64::from(y) * u64::from(self.width);
+        if rows == 0 || !read_all(storage, &self.path, at, &mut out[..rows * width]) {
+            return 0;
+        }
+        rows as u32
+    }
+
     /// Reads row `y` into `out` (at most `width` bytes).
     pub fn read_row(&self, storage: &dyn Storage, y: u32, out: &mut [u8]) -> bool {
         let len = out.len().min(self.width as usize);
@@ -51,6 +64,18 @@ impl GrayFile {
         }
         true
     }
+}
+
+/// Reads `out` whole from `at` in `path`.
+pub(crate) fn read_all(storage: &dyn Storage, path: &str, at: u64, out: &mut [u8]) -> bool {
+    let mut filled = 0;
+    while filled < out.len() {
+        match storage.read_at(path, at + filled as u64, &mut out[filled..]) {
+            Ok(0) | Err(_) => return false,
+            Ok(n) => filled += n,
+        }
+    }
+    true
 }
 
 /// Writes a decoded image to storage as it is decoded.

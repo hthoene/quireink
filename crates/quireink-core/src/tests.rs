@@ -151,15 +151,17 @@ fn render(kernel: &mut Kernel) {
     kernel.render(&mut |_, _| {});
 }
 
+/// A short press; the effects of what it did, on the press (a button
+/// without a long press) or as it is let go.
 fn press(kernel: &mut Kernel, at: u64, name: &'static str) -> crate::Effects {
-    kernel.handle(
+    let pressed = kernel.handle(
         Instant(at),
         InputEvent::Button {
             name,
             state: ButtonState::Pressed,
         },
     );
-    let effects = kernel.handle(
+    let released = kernel.handle(
         Instant(at + 50),
         InputEvent::Button {
             name,
@@ -167,7 +169,11 @@ fn press(kernel: &mut Kernel, at: u64, name: &'static str) -> crate::Effects {
         },
     );
     render(kernel);
-    effects
+    if pressed.refresh().is_some() || pressed.sleep() || pressed.restart() {
+        pressed
+    } else {
+        released
+    }
 }
 
 fn tap(kernel: &mut Kernel, at: u64, x: i32, y: i32) -> crate::Effects {
@@ -1880,6 +1886,18 @@ fn bands_pass_whole_aligned_rows_and_again() {
     );
     // Drawn again the same, e.g. for the controller's memory of the frame shown.
     assert_eq!(passed(&mut kernel, true), parts);
+
+    // Captured: the whole screen in bands, and what was rendered last
+    // stays what is drawn again.
+    let mut captured = Vec::new();
+    assert!(kernel.capture(&mut |top, rows| captured.push((top, rows.height))));
+    assert_eq!(captured.first(), Some(&(0, 16)));
+    let height = captured.iter().map(|(_, h)| *h).sum::<u16>();
+    assert_eq!(height, kernel.framebuffer.bounds().height);
+    assert_eq!(passed(&mut kernel, true), parts);
+    // With changes waiting, nothing is captured.
+    kernel.unrendered = Some(Rect::new(0, 0, 10, 10));
+    assert!(!kernel.capture(&mut |_, _| panic!("captured with changes waiting")));
 }
 
 #[test]
@@ -2133,4 +2151,196 @@ fn filters_see_inputs_and_refreshes_first() {
     );
     press(&mut kernel, 300, "confirm");
     assert_eq!(log.borrow().len(), 1, "confirm was taken");
+}
+
+/// Screens for the home and the reader slot that note the height they
+/// were made for; the home one names its confirm button.
+struct SizedPlugin(Rc<RefCell<Vec<(&'static str, u16)>>>);
+
+struct SizedScreen;
+
+impl Screen for SizedScreen {
+    fn draw(&mut self, _: &mut Canvas<'_>, _: &Env<'_>) {}
+
+    fn on_action(&mut self, _: &Id, _: &mut Cx<'_, '_>) -> Handled {
+        Handled::No
+    }
+
+    fn hint(&self, action: &Id, _: &Env<'_>) -> quireink_sdk::Hint {
+        if *action == actions::CONFIRM {
+            quireink_sdk::Hint::Text("Go".into())
+        } else {
+            quireink_sdk::Hint::Default
+        }
+    }
+}
+
+impl Plugin for SizedPlugin {
+    fn manifest(&self) -> Manifest {
+        Manifest {
+            id: Id::new_static("sized"),
+            name: Cow::Borrowed("Sized"),
+            description: Cow::Borrowed(""),
+            version: Version::new(1, 0, 0),
+            sdk: SDK_VERSION,
+        }
+    }
+
+    fn register(&self, r: &mut dyn Registrar) -> Result<(), RegisterError> {
+        for (name, slot) in [("home", slots::HOME), ("reader", slots::READER)] {
+            let made = self.0.clone();
+            let id = Id::parse(&alloc::format!("sized.{name}")).unwrap();
+            r.add_screen(ScreenSpec {
+                id: id.clone(),
+                title: Cow::Borrowed("sized"),
+                factory: Box::new(move |env, _| {
+                    made.borrow_mut().push((name, env.device.display.height));
+                    Box::new(SizedScreen)
+                }),
+            })?;
+            r.bind_slot(slot, id, Priority::DEFAULT)?;
+        }
+        r.set_screen_hints(Id::new_static("sized.reader"), quireink_sdk::Hints::OnPress)?;
+        Ok(())
+    }
+}
+
+#[test]
+fn a_row_of_hints_names_the_buttons_below_the_screen() {
+    use quireink_sdk::Hint;
+    let made = Rc::new(RefCell::new(Vec::new()));
+    let mut kernel = Kernel::builder(DEVICE)
+        .plugin(SizedPlugin(made.clone()))
+        .button_row(&["back", "confirm", "left", "right"])
+        .build()
+        .unwrap();
+    kernel.start(Instant(0));
+    render(&mut kernel);
+    // The home screen is made for the part above the row.
+    let (_, above) = made.borrow()[0];
+    assert!(above < 90 && above > 45, "{above}");
+    assert_eq!(kernel.hint_row(), Some(Rect::new(0, above, 90, 90 - above)));
+    // Nothing to go back to; the screen's own word; arrows.
+    assert_eq!(
+        kernel.hints,
+        [
+            Hint::Hidden,
+            Hint::Text("Go".into()),
+            Hint::Icon("chevron-left"),
+            Hint::Icon("chevron-right"),
+        ]
+    );
+
+    // The reader keeps all of the screen, made once for it.
+    kernel.apply(Command::OpenSlot(
+        slots::READER,
+        quireink_sdk::Params::new(),
+    ));
+    kernel.finish();
+    assert_eq!(made.borrow().last(), Some(&("reader", 90)));
+    assert_eq!(made.borrow().len(), 2);
+    assert_eq!(kernel.hint_row(), None);
+    // A button of the row shows the row over the page for a while; a side
+    // button does not.
+    press(&mut kernel, 50, "page-forward");
+    assert_eq!(kernel.hint_row(), None);
+    let effects = press(&mut kernel, 100, "confirm");
+    let over = Rect::new(0, above, 90, 90 - above);
+    assert_eq!(kernel.hint_row(), Some(over));
+    assert!(effects.wake_at().is_some());
+    render(&mut kernel);
+    // Recognized as the button is let go, 50 ms after it went down.
+    kernel.tick(Instant(150 + 4000));
+    assert_eq!(kernel.hint_row(), None);
+    // Gone, the page is drawn there again.
+    assert_eq!(kernel.unrendered.map(|r| r.bottom()), Some(90));
+    kernel.apply(Command::ShowHints);
+    kernel.finish();
+    assert_eq!(kernel.hint_row(), Some(over));
+    // Back from it, the home screen has the part above the row again.
+    press(&mut kernel, 5000, "back");
+    assert_eq!(kernel.content().height, above);
+    assert_eq!(kernel.hints[0], Hint::Hidden);
+
+    // Switched off: the screens are made anew for all of it.
+    kernel.apply(Command::SetSetting(
+        quireink_sdk::builtin::settings::BUTTON_HINTS,
+        quireink_sdk::SettingValue::Bool(false),
+    ));
+    kernel.finish();
+    assert_eq!(made.borrow().last(), Some(&("home", 90)));
+    assert_eq!(kernel.hint_row(), None);
+}
+
+/// A home screen that shows a picture over all of it while asked to.
+struct PicturePlugin(Rc<RefCell<bool>>);
+
+struct PictureScreen(Rc<RefCell<bool>>);
+
+impl Screen for PictureScreen {
+    fn draw(&mut self, canvas: &mut Canvas<'_>, env: &Env<'_>) {
+        if *self.0.borrow() {
+            let row = alloc::vec![128u8; usize::from(env.device.display.width)];
+            for y in 0..i32::from(env.device.display.height) {
+                canvas.draw_gray_row(0, y, &row);
+            }
+        } else {
+            canvas.fill_rect(0, 0, 10, 10, Color::BLACK);
+        }
+    }
+
+    fn on_action(&mut self, _: &Id, _: &mut Cx<'_, '_>) -> Handled {
+        Handled::No
+    }
+}
+
+impl Plugin for PicturePlugin {
+    fn manifest(&self) -> Manifest {
+        Manifest {
+            id: Id::new_static("picture"),
+            name: Cow::Borrowed("Picture"),
+            description: Cow::Borrowed(""),
+            version: Version::new(1, 0, 0),
+            sdk: SDK_VERSION,
+        }
+    }
+
+    fn register(&self, r: &mut dyn Registrar) -> Result<(), RegisterError> {
+        let shown = self.0.clone();
+        r.add_screen(ScreenSpec {
+            id: Id::new_static("picture.home"),
+            title: Cow::Borrowed("picture"),
+            factory: Box::new(move |_, _| Box::new(PictureScreen(shown.clone()))),
+        })?;
+        r.bind_slot(
+            slots::HOME,
+            Id::new_static("picture.home"),
+            Priority::DEFAULT,
+        )
+    }
+}
+
+#[test]
+fn leaving_a_large_picture_refreshes_in_full() {
+    let shown = Rc::new(RefCell::new(false));
+    let mut kernel = Kernel::builder(DEVICE)
+        .plugin(PicturePlugin(shown.clone()))
+        .build()
+        .unwrap();
+    kernel.start(Instant(0));
+    render(&mut kernel);
+    let mode = |effects: crate::Effects| effects.refresh().map(|(_, mode)| mode);
+    // A picture shown (drawn when rendered): asked as it is; leaving it,
+    // in full.
+    *shown.borrow_mut() = true;
+    kernel.apply(Command::Redraw(RefreshMode::Partial));
+    let effects = kernel.finish();
+    assert_eq!(mode(effects), Some(RefreshMode::Partial));
+    render(&mut kernel);
+    assert!(kernel.pictures_shown);
+    *shown.borrow_mut() = false;
+    kernel.apply(Command::Redraw(RefreshMode::Partial));
+    assert_eq!(mode(kernel.finish()), Some(RefreshMode::Full));
+    render(&mut kernel);
+    assert!(!kernel.pictures_shown);
 }

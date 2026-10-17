@@ -313,7 +313,7 @@ impl BrowseScreen {
                     env.storage,
                     &tmp,
                     &cover_path(&url),
-                    side,
+                    quireink_sdk::image::Fit::side(side),
                     color,
                 )
             })

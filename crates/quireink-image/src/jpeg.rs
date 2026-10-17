@@ -6,7 +6,7 @@
 
 use alloc::vec::Vec;
 
-use crate::{Downscaler, ImageError, ImageSink, Reader, factor_for, zeroed};
+use crate::{Downscaler, Fit, ImageError, ImageSink, Reader, block_side, zeroed};
 
 /// Natural order of the zig-zag sequence.
 pub(crate) const ZIGZAG: [u8; 64] = [
@@ -22,16 +22,36 @@ pub(crate) struct Huffman {
     /// Index into `values` of the first code of each length, minus that code.
     offset: [i32; 17],
     values: Vec<u8>,
+    /// The codes of up to [`FAST_BITS`] bits by the next bits: their
+    /// length times 256 plus their value, 0 where a longer code begins.
+    fast: [u16; 1 << FAST_BITS],
 }
+
+/// Bits of the codes looked up at once.
+const FAST_BITS: u32 = 8;
 
 impl Huffman {
     fn new(counts: &[u8; 16], values: Vec<u8>) -> Self {
         let mut max_code = [-1i32; 18];
         let mut offset = [0i32; 17];
+        let mut fast = [0u16; 1 << FAST_BITS];
         let (mut code, mut k) = (0i32, 0i32);
         for len in 1..=16 {
             let count = i32::from(counts[len - 1]);
             offset[len] = k - code;
+            if len <= FAST_BITS as usize {
+                let spread = FAST_BITS as usize - len;
+                for c in 0..count {
+                    let Some(&value) = values.get((k + c) as usize) else {
+                        break;
+                    };
+                    let first = ((code + c) as usize) << spread;
+                    let entry = (len as u16) << 8 | u16::from(value);
+                    for slot in fast.iter_mut().skip(first).take(1 << spread) {
+                        *slot = entry;
+                    }
+                }
+            }
             code += count;
             k += count;
             max_code[len] = if count > 0 { code - 1 } else { -1 };
@@ -43,6 +63,7 @@ impl Huffman {
             max_code,
             offset,
             values,
+            fast,
         }
     }
 }
@@ -68,8 +89,10 @@ pub(crate) struct Bits<'r, 'a> {
 }
 
 impl<'r, 'a> Bits<'r, 'a> {
-    pub(crate) fn bit(&mut self) -> Result<u32, ImageError> {
-        if self.count == 0 {
+    /// Takes bytes until more than 24 bits are at hand (zeros after a
+    /// marker).
+    fn fill(&mut self) -> Result<(), ImageError> {
+        while self.count <= 24 {
             let byte = match self.marker {
                 Some(_) => 0,
                 None => {
@@ -90,19 +113,37 @@ impl<'r, 'a> Bits<'r, 'a> {
                     }
                 }
             };
-            self.bits = u32::from(byte);
-            self.count = 8;
+            self.bits = self.bits << 8 | u32::from(byte);
+            self.count += 8;
         }
+        Ok(())
+    }
+
+    /// The next `n` bits (at most 24), not taken.
+    fn peek(&mut self, n: u32) -> Result<u32, ImageError> {
+        if self.count < n {
+            self.fill()?;
+        }
+        Ok((self.bits >> (self.count - n)) & ((1 << n) - 1))
+    }
+
+    pub(crate) fn bit(&mut self) -> Result<u32, ImageError> {
+        let bit = self.peek(1)?;
         self.count -= 1;
-        Ok((self.bits >> self.count) & 1)
+        Ok(bit)
     }
 
     pub(crate) fn receive(&mut self, n: u32) -> Result<i32, ImageError> {
-        let mut v = 0i32;
-        for _ in 0..n {
-            v = (v << 1) | self.bit()? as i32;
+        if n > 16 {
+            let high = self.receive(n - 16)?;
+            return Ok(high << 16 | self.receive(16)?);
         }
-        Ok(v)
+        if n == 0 {
+            return Ok(0);
+        }
+        let v = self.peek(n)?;
+        self.count -= n;
+        Ok(v as i32)
     }
 
     pub(crate) fn extend(v: i32, n: u32) -> i32 {
@@ -116,8 +157,16 @@ impl<'r, 'a> Bits<'r, 'a> {
     }
 
     pub(crate) fn decode(&mut self, table: &Huffman) -> Result<u8, ImageError> {
-        let mut code = 0i32;
-        for len in 1..=16 {
+        let next = self.peek(FAST_BITS)?;
+        let entry = table.fast[next as usize];
+        if entry != 0 {
+            self.count -= u32::from(entry >> 8);
+            return Ok(entry as u8);
+        }
+        // A longer code: bit by bit from there.
+        self.count -= FAST_BITS;
+        let mut code = next as i32;
+        for len in FAST_BITS as usize + 1..=16 {
             code = (code << 1) | self.bit()? as i32;
             if code <= table.max_code[len] {
                 let index = (table.offset[len] + code) as usize;
@@ -156,12 +205,6 @@ impl<'r, 'a> Bits<'r, 'a> {
             }
         }
     }
-}
-
-/// Inverse DCT of one block (dequantized coefficients in natural order),
-/// written to `out` with stride `stride`, clamped to 0 to 255.
-fn idct(coef: &[i32; 64], out: &mut [u8], stride: usize) {
-    idct_scaled(coef, 8, out, stride);
 }
 
 /// The cosine basis c[u][x] = C(u) cos((2x+1)uπ/2n) / 2, scaled by 2^12,
@@ -207,9 +250,17 @@ const C1: [[i32; 8]; 8] = [
     [0; 8],
 ];
 
+/// Coefficients are kept within this (a valid one is within 2048), so
+/// sums stay within 32 bits: the processor of the X4 multiplies 64-bit
+/// numbers slowly.
+const COEFFICIENT: i32 = 4095;
+
 /// Inverse DCT of the `n`×`n` lowest frequencies of a block, which gives
 /// the block at `n`/8 of its size (`n` = 8, 4, 2 or 1).
 pub(crate) fn idct_scaled(coef: &[i32; 64], n: usize, out: &mut [u8], stride: usize) {
+    if n == 4 {
+        return idct4(coef, out, stride);
+    }
     let c = match n {
         8 => &C8,
         4 => &C4,
@@ -225,30 +276,64 @@ pub(crate) fn idct_scaled(coef: &[i32; 64], n: usize, out: &mut [u8], stride: us
             continue;
         }
         for x in 0..n {
-            let mut sum = 0i64;
+            let mut sum = 0i32;
             for (u, &value) in row.iter().enumerate() {
-                sum += i64::from(value) * i64::from(c[u][x]);
+                sum += value.clamp(-COEFFICIENT, COEFFICIENT) * c[u][x];
             }
-            tmp[v * 8 + x] = (sum >> 8) as i32;
+            tmp[v * 8 + x] = sum >> 10;
         }
     }
     // Columns.
     for x in 0..n {
         for y in 0..n {
-            let mut sum = 0i64;
+            let mut sum = 0i32;
             for v in 0..n {
-                sum += i64::from(tmp[v * 8 + x]) * i64::from(c[v][y]);
+                sum += tmp[v * 8 + x] * c[v][y];
             }
-            // Scales: 2^12 · 2^12 / 2^8 = 2^16, plus the level shift.
-            let value = (sum >> 16) as i32 + 128;
+            // Scales: 2^12 · 2^12 / 2^10 = 2^14, plus the level shift.
+            let value = ((sum + (1 << 13)) >> 14) + 128;
             out[y * stride + x] = value.clamp(0, 255) as u8;
         }
     }
 }
 
+/// [`C4`] applied to four frequencies, with 6 multiplications instead of
+/// 16 (the same sums, so the same numbers).
+fn idct4_line(f: [i32; 4]) -> [i32; 4] {
+    let even = (f[0] + f[2]) * 1448;
+    let odd = (f[0] - f[2]) * 1448;
+    let a = f[1] * 1892 + f[3] * 784;
+    let b = f[1] * 784 - f[3] * 1892;
+    [even + a, odd + b, odd - b, even - a]
+}
+
+/// [`idct_scaled`] at half the size (`n` = 4), the most common.
+fn idct4(coef: &[i32; 64], out: &mut [u8], stride: usize) {
+    let mut tmp = [[0i32; 4]; 4];
+    for (v, row) in tmp.iter_mut().enumerate() {
+        let f = core::array::from_fn(|u| coef[v * 8 + u].clamp(-COEFFICIENT, COEFFICIENT));
+        if f != [0; 4] {
+            *row = idct4_line(f).map(|sum| sum >> 10);
+        }
+    }
+    for x in 0..4 {
+        let column = idct4_line([tmp[0][x], tmp[1][x], tmp[2][x], tmp[3][x]]);
+        for (y, sum) in column.into_iter().enumerate() {
+            out[y * stride + x] = (((sum + (1 << 13)) >> 14) + 128).clamp(0, 255) as u8;
+        }
+    }
+}
+
+/// The level of a block with only its DC coefficient, as
+/// [`idct_scaled`] gives it.
+pub(crate) fn dc_level(dc: i32) -> u8 {
+    let tmp = (dc.clamp(-COEFFICIENT, COEFFICIENT) * 1448) >> 10;
+    (((tmp * 1448 + (1 << 13)) >> 14) + 128).clamp(0, 255) as u8
+}
+
 pub(crate) fn decode(
     reader: &mut Reader<'_>,
-    max_side: u32,
+    fit: Fit,
     sink: &mut dyn ImageSink,
 ) -> Result<(), ImageError> {
     if reader.byte()? != 0xff || reader.byte()? != 0xd8 {
@@ -332,7 +417,7 @@ pub(crate) fn decode(
                     ac_tables,
                     restart_interval,
                 };
-                return crate::progressive::decode(reader, frame, max_side, sink);
+                return crate::progressive::decode(reader, frame, fit, sink);
             }
             0xda => {
                 let count = usize::from(reader.byte()?);
@@ -357,7 +442,7 @@ pub(crate) fn decode(
                     &dc_tables,
                     &ac_tables,
                     (width, height, restart_interval),
-                    max_side,
+                    fit,
                     sink,
                 );
             }
@@ -431,7 +516,7 @@ fn scan(
     dc_tables: &[Option<Huffman>; 4],
     ac_tables: &[Option<Huffman>; 4],
     (width, height, restart_interval): (u32, u32, u32),
-    max_side: u32,
+    fit: Fit,
     sink: &mut dyn ImageSink,
 ) -> Result<(), ImageError> {
     for c in components.iter() {
@@ -450,17 +535,26 @@ fn scan(
     let luma = components[0];
     // Luma at less than full resolution is rare; it is stretched.
     let (sx, sy) = (h_max / luma.h, v_max / luma.v);
-    let mcu_w = 8 * h_max;
-    let mcu_h = 8 * v_max;
-    let mcus_x = (width as usize).div_ceil(mcu_w);
-    let mcus_y = (height as usize).div_ceil(mcu_h);
+    let mcus_x = (width as usize).div_ceil(8 * h_max);
+    let mcus_y = (height as usize).div_ceil(8 * v_max);
+
+    // Each block decoded at n×n pixels of its 8×8 (8, 4, 2 or 1): an image
+    // made smaller is made smaller as it is decoded, from its lowest
+    // frequencies, not decoded whole and averaged; then averaged to the
+    // size it shows at.
+    let size = fit.size(width, height);
+    let n = block_side(width, height, size);
+    let scale = (8 / n) as u32;
+    let (out_width, out_height) = (width.div_ceil(scale), height.div_ceil(scale));
+    let mcu_w = n * h_max;
+    let mcu_h = n * v_max;
     let row_width = mcus_x * mcu_w;
 
-    let factor = factor_for(width, height, max_side);
     // Colour where it is wanted and the image has it (luma and chroma).
     let color = sink.wants_color() && components.len() == 3;
-    let mut scaler = Downscaler::new(width, factor, if color { 3 } else { 1 })?;
-    sink.start(scaler.out_width(), height.div_ceil(factor))?;
+    let mut scaler = Downscaler::new(out_width, out_height, size, if color { 3 } else { 1 })?;
+    sink.start(scaler.out_width(), scaler.out_height())?;
+    let height = out_height;
 
     // One row of MCUs of luma at full resolution, and for colour of each
     // chroma component stretched to it.
@@ -516,6 +610,8 @@ fn scan(
                         // Damaged data must not overflow.
                         component.prediction = component.prediction.wrapping_add(diff);
                         coef[0] = component.prediction.saturating_mul(i32::from(q[0]));
+                        // Whether a coefficient decoded counts at this size.
+                        let mut shaded = false;
                         let mut k = 1;
                         while k < 64 {
                             let rs = bits.decode(ac)?;
@@ -533,8 +629,9 @@ fn scan(
                             }
                             if index == 0 || color {
                                 let value = Bits::extend(bits.receive(s)?, s);
-                                coef[usize::from(ZIGZAG[k])] =
-                                    value.saturating_mul(i32::from(q[k]));
+                                let at = usize::from(ZIGZAG[k]);
+                                coef[at] = value.saturating_mul(i32::from(q[k]));
+                                shaded |= at % 8 < n && at / 8 < n;
                             } else {
                                 bits.receive(s)?;
                             }
@@ -543,7 +640,13 @@ fn scan(
                         if index != 0 && !color {
                             continue;
                         }
-                        idct(&coef, &mut block, 8);
+                        if shaded {
+                            idct_scaled(&coef, n, &mut block, n);
+                        } else {
+                            // One level: most blocks of a picture made
+                            // smaller.
+                            block[..n * n].fill(dc_level(coef[0]));
+                        }
                         // Place the block, stretched where the component
                         // has less resolution than the largest.
                         let (sx, sy) = if index == 0 {
@@ -556,12 +659,19 @@ fn scan(
                             1 => &mut chroma[0],
                             _ => &mut chroma[1],
                         };
-                        let x0 = (mx * h_max + bx * sx) * 8;
-                        let y0 = by * sy * 8;
-                        for y in 0..8 * sy {
-                            for x in 0..8 * sx {
-                                let at = (y0 + y) * row_width + x0 + x;
-                                plane[at] = block[(y / sy) * 8 + x / sx];
+                        let x0 = (mx * h_max + bx * sx) * n;
+                        let y0 = by * sy * n;
+                        if (sx, sy) == (1, 1) {
+                            for (y, from) in block.chunks_exact(n).take(n).enumerate() {
+                                let at = (y0 + y) * row_width + x0;
+                                plane[at..at + n].copy_from_slice(from);
+                            }
+                        } else {
+                            for y in 0..n * sy {
+                                for x in 0..n * sx {
+                                    let at = (y0 + y) * row_width + x0 + x;
+                                    plane[at] = block[(y / sy) * n + x / sx];
+                                }
                             }
                         }
                     }
@@ -611,6 +721,35 @@ mod tests {
     use super::*;
 
     #[test]
+    fn half_size_idct_as_the_general_one() {
+        // Any coefficients: the shortcut gives the general sums' numbers.
+        let mut seed = 7u32;
+        for _ in 0..500 {
+            let mut coef = [0i32; 64];
+            for c in coef.iter_mut() {
+                seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+                *c = (seed >> 16) as i32 % 3000 - 1500;
+            }
+            let (mut fast, mut general) = ([0u8; 16], [0u8; 16]);
+            idct4(&coef, &mut fast, 4);
+            let c = &C4;
+            let mut tmp = [0i32; 64];
+            for v in 0..4 {
+                for x in 0..4 {
+                    tmp[v * 8 + x] = (0..4).map(|u| coef[v * 8 + u] * c[u][x]).sum::<i32>() >> 10;
+                }
+            }
+            for x in 0..4 {
+                for y in 0..4 {
+                    let sum: i32 = (0..4).map(|v| tmp[v * 8 + x] * c[v][y]).sum();
+                    general[y * 4 + x] = (((sum + (1 << 13)) >> 14) + 128).clamp(0, 255) as u8;
+                }
+            }
+            assert_eq!(fast, general);
+        }
+    }
+
+    #[test]
     fn ycbcr_primaries() {
         assert_eq!(ycbcr_to_rgb(128, 128, 128), [128, 128, 128]);
         // Pure red, green and blue as JFIF codes them.
@@ -626,7 +765,7 @@ mod tests {
         // DC 80 → 80/8 = 10 above mid-gray.
         coef[0] = 80;
         let mut out = [0u8; 64];
-        idct(&coef, &mut out, 8);
+        idct_scaled(&coef, 8, &mut out, 8);
         assert!(out.iter().all(|&v| (137..=139).contains(&v)), "{out:?}");
     }
 }

@@ -26,6 +26,8 @@ pub struct Framebuffer {
     inverted: bool,
     /// Saturation of RGB pixels drawn, in percent (100: as they are).
     saturation: u16,
+    /// Pixels of pictures drawn since [`Framebuffer::take_pictured`].
+    pictured: u32,
 }
 
 impl Framebuffer {
@@ -64,6 +66,7 @@ impl Framebuffer {
             dirty: None,
             inverted: false,
             saturation: 100,
+            pictured: 0,
         })
     }
 
@@ -200,13 +203,43 @@ impl Framebuffer {
             return;
         }
         let value = self.encode(color);
+        let bpp = self.format.bits_per_pixel();
+        // Formats of several pixels a byte: whole bytes at once, the
+        // pixels of the bytes at either end one by one (every band is
+        // cleared before it is drawn).
+        let pattern = match bpp {
+            1 => Some(if value & 1 != 0 { 0xFF } else { 0x00 }),
+            2 => Some((value as u8 & 0b11) * 0x55),
+            4 => Some((value as u8 & 0x0F) * 0x11),
+            _ => None,
+        };
+        let (left, right) = (rect.x, rect.right() as u16);
         for y in rect.y..rect.bottom() as u16 {
+            let row = usize::from(y - self.top) * self.stride;
             if self.format == PixelFormat::Gray8 {
-                let row = usize::from(y - self.top) * self.stride;
-                self.data[row + usize::from(rect.x)..row + rect.right() as usize].fill(value as u8);
+                self.data[row + usize::from(left)..row + usize::from(right)].fill(value as u8);
                 continue;
             }
-            for x in rect.x..rect.right() as u16 {
+            let Some(pattern) = pattern else {
+                for x in left..right {
+                    self.store(x, y, value);
+                }
+                continue;
+            };
+            let per = 8 / u16::from(bpp);
+            let first = left.div_ceil(per) * per;
+            let last = right / per * per;
+            if first >= last {
+                for x in left..right {
+                    self.store(x, y, value);
+                }
+                continue;
+            }
+            for x in left..first {
+                self.store(x, y, value);
+            }
+            self.data[row + usize::from(first / per)..row + usize::from(last / per)].fill(pattern);
+            for x in last..right {
                 self.store(x, y, value);
             }
         }
@@ -217,6 +250,22 @@ impl Framebuffer {
     /// `(x, y)`, which must lie inside the framebuffer. Does not mark the
     /// pixel dirty; callers mark whole areas.
     pub(crate) fn blend_pixel(&mut self, x: u16, y: u16, color: Color, alpha: u8) {
+        // Gray formats mix in gray: every glyph's edge comes here, and on
+        // small devices the round through red, green and blue is felt.
+        if alpha != 255
+            && let Some(levels) = self.format.gray_levels()
+            && self.format.bits_per_pixel() <= 8
+        {
+            let max = u32::from(levels - 1);
+            let mut under = self.load(x, y) * 255 / max;
+            if self.inverted {
+                under = 255 - under;
+            }
+            let (a, over) = (u32::from(alpha), u32::from(color.luma()));
+            let mixed = (over * a + under * (255 - a) + 127) / 255;
+            let encoded = self.encode(Color::gray(mixed as u8));
+            return self.store(x, y, encoded);
+        }
         let value = if alpha == 255 {
             color
         } else {
@@ -243,15 +292,24 @@ impl Framebuffer {
     /// Sets the pixel at `(x, y)` (inside the band) to `gray`, ordered
     /// dithered for formats with few gray levels, so photos and
     /// illustrations keep their tones.
+    /// Pixels of pictures (photos, illustrations) drawn since the last
+    /// call: panels that keep ghosts of them want a full refresh after.
+    pub fn take_pictured(&mut self) -> u32 {
+        core::mem::take(&mut self.pictured)
+    }
+
     pub(crate) fn put_gray(&mut self, x: u16, y: u16, gray: u8) {
+        self.pictured = self.pictured.saturating_add(1);
         /// 4×4 Bayer matrix.
         const BAYER: [[u8; 4]; 4] = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
         let gray = match self.format.gray_levels() {
+            // The threshold's offset, ((t + 0.5) / 16 - 0.5) of a level's
+            // step (255 / (levels - 1)), in whole numbers: chips without
+            // floating point reckon it for every pixel of a picture.
             Some(levels @ 2..=16) => {
-                let step = 255.0 / f32::from(levels - 1);
-                let threshold = f32::from(BAYER[usize::from(y % 4)][usize::from(x % 4)]);
-                let offset = ((threshold + 0.5) / 16.0 - 0.5) * step;
-                (f32::from(gray) + offset).clamp(0.0, 255.0) as u8
+                let threshold = i32::from(BAYER[usize::from(y % 4)][usize::from(x % 4)]);
+                let offset = (2 * threshold - 15) * 255 / (32 * i32::from(levels - 1));
+                (i32::from(gray) + offset).clamp(0, 255) as u8
             }
             _ => gray,
         };
@@ -263,12 +321,22 @@ impl Framebuffer {
     /// formats; on gray ones to its gray, as [`Framebuffer::put_gray`].
     pub(crate) fn put_rgb(&mut self, x: u16, y: u16, rgb: [u8; 3]) {
         if self.format.is_color() {
+            self.pictured = self.pictured.saturating_add(1);
             let rgb = saturate(rgb, self.saturation);
             let value = self.encode(Color::rgb(rgb[0], rgb[1], rgb[2]));
             self.store(x, y, value);
         } else {
             self.put_gray(x, y, Color::rgb(rgb[0], rgb[1], rgb[2]).luma());
         }
+    }
+
+    /// The stored value of a pixel of a format of 8 bits or fewer.
+    fn load(&self, x: u16, y: u16) -> u32 {
+        let row = usize::from(y - self.top) * self.stride;
+        let bpp = usize::from(self.format.bits_per_pixel());
+        let bit = usize::from(x) * bpp;
+        let byte = self.data[row + bit / 8];
+        u32::from(byte >> (8 - bpp - bit % 8)) & ((1 << bpp) - 1)
     }
 
     /// Writes an encoded pixel value.
@@ -335,6 +403,28 @@ fn saturate(rgb: [u8; 3], percent: u16) -> [u8; 3] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fills_whole_bytes_and_the_pixels_at_either_end() {
+        for format in [PixelFormat::Mono1, PixelFormat::Gray2, PixelFormat::Gray4] {
+            for (x, width) in [(0, 37), (3, 1), (5, 2), (7, 25), (9, 30), (16, 16)] {
+                let mut fb = Framebuffer::new(40, 3, format).unwrap();
+                fb.fill_clipped(Rect::new(x, 1, width, 1), Color::BLACK);
+                let view = fb.view();
+                for py in 0..3 {
+                    for px in 0..40 {
+                        let inside = py == 1 && px >= x && px < x + width;
+                        let expected = if inside { Color::BLACK } else { Color::WHITE };
+                        assert_eq!(
+                            view.pixel(px, py),
+                            expected,
+                            "{format:?} {x}+{width} at ({px}, {py})"
+                        );
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn saturation_strengthens_colours_not_grays() {

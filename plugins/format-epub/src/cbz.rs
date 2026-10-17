@@ -15,6 +15,7 @@ use core::cmp::Ordering;
 use quireink_sdk::document::{
     Align, Block, BlockKind, Document, DocumentError, ImageRef, Locator, Metadata, OffsetMap,
 };
+use quireink_sdk::image::Fit;
 use quireink_sdk::xml::{Token, Tokenizer, decode, local_name};
 use quireink_sdk::zip::ZipArchive;
 use quireink_sdk::{Env, Storage};
@@ -38,6 +39,8 @@ pub struct CbzDocument {
     metadata: Metadata,
     /// Pages in colour (ADR 0015).
     color: bool,
+    /// Pages decoded at most this large.
+    image_fit: Fit,
 }
 
 /// Whether `name` is a picture QuireInk shows.
@@ -144,17 +147,18 @@ impl CbzDocument {
             cache,
             metadata,
             color: options.color,
+            image_fit: options.image_fit,
         })
     }
 
-    /// Page `index` decoded at most `side` pixels on its longer side into
+    /// Page `index` decoded no larger than `fit` allows into
     /// the picture `base` (see `pictures`), if it can be.
     fn picture(
         &self,
         storage: &dyn Storage,
         index: usize,
         base: &str,
-        side: u32,
+        fit: Fit,
     ) -> Option<ImageRef> {
         if !crate::pictures::has(storage, base, self.color) {
             let name = self.pages.get(index)?;
@@ -165,7 +169,7 @@ impl CbzDocument {
                 name,
                 &file,
                 &self.cache,
-                side,
+                fit,
                 self.color,
             )
             .ok()?;
@@ -261,7 +265,7 @@ impl Document for CbzDocument {
             return Ok(None);
         }
         let cache = format!("{}/p{index}", self.cache);
-        let image = self.picture(storage, index, &cache, convert::IMAGE_SIDE);
+        let image = self.picture(storage, index, &cache, self.image_fit);
         // A picture that cannot be shown is named instead.
         let (kind, text) = match &image {
             Some(_) => (BlockKind::Image, String::new()),
@@ -285,7 +289,7 @@ impl Document for CbzDocument {
 
     fn cover(&self, storage: &dyn Storage) -> Result<Option<ImageRef>, DocumentError> {
         let cache = format!("{}/cover", self.cache);
-        Ok(self.picture(storage, 0, &cache, convert::COVER_SIDE))
+        Ok(self.picture(storage, 0, &cache, convert::COVER_FIT))
     }
 }
 

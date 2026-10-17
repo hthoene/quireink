@@ -52,6 +52,11 @@ pub enum MenuNeed {
     /// devices it is left out of the menus plugins define; users can still
     /// list it.
     NoTouch,
+    /// A device with buttons in a row below the screen, whose row of
+    /// hints shows what they do
+    /// ([`settings::BUTTON_HINTS`](crate::builtin::settings::BUTTON_HINTS)),
+    /// hidden elsewhere.
+    ButtonRow,
     /// A device whose shell shows the screen in other colours than black
     /// and white ([`settings::TEXT_COLOR`](crate::builtin::settings::TEXT_COLOR)),
     /// hidden elsewhere.
@@ -91,6 +96,8 @@ pub struct Menus {
     turns: bool,
     /// The shell tints the screen.
     tints: bool,
+    /// Buttons lie in a row below the screen.
+    button_row: bool,
 }
 
 impl Menus {
@@ -129,6 +136,12 @@ impl Menus {
         self.turns = turns;
     }
 
+    /// Whether buttons lie in a row below the screen, for entries that
+    /// need it ([`MenuNeed::ButtonRow`]).
+    pub fn set_button_row(&mut self, row: bool) {
+        self.button_row = row;
+    }
+
     /// Whether the shell shows the screen in the colours of the settings
     /// [`TEXT_COLOR`](crate::builtin::settings::TEXT_COLOR) and
     /// [`PAPER_COLOR`](crate::builtin::settings::PAPER_COLOR), for entries
@@ -164,6 +177,7 @@ impl Menus {
             Some(MenuNeed::Sleep) => self.sleeps,
             Some(MenuNeed::Rotation) => self.turns,
             Some(MenuNeed::Colors) => self.tints,
+            Some(MenuNeed::ButtonRow) => self.button_row,
             Some(MenuNeed::NoTouch) => listed || !self.touch,
             None => true,
         }

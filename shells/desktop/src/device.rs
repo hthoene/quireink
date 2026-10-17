@@ -145,6 +145,7 @@ impl Device {
             battery: Some(Battery {
                 percent: 80,
                 charging: false,
+                millivolts: None,
             }),
         }
     }
@@ -382,10 +383,12 @@ fn build_kernel(
         device.input.keys = profile.buttons;
         let mut builder = Kernel::builder(device)
             .storage(storage)
+            .clock(micros)
             .glyph_cache(profile.glyph_cache)
             .network(true)
             .speech(profile.speech)
             .sleep(profile.sleep)
+            .button_row(profile.button_row)
             .rotation(true);
         // Scalable fonts only where the emulated device renders them.
         if !profile.font_packs {
@@ -418,4 +421,13 @@ fn turned(mut device: DeviceInfo, rotation: Rotation) -> DeviceInfo {
         (display.width, display.height) = (display.height, display.width);
     }
     device
+}
+
+/// Microseconds since start, for measuring what plugins take.
+fn micros() -> u64 {
+    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    START
+        .get_or_init(std::time::Instant::now)
+        .elapsed()
+        .as_micros() as u64
 }

@@ -42,6 +42,7 @@ use alloc::vec::Vec;
 
 use quireink_sdk::Storage;
 use quireink_sdk::document::{Align, BlockKind, DocumentError, Run, TextStyle};
+use quireink_sdk::image::Fit;
 use quireink_sdk::xml::{Token, Tokenizer, decode, local_name};
 use quireink_sdk::zip::{Entry, ZipArchive};
 
@@ -119,11 +120,11 @@ pub(crate) struct CachePaths {
     pub end: String,
 }
 
-/// Images are decoded at most this large (longer side, in pixels); readers
-/// scale them to the page.
-pub(crate) const IMAGE_SIDE: u32 = 1600;
-/// Longest side of a decoded cover: enough for the library and home screen.
-pub(crate) const COVER_SIDE: u32 = 300;
+/// Images are decoded at most this large where the screen does not say
+/// (see `OpenOptions::image_fit`); readers scale them to the page.
+pub(crate) const IMAGE_FIT: Fit = quireink_sdk::IMAGE_FIT;
+/// A decoded cover: enough for the library and home screen.
+pub(crate) const COVER_FIT: Fit = Fit::side(300);
 
 pub(crate) fn encode_kind(kind: BlockKind) -> (u8, u8) {
     match kind {
@@ -780,6 +781,11 @@ impl Converter<'_> {
             margin = larger(margin, frame.after.0);
             padding = css::sum(padding, frame.after.1);
         }
+        // Written as they come: a chapter of notes has many links and few
+        // ids, and its links once filled tens of KB before an id came.
+        if self.links.len() >= FLUSH_SMALL {
+            self.write_links();
+        }
         if self.text.is_empty() {
             self.margin = larger(self.margin, margin);
             self.padding = css::sum(self.padding, padding);
@@ -1222,6 +1228,7 @@ pub(crate) fn convert(
     rules: Rules,
     styles: bool,
     color: bool,
+    fit: Fit,
 ) -> Result<u32, DocumentError> {
     let name = match source {
         Source::Zip { entry, .. } => entry.name.as_str(),
@@ -1352,16 +1359,16 @@ pub(crate) fn convert(
         for (path, base) in &images {
             if !crate::pictures::has(storage, base, color) {
                 let file = crate::pictures::file(base, color);
-                let _ = decode_image(storage, archive, path, &file, &paths.dir, IMAGE_SIDE, color);
+                let _ = decode_image(storage, archive, path, &file, &paths.dir, fit, color);
             }
         }
     }
     if let Source::Fb2 { path, encoding } = source
         && !images.is_empty()
     {
-        let wanted: Vec<(String, String, u32)> = images
+        let wanted: Vec<(String, String, Fit)> = images
             .into_iter()
-            .map(|(id, base)| (id, crate::pictures::file(&base, color), IMAGE_SIDE))
+            .map(|(id, base)| (id, crate::pictures::file(&base, color), fit))
             .collect();
         let _ = crate::fb2::decode_binaries(storage, path, *encoding, &wanted, &paths.dir, color);
     }
@@ -1405,18 +1412,52 @@ impl quireink_sdk::image::Source for StorageSource<'_> {
     }
 }
 
-/// Decodes the image at `path` in the archive into the cache file `cache`.
-/// Stored entries are read in place; compressed ones are inflated to a
-/// temporary file first.
+/// A compressed entry of the archive, inflated as it is read.
+struct EntrySource<'a> {
+    storage: &'a dyn Storage,
+    reader: quireink_sdk::zip::EntryReader<'a>,
+}
+
+impl quireink_sdk::image::Source for EntrySource<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize, quireink_sdk::image::ImageError> {
+        self.reader
+            .read(self.storage, buf)
+            .map_err(|_| quireink_sdk::image::ImageError::Io)
+    }
+}
+
+/// A source whose first bytes were read to tell its format, given again
+/// first.
+struct Headed<'a> {
+    head: [u8; 8],
+    len: usize,
+    at: usize,
+    rest: &'a mut dyn quireink_sdk::image::Source,
+}
+
+impl quireink_sdk::image::Source for Headed<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize, quireink_sdk::image::ImageError> {
+        if self.at < self.len {
+            let n = (self.len - self.at).min(buf.len());
+            buf[..n].copy_from_slice(&self.head[self.at..self.at + n]);
+            self.at += n;
+            return Ok(n);
+        }
+        self.rest.read(buf)
+    }
+}
+
 /// Decodes the image at `path` in the archive into the cache file
-/// `cache`, in colour with `color`, else gray.
+/// `cache`, in colour with `color`, else gray. Stored entries are read in
+/// place, compressed ones inflated as they are decoded (or, with memory
+/// short for both at once, inflated to a temporary file first).
 pub(crate) fn decode_image(
     storage: &dyn Storage,
     archive: &ZipArchive,
     path: &str,
     cache: &str,
     dir: &str,
-    side: u32,
+    fit: Fit,
     color: bool,
 ) -> Result<(), DocumentError> {
     let entry = archive
@@ -1425,28 +1466,44 @@ pub(crate) fn decode_image(
         .ok_or(DocumentError::Malformed(alloc::borrow::Cow::Borrowed(
             "missing image",
         )))?;
-    let temp = alloc::format!("{dir}/image.tmp");
-    let (file, offset, end) = match archive.stored_range(storage, &entry).map_err(error)? {
-        Some((offset, len)) => (archive.path(), offset, offset + len),
-        None => {
-            storage.write(&temp, &[])?;
-            let mut failed = None;
-            archive
-                .stream(storage, &entry, &mut |chunk| {
-                    failed = storage.append(&temp, chunk).err();
-                    failed.is_none()
-                })
-                .map_err(error)?;
-            if let Some(e) = failed {
-                return Err(DocumentError::Storage(e));
-            }
-            (temp.as_str(), 0, u64::from(entry.size))
-        }
-    };
-    let result = decode_range(storage, file, offset, end, cache, side, color);
-    if file == temp {
-        let _ = storage.remove(&temp);
+    if let Some((offset, len)) = archive.stored_range(storage, &entry).map_err(error)? {
+        return decode_range(
+            storage,
+            archive.path(),
+            offset,
+            offset + len,
+            cache,
+            fit,
+            color,
+        );
     }
+    let streamed = match archive.reader(storage, &entry) {
+        Ok(reader) => {
+            let mut source = EntrySource { storage, reader };
+            decode_source(storage, &mut source, cache, fit, color)
+        }
+        Err(quireink_sdk::zip::ZipError::OutOfMemory) => {
+            Err(quireink_sdk::image::ImageError::OutOfMemory)
+        }
+        Err(e) => return Err(error(e)),
+    };
+    if streamed != Err(quireink_sdk::image::ImageError::OutOfMemory) {
+        return streamed.map_err(image_error);
+    }
+    let temp = alloc::format!("{dir}/image.tmp");
+    storage.write(&temp, &[])?;
+    let mut failed = None;
+    archive
+        .stream(storage, &entry, &mut |chunk| {
+            failed = storage.append(&temp, chunk).err();
+            failed.is_none()
+        })
+        .map_err(error)?;
+    let result = match failed {
+        Some(e) => Err(DocumentError::Storage(e)),
+        None => decode_range(storage, &temp, 0, u64::from(entry.size), cache, fit, color),
+    };
+    let _ = storage.remove(&temp);
     result
 }
 
@@ -1456,11 +1513,11 @@ pub(crate) fn decode_file(
     storage: &dyn Storage,
     file: &str,
     cache: &str,
-    side: u32,
+    fit: Fit,
     color: bool,
 ) -> Result<(), DocumentError> {
     let end = storage.size(file)?;
-    decode_range(storage, file, 0, end, cache, side, color)
+    decode_range(storage, file, 0, end, cache, fit, color)
 }
 
 /// Decodes the image in `offset..end` of `file` into `cache`.
@@ -1470,35 +1527,63 @@ fn decode_range(
     offset: u64,
     end: u64,
     cache: &str,
-    side: u32,
+    fit: Fit,
     color: bool,
 ) -> Result<(), DocumentError> {
-    use quireink_sdk::image::{ColorWriter, Format, GrayWriter, decode};
+    let mut source = StorageSource {
+        storage,
+        path: file,
+        offset,
+        end,
+    };
+    decode_source(storage, &mut source, cache, fit, color).map_err(image_error)
+}
+
+/// Decodes the image `source` gives into `cache`; nothing is left of
+/// `cache` if it fails.
+fn decode_source(
+    storage: &dyn Storage,
+    source: &mut dyn quireink_sdk::image::Source,
+    cache: &str,
+    fit: Fit,
+    color: bool,
+) -> Result<(), quireink_sdk::image::ImageError> {
+    use quireink_sdk::image::{ColorWriter, Format, GrayWriter, ImageError, decode};
 
     let mut head = [0u8; 8];
-    let n = storage.read_at(file, offset, &mut head)?;
-    let result = match Format::detect(&head[..n]) {
+    let mut len = 0;
+    while len < head.len() {
+        match source.read(&mut head[len..])? {
+            0 => break,
+            n => len += n,
+        }
+    }
+    let result = match Format::detect(&head[..len]) {
         Some(format) => {
-            let mut source = StorageSource {
-                storage,
-                path: file,
-                offset,
-                end,
+            let mut source = Headed {
+                head,
+                len,
+                at: 0,
+                rest: source,
             };
             if color {
                 let mut writer = ColorWriter::new(storage, cache);
-                decode(format, &mut source, side, &mut writer).and_then(|()| writer.finish())
+                decode(format, &mut source, fit, &mut writer).and_then(|()| writer.finish())
             } else {
                 let mut writer = GrayWriter::new(storage, cache);
-                decode(format, &mut source, side, &mut writer).and_then(|()| writer.finish())
+                decode(format, &mut source, fit, &mut writer).and_then(|()| writer.finish())
             }
         }
-        None => Err(quireink_sdk::image::ImageError::Unsupported("image format")),
+        None => Err(ImageError::Unsupported("image format")),
     };
     if result.is_err() {
         let _ = storage.remove(cache);
     }
-    result.map_err(|e| DocumentError::Malformed(alloc::borrow::Cow::Owned(alloc::format!("{e}"))))
+    result
+}
+
+fn image_error(e: quireink_sdk::image::ImageError) -> DocumentError {
+    DocumentError::Malformed(alloc::borrow::Cow::Owned(alloc::format!("{e}")))
 }
 
 #[cfg(test)]

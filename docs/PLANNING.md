@@ -706,8 +706,9 @@ Pages ("try QuireInk in your browser"), also handy for UI reviews.
 ### 10.1 ESP32 (Xteink)
 
 - `esp-hal` + Embassy (async) inside the shell; core stays synchronous.
-- SPI display driver, button GPIO/ADC, SD card (FAT via `embedded-sdmmc`),
-  battery ADC, deep/light sleep between interactions.
+- SPI display driver, button GPIO/ADC, SD card (own SPI driver in
+  `quireink-x4`, FAT via `fatfs`), battery ADC, deep/light sleep between
+  interactions.
 - Wi-Fi via `esp-wifi`/`esp-radio` **[VERIFY current crate]**, only on
   demand: the radio is the largest consumer after the display, so it is
   off while reading. The shell switches it on for an HTTP request or a

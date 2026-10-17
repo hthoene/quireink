@@ -3,7 +3,7 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use quireink_image::{Format, ImageError, ImageSink, decode};
+use quireink_image::{Fit, Format, ImageError, ImageSink, decode};
 
 struct Count(u64);
 
@@ -22,6 +22,6 @@ impl ImageSink for Count {
 fuzz_target!(|data: &[u8]| {
     for format in [Format::Jpeg, Format::Png, Format::Gif] {
         let mut source = data;
-        let _ = decode(format, &mut source, 64, &mut Count(0));
+        let _ = decode(format, &mut source, Fit::side(64), &mut Count(0));
     }
 });

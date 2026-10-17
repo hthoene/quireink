@@ -5,7 +5,7 @@
 // Tests panic on purpose when something is wrong.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use quireink_image::{Format, ImageError, ImageSink, decode};
+use quireink_image::{Fit, Format, ImageError, ImageSink, decode};
 
 #[derive(Default)]
 struct Collect {
@@ -28,11 +28,15 @@ impl ImageSink for Collect {
     }
 }
 
-fn decoded(data: &[u8], max_side: u32) -> Collect {
+fn decoded(data: &[u8], side: u32) -> Collect {
+    decoded_fit(data, Fit::side(side))
+}
+
+fn decoded_fit(data: &[u8], fit: Fit) -> Collect {
     let format = Format::detect(data).expect("known format");
     let mut source = data;
     let mut out = Collect::default();
-    decode(format, &mut source, max_side, &mut out).expect("decodes");
+    decode(format, &mut source, fit, &mut out).expect("decodes");
     assert_eq!(out.pixels.len(), (out.width * out.height) as usize);
     out
 }
@@ -50,8 +54,8 @@ fn difference(a: &[u8], b: &[u8]) -> f64 {
 
 #[test]
 fn colour_jpeg_matches_reference() {
-    let image = decoded(include_bytes!("data/alice-cover.jpg"), 300);
-    // 800×1104 by 1/4 fits 300.
+    let image = decoded(include_bytes!("data/alice-cover.jpg"), 276);
+    // 800×1104 by 1/4 fits 276.
     assert_eq!((image.width, image.height), (200, 276));
     let diff = difference(&image.pixels, include_bytes!("data/alice-cover.gray4"));
     assert!(diff < 4.0, "mean difference {diff}");
@@ -85,12 +89,41 @@ fn reduce(image: &Collect, factor: u32) -> Vec<u8> {
 }
 
 #[test]
+fn jpeg_made_smaller_as_it_is_decoded() {
+    // 800×1104 for 552 at most: decoded at half its size (its blocks'
+    // lower frequencies), not whole and averaged.
+    let image = decoded(include_bytes!("data/alice-cover.jpg"), 552);
+    assert_eq!((image.width, image.height), (400, 552));
+    let diff = difference(&reduce(&image, 2), include_bytes!("data/alice-cover.gray4"));
+    assert!(diff < 4.0, "mean difference {diff}");
+    // For 400 at most: decoded at half its size, then averaged to fit.
+    let image = decoded(include_bytes!("data/alice-cover.jpg"), 400);
+    assert_eq!((image.width, image.height), (290, 400));
+}
+
+#[test]
+fn pictures_fit_the_screen_either_way_up() {
+    let x4 = Fit::screen(480, 800);
+    assert_eq!(x4, Fit::screen(800, 480));
+    // A cover: as wide as the screen upright.
+    assert_eq!(x4.size(1500, 2114), (480, 676));
+    // A wide picture: as wide as the screen turned.
+    assert_eq!(x4.size(2000, 1000), (800, 400));
+    // Small ones stay as they are.
+    assert_eq!(x4.size(300, 200), (300, 200));
+    // Decoded whole, then averaged to the size it shows at.
+    let image = decoded_fit(include_bytes!("data/alice-cover.jpg"), x4);
+    assert_eq!((image.width, image.height), (480, 662));
+    assert_eq!(image.pixels.len(), 480 * 662);
+}
+
+#[test]
 fn progressive_jpeg_matches_reference() {
     // 4:2:0 colour, ten scans, restart markers.
     let data = include_bytes!("data/alice-progressive.jpg");
     let reference = include_bytes!("data/alice-progressive.gray4");
     // A quarter: the 2×2 lowest frequencies of each block.
-    let image = decoded(data, 300);
+    let image = decoded(data, 276);
     assert_eq!((image.width, image.height), (200, 276));
     let diff = difference(&image.pixels, reference);
     assert!(diff < 4.0, "mean difference {diff}");
@@ -100,12 +133,12 @@ fn progressive_jpeg_matches_reference() {
     let diff = difference(&reduce(&image, 4), reference);
     assert!(diff < 3.0, "mean difference {diff}");
     // Half size.
-    let image = decoded(data, 600);
+    let image = decoded(data, 552);
     assert_eq!((image.width, image.height), (400, 552));
     let diff = difference(&reduce(&image, 2), reference);
     assert!(diff < 3.0, "mean difference {diff}");
     // Very small: the DC only.
-    let image = decoded(data, 120);
+    let image = decoded(data, 69);
     assert_eq!((image.width, image.height), (50, 69));
     let small = Collect {
         width: 200,
@@ -178,7 +211,7 @@ fn damaged_images_fail_cleanly() {
             let mut source = &data[..cut];
             let mut out = Collect::default();
             if let Some(format) = Format::detect(&data[..cut]) {
-                let _ = decode(format, &mut source, 100, &mut out);
+                let _ = decode(format, &mut source, Fit::side(100), &mut out);
             }
         }
         for at in (0..data.len()).step_by(step / 2 + 1) {
@@ -191,7 +224,7 @@ fn damaged_images_fail_cleanly() {
                 let _ = decode(
                     Format::detect(&damaged).unwrap_or(Format::Jpeg),
                     &mut source,
-                    side,
+                    Fit::side(side),
                     &mut out,
                 );
                 if out.height > 0 {
@@ -276,9 +309,9 @@ fn interlaced_gif_matches_the_same_picture() {
 
 #[test]
 fn gif_downscales() {
-    // By whole factors, as PNG: 160×221 by 3 fits 80.
+    // 160×221 made to fit 80, in its proportions.
     let image = decoded(include_bytes!("data/alice-cover.gif"), 80);
-    assert_eq!((image.width, image.height), (54, 74));
+    assert_eq!((image.width, image.height), (58, 80));
 }
 
 #[test]
@@ -296,7 +329,7 @@ fn damaged_gifs_fail_without_panicking() {
     for cut in [6, 13, 400, 800, 5000, data.len() - 1] {
         let mut source = &data[..cut];
         let mut out = Collect::default();
-        let _ = decode(Format::Gif, &mut source, 100, &mut out);
+        let _ = decode(Format::Gif, &mut source, Fit::side(100), &mut out);
     }
 }
 
@@ -334,15 +367,15 @@ fn decoded_rgb(data: &[u8], max_side: u32) -> CollectRgb {
     let format = Format::detect(data).expect("known format");
     let mut source = data;
     let mut out = CollectRgb::default();
-    decode(format, &mut source, max_side, &mut out).expect("decodes");
+    decode(format, &mut source, Fit::side(max_side), &mut out).expect("decodes");
     assert_eq!(out.pixels.len(), (out.width * out.height * 3) as usize);
     out
 }
 
 #[test]
 fn colour_jpeg_matches_reference_in_colour() {
-    let image = decoded_rgb(include_bytes!("data/alice-cover.jpg"), 140);
-    // 800×1104 by 1/8 fits 140.
+    let image = decoded_rgb(include_bytes!("data/alice-cover.jpg"), 138);
+    // 800×1104 by 1/8 fits 138.
     assert_eq!((image.width, image.height), (100, 138));
     let diff = difference(&image.pixels, include_bytes!("data/alice-cover.rgb8"));
     assert!(diff < 6.0, "mean difference {diff}");
@@ -409,7 +442,7 @@ fn progressive_jpeg_matches_reference_in_colour() {
     let data = include_bytes!("data/alice-progressive.jpg");
     let reference = include_bytes!("data/alice-progressive.rgb4");
     // A quarter: the 2×2 lowest frequencies of each block, chroma too.
-    let image = decoded_rgb(data, 300);
+    let image = decoded_rgb(data, 276);
     assert_eq!((image.width, image.height), (200, 276));
     let diff = difference(&image.pixels, reference);
     assert!(diff < 5.0, "mean difference {diff}");

@@ -263,6 +263,10 @@ pub mod events {
     pub const RESUME: Id = Id::new_static("core.resume");
     /// The battery or the time zone changed; status lines redraw.
     pub const STATUS_CHANGED: Id = Id::new_static("core.status-changed");
+    /// The battery was measured again ([`Env::status`](crate::Env::status)),
+    /// about once a minute where the device measures it: for plugins that
+    /// record its use. Nothing need be drawn anew.
+    pub const BATTERY_MEASURED: Id = Id::new_static("core.battery-measured");
 }
 
 /// Status items of the kernel (see [`status`](crate::status)).
@@ -309,6 +313,10 @@ pub mod settings {
     /// Partial refreshes between two full refreshes; `0` disables full
     /// refreshes for ghosting removal.
     pub const FULL_REFRESH_INTERVAL: Id = Id::new_static("core.full-refresh-interval");
+    /// Whether another screen opening flashes the panel (a full refresh,
+    /// no traces of the last one, but slow on some panels); else it counts
+    /// as a page turn towards [`FULL_REFRESH_INTERVAL`].
+    pub const FLASH_SCREENS: Id = Id::new_static("core.flash-screens");
     /// Minutes without use after which the device goes to sleep by itself
     /// (`0`: never), where QuireInk puts it to sleep
     /// ([`Env::sleep`](crate::Env)). Turning pages, also by themselves,
@@ -317,6 +325,10 @@ pub mod settings {
     /// How the screen is turned: one of [`ROTATIONS`], where the shell
     /// can turn it (see [`MenuNeed::Rotation`](crate::MenuNeed)).
     pub const ROTATION: Id = Id::new_static("core.rotation");
+    /// Whether a row below the screen shows what the buttons under it do,
+    /// where a device has buttons in a row there (see
+    /// [`MenuNeed::ButtonRow`](crate::MenuNeed)).
+    pub const BUTTON_HINTS: Id = Id::new_static("core.button-hints");
     /// The values of [`ROTATION`]: upright, on its side (landscape),
     /// upside down, on its other side.
     pub const ROTATIONS: [&str; 4] = [

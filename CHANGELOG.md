@@ -6,11 +6,151 @@ change the plugin SDK.
 
 ## [Unreleased]
 
+- X4: on battery the processor sleeps (light sleep, about 0.1 mA) while
+  there is nothing to do, waking every 30 ms to read the buttons and for
+  what is due; before, it spun at full speed (about 20 mA) all the time
+  it was awake. On USB it stays awake for the computer (`idle sleep
+  <seconds>` over USB tries the battery's way for a while, then starts
+  again).
+- X4: two watchdogs start it again if the firmware stops coming by: the
+  RTC's after 20 s, counting in light sleep too (a sleep that does not
+  end), and a timer group's after 30 s; before, a hang kept it on until
+  the battery was empty. Where it was is kept through the reset (`boot`
+  over USB says it, with the reason).
+- Battery use (new plugin, under Tools): records the battery about once
+  a minute while the device is awake, with what it did, and shows the
+  charge now, this time awake (pages, refreshes), the use on battery an
+  hour awake and for 100 pages, how long it lasts at that pace, the recent
+  times awake, and which plugins were shown and kept the processor busy.
+  The records are CSV files in `.quireink/plugins/battery` (`log.csv`,
+  and `plugins.csv` every ten minutes awake), for analysis on a computer.
+- What each plugin takes: the kernel measures the time each plugin's code
+  runs (screens drawing and handling input, event and action handlers),
+  the time its screens are shown with the refreshes then, and the storage
+  it reads and writes; plugins see it in `Env::usage`
+  (`quireink_sdk::usage`), with the refreshes, input and sleeps of the
+  whole device. Shells give a clock for it (`KernelBuilder::clock`) and
+  say how long the panel refreshed (`Kernel::panel_busy`).
+- The battery's voltage where the device measures it
+  (`Battery::millivolts`: the X4, Android), and an event each time the
+  battery is measured (`events::BATTERY_MEASURED`); status lines redraw
+  only when the percent or charging changes.
+- X4 remote: `--get` copies a file off the card (e.g. the battery logs).
 - A new icon: the capital Q of Besley in ink on e-paper, as on
   quireink.org (its source is `shells/android/icon.svg`).
 - X4: SD cards with a partition table (MBR or GPT), as nearly all come,
   are read; before, only cards with the file system from the first block
   were. A card in exFAT is named as such in the log.
+- X4: remote control over USB for testing on the device:
+  `tools/x4-remote.py` presses its buttons, takes screenshots and tells
+  what the screen shows, with the steps of the emulator's scripts.
+  `Kernel::capture` draws the whole screen for a shell to send elsewhere.
+- What the buttons do, at the bottom of the screen: where buttons lie in
+  a row below it (the X4's four), a row above them names what each does
+  on the screen shown: *Back*, *Select*, arrows, or a screen's own word.
+  The reader keeps the whole page: there the row shows for a few seconds
+  after a button of the row is pressed. Switched off under Controls ›
+  *Show what the buttons do*. Screens say when they show it
+  (`Registrar::set_screen_hints`, `Command::ShowHints`) and name their
+  buttons (`Screen::hint`); shells give the row with
+  `KernelBuilder::button_row`.
+- X4: books and other files go onto the card over USB
+  (`tools/x4-remote.py --put`); code may use all 8 MB of flash the chip
+  maps, not 4 shared with the fonts; the reader counts pages one at a
+  time in the background, so buttons answer within half a second.
+- Reader: the status lines sit close to the edge of the screen (1.5 mm,
+  under Status lines › *Distance from the edge*), and the text has the
+  room their margin took: two more lines a page on the X4.
+- X4: the buttons are read in a timer's interrupt every 5 ms, so a press
+  counts while QuireInk is busy (before, the buttons did nothing while
+  the reader counted a book's pages); presses wait in a queue with the
+  time they came.
+- X4: a page turns in about 1.5 s instead of 4 to 6. It draws in black and
+  white, what its panel shows (its four grays are still to come), in
+  bands twice as tall; the frame sent is kept in runs of bytes and sent
+  again after a fast refresh instead of drawn anew; gray formats blend
+  glyph edges in gray, not through red, green and blue; the panel gets
+  its bytes straight from the frame, in bigger pieces.
+- Storage on SD cards (the X4): the 8 blocks used last stay in memory,
+  and the 4 files read last stay open. The library opens in under 2 s
+  instead of 24, a page is laid out in a quarter of a second.
+- *Flash when screens change* (Display, advanced): off, another screen
+  opens with a fast refresh and counts towards the full refresh after so
+  many pages. Off on the X4, where a full refresh takes 3.5 s.
+- Faster on small devices, measured on the X4 (a page now turns in about
+  0.7 s): font packs find a glyph's size in whole numbers (the X4 has no
+  floating point unit, and every character asked); the EPUB reader keeps
+  the chapter it reads and finds the next block right after the last;
+  the reader writes its position at most every 5 s (always when the book
+  closes or the device sleeps) and remembers the page it looked up last;
+  bands are cleared a byte at a time; glyphs of the usual weight skip
+  the loop of bold ones; the X4 turns black and white bands eight by
+  eight pixels at once for its panel. A long chapter of notes no longer
+  runs out of memory while converted.
+- X4: the display is driven with the stock firmware's sequences (as the
+  FreeInk SDK records them): fast `FC`, which loads the temperature each
+  time, half `D7`, full `F7`, the stock booster and border; after every
+  refresh both memories of the controller hold the frame shown. Before,
+  a fast refresh sometimes left a page's text on the panel: the page
+  before (or after) stood under the new page number until the next full
+  refresh, which looked like a page turned by itself.
+- X4: the full refresh against ghosts takes the shorter waveform of a warm
+  panel (1.6 s instead of 3.5); the slow one only after starting.
+- Pictures of books are decoded no larger than the screen shows them,
+  upright or turned (`OpenOptions::image_fit`, a `Fit` from the device;
+  it was a longer side), in their proportions to the pixel: a cover on
+  the X4 is kept at 480 × 676, not 1500 × 2114, and its page drawn in
+  1 s instead of 3.4. A JPEG made smaller is made smaller as it is
+  decoded, from the lower frequencies of its blocks, then averaged to its
+  size; pictures are dithered in whole numbers. Sleep screen pictures are
+  kept at the screen's size too.
+- Storage on SD cards (the X4): files appended to stay open and are
+  written back when they are wanted otherwise, when another file needs
+  the room, or on `Storage::sync` (new; the kernel calls it before the
+  device sleeps). A cover decoded in hundreds of pieces is no longer
+  looked up and written back for each.
+- X4: the first opening of a book with a large cover takes 5 s instead
+  of 22 (and says so after 1 s), through the changes above and below.
+- Pictures compressed in a book are decoded as they are inflated
+  (`ZipArchive::reader`, an `EntryReader`), not inflated to a temporary
+  file first; with memory short for both, as before. JPEGs decode a
+  third faster: Huffman codes looked up by their first 8 bits, bits
+  taken a few bytes at a time, the inverse DCT in 32-bit numbers (at
+  half size with 6 multiplications a line instead of 16), and blocks of
+  one level filled at once. Pictures are read and written several blocks
+  of a card at a time (rows drawn in chunks of 8 KB).
+- X4: the SPI bus uses DMA for transfers of 32 bytes and more.
+- Storage on SD cards: whole blocks of a file pass by the blocks kept,
+  several read or written in one command (`Blocks::read_blocks`,
+  `write_blocks`), so a picture streamed through no longer pushes the FAT
+  and the folders out; 24 blocks are kept instead of 8, and 16 files
+  open instead of 8.
+- The reader says when a book is opened for the first time and takes a
+  moment ("This takes a moment"), then opens it: formats say whether a
+  document opens at once (`FormatSpec::prepared`, `Formats::prepared`);
+  EPUB does once its first chapter is converted.
+- X4: the SD card is read and written by QuireInk's own driver
+  (`quireink_x4::card`), a command at a time with the bus held, not a
+  bus transaction for every byte as `embedded-sdmmc` did.
+- X4: pages with pictures are sent to the panel's second memory as they
+  were kept, packed, in 80 ms, not drawn again in 2 s: the heap has the
+  64 KB more the bootloader leaves free.
+- X4 remote: `--profile` shows where the time goes (the functions the
+  processor was in, every 5 ms), `--trace` what is read and written.
+- A button with nothing bound to its long press counts as it goes down,
+  not when it is let go: pages turn as the button is pressed.
+- X4: a button counts once its reading held 15 ms, and a ladder goes from
+  one button to another only through nothing pressed: let go, the lower
+  page button passed the level of the upper one and turned a page back
+  by itself.
+- X4: the buttons are read with the ADC calibrated for its offset.
+  Uncalibrated, every reading came out some 1600 too high: the lower page
+  button turned back, and the two left front buttons did nothing.
+- A screen with large pictures (over 15 % of it, such as a book's cover
+  page) is left with a full refresh: e-paper keeps strong ghosts of them
+  after a fast one. Covers in a list stay below that.
+- X4: on USB power, sleep shows the sleep screen and keeps the USB
+  connection, so a computer can still read the log and wake it.
 
 ## [0.3.0] - 2026-10-16
 

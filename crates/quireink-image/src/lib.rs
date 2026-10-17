@@ -130,27 +130,112 @@ impl Format {
     }
 }
 
-/// Decodes an image of `format`, downscaled so that neither side exceeds
-/// `max_side` (as far as the format's scaling steps allow; JPEG scales by
-/// 1/2, 1/4 or 1/8).
+/// The size pictures are decoded to at most: as large as they show on a
+/// screen of these sides, upright or turned, and never larger than they
+/// are.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Fit {
+    pub short: u32,
+    pub long: u32,
+}
+
+impl Fit {
+    /// A screen of `width` × `height` pixels, either way up.
+    pub const fn screen(width: u32, height: u32) -> Self {
+        if width < height {
+            Self {
+                short: width,
+                long: height,
+            }
+        } else {
+            Self {
+                short: height,
+                long: width,
+            }
+        }
+    }
+
+    /// At most `side` pixels on either side.
+    pub const fn side(side: u32) -> Self {
+        Self {
+            short: side,
+            long: side,
+        }
+    }
+
+    /// What fits both.
+    pub fn min(self, other: Fit) -> Fit {
+        Fit {
+            short: self.short.min(other.short),
+            long: self.long.min(other.long),
+        }
+    }
+
+    /// The size a picture of `width` × `height` is decoded to: as large as
+    /// it shows on the screen upright or turned, whichever is larger, in
+    /// its proportions.
+    pub fn size(&self, width: u32, height: u32) -> (u32, u32) {
+        let upright = scaled(width, height, self.short, self.long);
+        let turned = scaled(width, height, self.long, self.short);
+        if turned.0 > upright.0 {
+            turned
+        } else {
+            upright
+        }
+    }
+}
+
+/// `width` × `height` made just small enough for `max_width` ×
+/// `max_height`, in its proportions (a pixel at least on each side).
+fn scaled(width: u32, height: u32, max_width: u32, max_height: u32) -> (u32, u32) {
+    let (max_width, max_height) = (max_width.max(1), max_height.max(1));
+    if width == 0 || height == 0 || (width <= max_width && height <= max_height) {
+        return (width, height);
+    }
+    let (w, h) = (u64::from(width), u64::from(height));
+    let (mw, mh) = (u64::from(max_width), u64::from(max_height));
+    if w * mh > h * mw {
+        // As wide as it may be.
+        let h = ((h * mw + w / 2) / w).clamp(1, mh);
+        (max_width, h as u32)
+    } else {
+        let w = ((w * mh + h / 2) / h).clamp(1, mw);
+        (w as u32, max_height)
+    }
+}
+
+/// The pixels of each 8×8 block's side a JPEG is decoded at (8, 4, 2 or
+/// 1): the fewest that still give `size` at least.
+pub(crate) fn block_side(width: u32, height: u32, size: (u32, u32)) -> usize {
+    for n in [1u32, 2, 4] {
+        let scale = 8 / n;
+        if width.div_ceil(scale) >= size.0 && height.div_ceil(scale) >= size.1 {
+            return n as usize;
+        }
+    }
+    8
+}
+
+/// Decodes an image of `format`, made as small as `fit` allows.
 pub fn decode(
     format: Format,
     source: &mut dyn Source,
-    max_side: u32,
+    fit: Fit,
     sink: &mut dyn ImageSink,
 ) -> Result<(), ImageError> {
     let mut reader = Reader::new(source);
     match format {
-        Format::Jpeg => jpeg::decode(&mut reader, max_side, sink),
-        Format::Png => png::decode(&mut reader, max_side, sink),
-        Format::Gif => gif::decode(&mut reader, max_side, sink),
+        Format::Jpeg => jpeg::decode(&mut reader, fit, sink),
+        Format::Png => png::decode(&mut reader, fit, sink),
+        Format::Gif => gif::decode(&mut reader, fit, sink),
     }
 }
 
 /// Buffered byte reader over a [`Source`].
 pub(crate) struct Reader<'a> {
     source: &'a mut dyn Source,
-    buf: [u8; 512],
+    /// Read several blocks of a card at a time.
+    buf: [u8; 4096],
     pos: usize,
     len: usize,
 }
@@ -159,7 +244,7 @@ impl<'a> Reader<'a> {
     fn new(source: &'a mut dyn Source) -> Self {
         Self {
             source,
-            buf: [0; 512],
+            buf: [0; 4096],
             pos: 0,
             len: 0,
         }
@@ -220,37 +305,80 @@ pub(crate) fn zeroed<T: Clone + Default>(len: usize) -> Result<alloc::vec::Vec<T
     Ok(v)
 }
 
-/// Averages `factor`×`factor` blocks of rows into downscaled rows, of
-/// gray or (with three channels) RGB.
+/// Makes rows smaller, to a size no larger than theirs: each pixel the
+/// mean of the pixels it covers, of gray or (with three channels) RGB.
 pub(crate) struct Downscaler {
-    factor: u32,
     width: u32,
+    height: u32,
     channels: usize,
     out_width: u32,
+    out_height: u32,
+    /// The pixel of the smaller row each pixel goes to.
+    columns: alloc::vec::Vec<u16>,
+    /// Pixels of a row each pixel of the smaller one covers.
+    counts: alloc::vec::Vec<u16>,
     sums: alloc::vec::Vec<u32>,
+    /// Rows summed, and rows come.
     rows: u32,
+    seen: u32,
     out: alloc::vec::Vec<u8>,
 }
 
 impl Downscaler {
-    /// For rows of `channels` bytes a pixel: 1 (gray) or 3 (RGB).
-    pub fn new(width: u32, factor: u32, channels: usize) -> Result<Self, ImageError> {
-        let factor = factor.max(1);
-        let out_width = width.div_ceil(factor);
+    /// For `width` × `height` made `size` (at most as large), in rows of
+    /// `channels` bytes a pixel: 1 (gray) or 3 (RGB).
+    pub fn new(
+        width: u32,
+        height: u32,
+        size: (u32, u32),
+        channels: usize,
+    ) -> Result<Self, ImageError> {
+        let out_width = size.0.clamp(1, width.max(1));
+        let out_height = size.1.clamp(1, height.max(1));
+        if out_width > u32::from(u16::MAX) {
+            return Err(ImageError::Unsupported("image this large"));
+        }
+        let mut columns = alloc::vec::Vec::new();
+        let mut counts: alloc::vec::Vec<u16> = zeroed(out_width as usize)?;
+        if out_width != width {
+            columns
+                .try_reserve_exact(width as usize)
+                .map_err(|_| ImageError::OutOfMemory)?;
+            for x in 0..u64::from(width) {
+                let to = (x * u64::from(out_width) / u64::from(width)) as usize;
+                columns.push(to as u16);
+                counts[to] = counts[to].saturating_add(1);
+            }
+        } else {
+            counts.fill(1);
+        }
         let len = out_width as usize * channels;
         Ok(Self {
-            factor,
             width,
+            height,
             channels,
             out_width,
+            out_height,
+            columns,
+            counts,
             sums: zeroed(len)?,
             rows: 0,
+            seen: 0,
             out: zeroed(len)?,
         })
     }
 
     pub fn out_width(&self) -> u32 {
         self.out_width
+    }
+
+    pub fn out_height(&self) -> u32 {
+        self.out_height
+    }
+
+    /// The row of the smaller image row `y` goes to.
+    fn out_row(&self, y: u32) -> u64 {
+        u64::from(y) * u64::from(self.out_height) / u64::from(self.height.max(1))
     }
 
     fn emit(&self, row: &[u8], sink: &mut dyn ImageSink) -> Result<(), ImageError> {
@@ -261,19 +389,35 @@ impl Downscaler {
         }
     }
 
-    /// Adds a full-resolution row; emits a downscaled row every `factor`.
+    /// Adds a row; emits a smaller one when the rows it covers are in.
     pub fn row(&mut self, pixels: &[u8], sink: &mut dyn ImageSink) -> Result<(), ImageError> {
         let ch = self.channels;
-        if self.factor == 1 {
+        if self.seen >= self.height {
+            return Ok(());
+        }
+        self.seen += 1;
+        if self.out_width == self.width && self.out_height == self.height {
             return self.emit(&pixels[..self.width as usize * ch], sink);
         }
-        let factor = self.factor as usize;
-        for (i, &v) in pixels.iter().take(self.width as usize * ch).enumerate() {
-            let (x, c) = (i / ch, i % ch);
-            self.sums[x / factor * ch + c] += u32::from(v);
+        let pixels = &pixels[..self.width as usize * ch];
+        if self.columns.is_empty() {
+            for (sum, &v) in self.sums.iter_mut().zip(pixels) {
+                *sum += u32::from(v);
+            }
+        } else if ch == 1 {
+            for (&to, &v) in self.columns.iter().zip(pixels) {
+                self.sums[usize::from(to)] += u32::from(v);
+            }
+        } else {
+            for (&to, pixel) in self.columns.iter().zip(pixels.chunks_exact(ch)) {
+                let at = usize::from(to) * ch;
+                for (sum, &v) in self.sums[at..at + ch].iter_mut().zip(pixel) {
+                    *sum += u32::from(v);
+                }
+            }
         }
         self.rows += 1;
-        if self.rows == self.factor {
+        if self.seen == self.height || self.out_row(self.seen) != self.out_row(self.seen - 1) {
             self.flush(sink)?;
         }
         Ok(())
@@ -290,9 +434,8 @@ impl Downscaler {
     fn flush(&mut self, sink: &mut dyn ImageSink) -> Result<(), ImageError> {
         let ch = self.channels;
         for (i, out) in self.out.iter_mut().enumerate() {
-            let x = (i / ch) as u32;
-            let columns = (self.width - x * self.factor).min(self.factor);
-            *out = (self.sums[i] / (columns * self.rows)) as u8;
+            let covered = u32::from(self.counts[i / ch]).max(1) * self.rows;
+            *out = (self.sums[i] / covered) as u8;
         }
         self.sums.fill(0);
         self.rows = 0;
@@ -301,11 +444,6 @@ impl Downscaler {
         self.out = out;
         result
     }
-}
-
-/// The smallest integer factor that brings the larger side to `max_side`.
-pub(crate) fn factor_for(width: u32, height: u32, max_side: u32) -> u32 {
-    width.max(height).div_ceil(max_side.max(1)).max(1)
 }
 
 /// A decoded image in storage, gray ([`GrayFile`]) or colour

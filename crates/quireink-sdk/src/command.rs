@@ -195,6 +195,9 @@ pub enum Command {
     OpenScreen(Id, Params),
     /// Closes the current screen (no-op on the root screen).
     Back,
+    /// Shows the row of hints for a few seconds on a screen that has it
+    /// only on a press ([`Hints::OnPress`](crate::Hints)).
+    ShowHints,
     /// Changes a setting; invalid values are rejected with a warning.
     SetSetting(Id, SettingValue),
     /// Redraws the current screen completely; with

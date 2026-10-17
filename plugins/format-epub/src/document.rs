@@ -6,6 +6,7 @@ use core::cell::Cell;
 use quireink_sdk::document::{
     Block, Document, DocumentError, EmbeddedFont, ImageRef, Link, Locator, Metadata, TocEntry,
 };
+use quireink_sdk::image::Fit;
 use quireink_sdk::zip::ZipArchive;
 use quireink_sdk::{Env, Storage};
 
@@ -41,6 +42,8 @@ pub struct EpubDocument {
     styles: bool,
     /// Pictures in colour (ADR 0015).
     color: bool,
+    /// Pictures decoded at most this large.
+    image_fit: Fit,
     /// Archive path of the cover image.
     cover: Option<String>,
     /// One's own stylesheets for this book (see [`user_css`]), applied
@@ -48,6 +51,20 @@ pub struct EpubDocument {
     user_css: String,
     /// The printed pages of one section, resolved: offset and label.
     pages: core::cell::RefCell<Option<SectionPages>>,
+    /// The chapter read last, known: its paths, text length and number of
+    /// blocks, and the block found last in it. A page is laid out a block
+    /// at a time, the next one mostly right after the last.
+    known: core::cell::RefCell<Option<Known>>,
+}
+
+/// A converted chapter, as [`EpubDocument::known`] keeps it.
+#[derive(Debug)]
+struct Known {
+    section: u32,
+    paths: CachePaths,
+    length: u32,
+    blocks: u32,
+    last: Option<u32>,
 }
 
 /// A section and its printed pages: offset and label.
@@ -178,6 +195,36 @@ fn origin(line: &str) -> Option<(u32, &str, u32)> {
 }
 
 /// Where chapters converted without the book's styles are kept.
+/// The cache of a book.
+fn book_cache(path: &str) -> String {
+    alloc::format!("{}/{:016x}", Env::plugin_dir(PLUGIN.as_str()), fnv(path))
+}
+
+/// The cache of a book's chapters converted with its styles or not, and
+/// one's own stylesheets: chapters converted with them go into a cache of
+/// their own, so a changed stylesheet applies at once.
+fn chapters_cache(
+    storage: &dyn Storage,
+    path: &str,
+    cache: &str,
+    styles: bool,
+    plugin_css: &str,
+) -> (String, String) {
+    let user_css = if styles {
+        user_css(storage, path, plugin_css)
+    } else {
+        String::new()
+    };
+    let chapters = if !styles {
+        plain_cache(cache)
+    } else if user_css.is_empty() {
+        String::from(cache)
+    } else {
+        alloc::format!("{cache}/css-{:016x}", fnv(&user_css))
+    };
+    (chapters, user_css)
+}
+
 fn plain_cache(cache: &str) -> String {
     alloc::format!("{cache}/plain")
 }
@@ -194,7 +241,7 @@ impl EpubDocument {
         path: &str,
         styles: bool,
     ) -> Result<Self, DocumentError> {
-        Self::open_styled(storage, path, styles, "", false)
+        Self::open_styled(storage, path, styles, "", false, convert::IMAGE_FIT)
     }
 
     /// Opens a book as `options` say: with its styles or not, and with
@@ -210,7 +257,27 @@ impl EpubDocument {
             options.publisher_styles,
             &options.css,
             options.color,
+            options.image_fit,
         )
+    }
+
+    /// Whether the book opens at once as `options` say: its first chapter
+    /// is converted. Converting it (and decoding its pictures, often a
+    /// large cover) takes a while the first time.
+    pub fn prepared(
+        storage: &dyn Storage,
+        path: &str,
+        options: &quireink_sdk::OpenOptions,
+    ) -> bool {
+        let cache = book_cache(path);
+        let (chapters, _) = chapters_cache(
+            storage,
+            path,
+            &cache,
+            options.publisher_styles,
+            &options.css,
+        );
+        storage.exists(&paths(&chapters, 0).end)
     }
 
     fn open_styled(
@@ -219,9 +286,10 @@ impl EpubDocument {
         styles: bool,
         plugin_css: &str,
         color: bool,
+        image_fit: Fit,
     ) -> Result<Self, DocumentError> {
         let archive = ZipArchive::open(storage, path).map_err(package::error)?;
-        let cache = alloc::format!("{}/{:016x}", Env::plugin_dir(PLUGIN.as_str()), fnv(path));
+        let cache = book_cache(path);
         let size = storage.size(path)?;
         let package = match package::load(storage, &cache, size) {
             Some(package) => package,
@@ -235,20 +303,7 @@ impl EpubDocument {
                 package::build(storage, &archive, &cache, size)?
             }
         };
-        // One's own stylesheets: chapters converted with them go into a
-        // cache of their own, so a changed stylesheet applies at once.
-        let user_css = if styles {
-            user_css(storage, path, plugin_css)
-        } else {
-            String::new()
-        };
-        let chapters = if !styles {
-            plain_cache(&cache)
-        } else if user_css.is_empty() {
-            cache.clone()
-        } else {
-            alloc::format!("{cache}/css-{:016x}", fnv(&user_css))
-        };
+        let (chapters, user_css) = chapters_cache(storage, path, &cache, styles, plugin_css);
         let mut metadata = package.metadata;
         if metadata.title.is_none() {
             let name = path.rsplit('/').next().unwrap_or(path);
@@ -265,8 +320,10 @@ impl EpubDocument {
             chapters,
             styles,
             color,
+            image_fit,
             user_css,
             pages: core::cell::RefCell::new(None),
+            known: core::cell::RefCell::new(None),
         })
     }
 
@@ -323,7 +380,15 @@ impl EpubDocument {
                     archive: &self.archive,
                     entry: &entry,
                 };
-                convert::convert(storage, &source, &paths, rules, self.styles, self.color)?
+                convert::convert(
+                    storage,
+                    &source,
+                    &paths,
+                    rules,
+                    self.styles,
+                    self.color,
+                    self.image_fit,
+                )?
             }
         };
         if let Some(slot) = self.lengths.get(section as usize) {
@@ -438,7 +503,7 @@ impl Document for EpubDocument {
                 source,
                 &crate::pictures::file(&base, self.color),
                 &self.cache,
-                convert::COVER_SIDE,
+                convert::COVER_FIT,
                 self.color,
             )?;
         }
@@ -608,8 +673,29 @@ impl Document for EpubDocument {
         if at.section as usize >= self.spine.len() {
             return Ok(None);
         }
-        let (paths, length, blocks) = self.chapter(storage, at.section)?;
-        cached::block_at(storage, &paths, length, blocks, at.offset, self.color)
+        let mut known = self.known.borrow_mut();
+        if known.as_ref().is_none_or(|k| k.section != at.section) {
+            let (paths, length, blocks) = self.chapter(storage, at.section)?;
+            *known = Some(Known {
+                section: at.section,
+                paths,
+                length,
+                blocks,
+                last: None,
+            });
+        }
+        let Some(k) = known.as_mut() else {
+            return Ok(None);
+        };
+        cached::block_at(
+            storage,
+            &k.paths,
+            k.length,
+            k.blocks,
+            at.offset,
+            self.color,
+            &mut k.last,
+        )
     }
 
     fn links(&self, storage: &dyn Storage, section: u32, from: u32, to: u32) -> Vec<Link> {

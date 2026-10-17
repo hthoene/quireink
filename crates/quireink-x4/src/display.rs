@@ -28,7 +28,7 @@ use alloc::vec::Vec;
 use embedded_hal::delay::DelayNs;
 use embedded_hal::digital::{InputPin, OutputPin};
 use embedded_hal::spi::SpiDevice;
-use quireink_platform::FrameView;
+use quireink_platform::{FrameView, PixelFormat};
 
 /// The panel, as the controller addresses it.
 pub const PANEL_WIDTH: u16 = 800;
@@ -39,8 +39,22 @@ pub const HEIGHT: u16 = PANEL_WIDTH;
 
 /// Longest wait for the controller, e.g. a full refresh (about 2 s).
 const BUSY_TIMEOUT_MS: u32 = 30_000;
-/// Bytes sent at once.
-const CHUNK: usize = 256;
+/// Bytes sent at once: each sending has its cost, a column of a band takes
+/// 12 to 24 bytes.
+const CHUNK: usize = 1024;
+
+/// Turns eight bytes (rows, the leftmost pixel in the highest bit) into
+/// eight bytes of their columns (the top row in the highest bit).
+fn transpose8(rows: [u8; 8]) -> [u8; 8] {
+    let mut x = u64::from_be_bytes(rows);
+    let t = (x ^ (x >> 7)) & 0x00AA_00AA_00AA_00AA;
+    x ^= t ^ (t << 7);
+    let t = (x ^ (x >> 14)) & 0x0000_CCCC_0000_CCCC;
+    x ^= t ^ (t << 14);
+    let t = (x ^ (x >> 28)) & 0x0000_0000_F0F0_F0F0;
+    x ^= t ^ (t << 28);
+    x.to_be_bytes()
+}
 
 /// The controller's commands used here.
 mod cmd {
@@ -165,14 +179,16 @@ where
         // The internal temperature sensor.
         self.command(cmd::TEMPERATURE_SENSOR, &[0x80])?;
         // The booster's soft start, as the panel wants it.
-        self.command(cmd::BOOSTER_SOFT_START, &[0xAE, 0xC7, 0xC3, 0xC0, 0x40])?;
+        // The stock firmware's sequences throughout (as the FreeInk SDK
+        // records them for the X4): booster, border, and the updates below.
+        self.command(cmd::BOOSTER_SOFT_START, &[0xAE, 0xC7, 0xC3, 0xC0, 0x80])?;
         // 480 gates, scanned interlaced.
         let gates = PANEL_HEIGHT - 1;
         self.command(
             cmd::DRIVER_OUTPUT,
             &[(gates % 256) as u8, (gates / 256) as u8, 0x02],
         )?;
-        self.command(cmd::BORDER, &[0x01])?;
+        self.command(cmd::BORDER, &[0x80])?;
         self.window(0, PANEL_WIDTH)?;
         for fill in [cmd::FILL_NEW, cmd::FILL_SHOWN] {
             self.command(fill, &[0xF7])?;
@@ -222,6 +238,23 @@ where
         // Whole bytes: rows past the band's end (only at its last byte)
         // are white.
         let bytes = usize::from(height.div_ceil(8));
+        // Light pixels show white, dark ones black: gray formats read
+        // straight from their bytes, others through their colour.
+        let bpp = usize::from(rows.format.bits_per_pixel());
+        let gray = rows.format.gray_levels().is_some() && bpp <= 8;
+        let max = (1u32 << bpp.min(8)) - 1;
+        let light = |x: u16, y: u16| {
+            if gray {
+                let bit = usize::from(x) * bpp;
+                let at = usize::from(y) * rows.stride + bit / 8;
+                let byte = rows.data.get(at).copied().unwrap_or(0xFF);
+                let level = u32::from(byte >> (8 - bpp - bit % 8)) & max;
+                level * 255 >= 128 * max
+            } else {
+                let c = rows.pixel(x, y);
+                u16::from(c.r) * 77 + u16::from(c.g) * 150 + u16::from(c.b) * 29 >= 128 * 256
+            }
+        };
         for (plane, write) in [
             (planes.new, cmd::WRITE_NEW),
             (planes.shown, cmd::WRITE_SHOWN),
@@ -232,16 +265,16 @@ where
             self.window(top, bytes as u16 * 8)?;
             self.command(write, &[])?;
             self.buffer.clear();
+            if rows.format == PixelFormat::Mono1 {
+                self.write_mono(&rows, height, bytes)?;
+                continue;
+            }
             for x in 0..WIDTH {
                 for byte in 0..bytes {
                     let mut bits = 0u8;
                     for bit in 0..8u16 {
                         let y = byte as u16 * 8 + bit;
-                        let white = y >= height || {
-                            let c = rows.pixel(x, y);
-                            u16::from(c.r) * 77 + u16::from(c.g) * 150 + u16::from(c.b) * 29
-                                >= 128 * 256
-                        };
+                        let white = y >= height || light(x, y);
                         if white {
                             bits |= 0x80 >> bit;
                         }
@@ -257,6 +290,40 @@ where
         Ok(())
     }
 
+    /// [`Display::write_rows`] for black and white, as the X4 draws: eight
+    /// rows by eight columns at a time, turned with a few shifts where
+    /// pixel by pixel took a quarter of a page's time.
+    fn write_mono(&mut self, rows: &FrameView<'_>, height: u16, bytes: usize) -> Result<(), Error> {
+        // Each of eight columns' bytes, top to bottom.
+        let mut columns = [0u8; 8 * (HEIGHT as usize / 8)];
+        for column in 0..usize::from(WIDTH) / 8 {
+            for group in 0..bytes {
+                let mut block = [0xFFu8; 8];
+                for (i, row) in block.iter_mut().enumerate() {
+                    let y = group * 8 + i;
+                    if y < usize::from(height) {
+                        *row = rows
+                            .data
+                            .get(y * rows.stride + column)
+                            .copied()
+                            .unwrap_or(0xFF);
+                    }
+                }
+                for (c, byte) in transpose8(block).into_iter().enumerate() {
+                    columns[c * bytes + group] = byte;
+                }
+            }
+            for c in 0..8 {
+                self.buffer
+                    .extend_from_slice(&columns[c * bytes..(c + 1) * bytes]);
+            }
+            if self.buffer.len() >= CHUNK {
+                self.data_buffer()?;
+            }
+        }
+        self.data_buffer()
+    }
+
     fn data_buffer(&mut self) -> Result<(), Error> {
         if self.buffer.is_empty() {
             return Ok(());
@@ -268,34 +335,37 @@ where
     }
 
     /// Shows the new frame; `power_off` turns the panel's power off after
-    /// it, e.g. before sleeping. The first after [`Display::init`] is full
-    /// in any case.
+    /// it, e.g. before sleeping. The first after [`Display::init`] drives
+    /// every pixel in any case (a half refresh).
+    ///
+    /// The stock firmware's whole sequences, each powering up, loading the
+    /// temperature and the waveform: full `F7`, half `D7` (a warm panel's
+    /// waveform), fast `FC` (the panel's partial waveform). A weaker fast
+    /// sequence (`1C`, without the temperature) left text on some pages
+    /// behind: a page turned showed the page before under its number.
     pub fn refresh(&mut self, refresh: Refresh, power_off: bool) -> Result<(), Error> {
-        let refresh = if self.fresh { Refresh::Full } else { refresh };
+        let refresh = if self.fresh { Refresh::Half } else { refresh };
         self.fresh = false;
         // A fast refresh compares with the frame shown; the others
         // drive every pixel.
         let compare = if refresh == Refresh::Fast { 0x00 } else { 0x40 };
         self.command(cmd::UPDATE_CONTROL_1, &[compare])?;
+        self.command(cmd::BORDER, &[0xC0])?;
         let mut sequence = match refresh {
-            Refresh::Full => 0x34,
+            Refresh::Full => 0xF7,
             Refresh::Half => {
-                // A warm panel's waveform: shorter.
                 self.command(cmd::WRITE_TEMPERATURE, &[0x5A])?;
-                0xD4
+                0xD7
             }
-            Refresh::Fast => 0x1C,
+            Refresh::Fast => 0xFC,
         };
-        if !self.powered {
-            // Clock and analog power on first.
-            sequence |= 0xC0;
-        }
         if power_off {
             sequence |= 0x03;
         }
         self.command(cmd::UPDATE_CONTROL_2, &[sequence])?;
         self.command(cmd::ACTIVATE, &[])?;
-        self.powered = !power_off;
+        // The full and half sequences power down at their end (0x03).
+        self.powered = sequence & 0x03 == 0;
         self.wait()
     }
 
@@ -521,6 +591,71 @@ mod tests {
     }
 
     #[test]
+    fn eight_by_eight_turned() {
+        let rows = [
+            0b1000_0000,
+            0b0100_0001,
+            0,
+            0xFF,
+            0b0000_0001,
+            0,
+            0,
+            0b1000_0000,
+        ];
+        let columns = transpose8(rows);
+        for (r, row) in rows.iter().enumerate() {
+            for (c, column) in columns.iter().enumerate() {
+                let row_bit = row >> (7 - c) & 1;
+                let column_bit = column >> (7 - r) & 1;
+                assert_eq!(row_bit, column_bit, "row {r}, column {c}");
+            }
+        }
+    }
+
+    #[test]
+    fn black_and_white_bands_as_gray_ones() {
+        // The same ink in black and white and in gray: the same planes,
+        // also for a band whose height is not a multiple of 8.
+        let ink = |x: u16, y: u16| (x * 7 + y * 3) % 5 == 0 || x == y;
+        for height in [16, 13] {
+            let gray = band(height, ink);
+            let stride = usize::from(WIDTH) / 8;
+            let mut mono = vec![0xFFu8; stride * usize::from(height)];
+            for y in 0..height {
+                for x in 0..WIDTH {
+                    if ink(x, y) {
+                        mono[usize::from(y) * stride + usize::from(x) / 8] &= !(0x80 >> (x % 8));
+                    }
+                }
+            }
+            let planes = |view: FrameView<'_>| {
+                let controller = Controller::new();
+                let mut display = Display::new(
+                    Spi(controller.clone()),
+                    Dc(controller.clone()),
+                    Pin,
+                    Busy,
+                    Delay,
+                );
+                display.init().unwrap();
+                display.write_rows(96, view, Planes::NEW).unwrap();
+                controller.borrow().new.clone()
+            };
+            let mono_view = FrameView {
+                width: WIDTH,
+                height,
+                format: PixelFormat::Mono1,
+                stride,
+                data: &mono,
+            };
+            assert!(
+                planes(view(&gray, height)) == planes(mono_view),
+                "height {height}"
+            );
+        }
+    }
+
+    #[test]
     fn bands_go_in_turned_into_the_planes_asked() {
         let controller = Controller::new();
         let mut display = Display::new(
@@ -662,7 +797,7 @@ mod tests {
     }
 
     #[test]
-    fn refreshes_power_on_once_and_off_when_asked() {
+    fn refreshes_power_off_when_asked() {
         let controller = Controller::new();
         let mut display = Display::new(
             Spi(controller.clone()),
@@ -672,14 +807,42 @@ mod tests {
             Delay,
         );
         display.init().unwrap();
-        // The first is full whatever is asked.
+        // The first drives every pixel whatever is asked; a fast one keeps
+        // the panel powered, sleep powers it down first.
         display.refresh(Refresh::Fast, false).unwrap();
         display.refresh(Refresh::Fast, false).unwrap();
-        display.refresh(Refresh::Half, true).unwrap();
+        display.refresh(Refresh::Fast, true).unwrap();
         display.sleep().unwrap();
         let c = controller.borrow();
         let sequences: Vec<u8> = c.refreshes.iter().map(|&(_, two)| two).collect();
-        assert_eq!(sequences, [0xF4, 0x1C, 0xD7]);
+        assert_eq!(sequences, [0xD7, 0xFC, 0xFF]);
         assert_eq!(c.commands.last(), Some(&cmd::DEEP_SLEEP));
+    }
+
+    #[test]
+    fn the_stock_sequences() {
+        let controller = Controller::new();
+        let mut display = Display::new(
+            Spi(controller.clone()),
+            Dc(controller.clone()),
+            Pin,
+            Busy,
+            Delay,
+        );
+        display.init().unwrap();
+        // The first is a half whatever is asked; full, half and fast as the
+        // stock firmware sends them.
+        for refresh in [
+            Refresh::Fast,
+            Refresh::Full,
+            Refresh::Half,
+            Refresh::Fast,
+            Refresh::Fast,
+        ] {
+            display.refresh(refresh, false).unwrap();
+        }
+        let c = controller.borrow();
+        let sequences: Vec<u8> = c.refreshes.iter().map(|&(_, two)| two).collect();
+        assert_eq!(sequences, [0xD7, 0xF7, 0xD7, 0xFC, 0xFC]);
     }
 }

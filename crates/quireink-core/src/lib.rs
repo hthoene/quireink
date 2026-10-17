@@ -41,6 +41,7 @@ mod core_plugin;
 mod data_plugin;
 mod input;
 mod keymap;
+mod meter;
 mod net;
 mod refresh;
 mod registry;
@@ -68,8 +69,9 @@ use quireink_sdk::builtin::{
 };
 use quireink_sdk::{
     Actions, Command, Cx, Direction, Env, EventHandler, Fonts, Formats, Gesture, GestureKind,
-    Handled, Hyphenation, Id, Manifest, Menus, Metrics, Output, Params, Plugin, PluginInfo,
-    PluginState, Plugins, RegisterError, RequiredFor, SDK_VERSION, Screen, Settings, StatusItems,
+    Handled, Hint, Hints, Hyphenation, Id, Manifest, Menus, Metrics, Output, Params, Plugin,
+    PluginInfo, PluginState, Plugins, RegisterError, RequiredFor, SDK_VERSION, Screen, Settings,
+    StatusItems,
 };
 
 use crate::core_plugin::{CORE, CorePlugin};
@@ -87,6 +89,12 @@ pub use quireink_sdk as sdk;
 
 /// Commands may trigger further commands; this bounds runaway loops.
 const MAX_COMMAND_ROUNDS: usize = 16;
+/// A frame with pictures over this share of the screen (percent) is left
+/// with a full refresh: e-paper keeps ghosts of large pictures where text
+/// leaves none. Covers in a list stay below it.
+const PICTURES_PERCENT: u32 = 15;
+/// How long the row of hints shows on a screen that has it on a press.
+const HINTS_MS: u64 = 4000;
 /// Default memory for glyphs rasterized at runtime.
 const DEFAULT_GLYPH_CACHE: usize = 32 * 1024;
 
@@ -217,9 +225,11 @@ pub struct KernelBuilder {
     sleep: bool,
     rotation: bool,
     colors: bool,
+    button_row: &'static [&'static str],
     frame_rows: Option<u16>,
     row_align: u16,
     storage: Option<Box<dyn Storage>>,
+    clock: Option<fn() -> u64>,
     setting_defaults: Vec<(String, String)>,
     plugin_dirs: Vec<String>,
     font_dirs: Vec<String>,
@@ -272,6 +282,13 @@ impl KernelBuilder {
     /// (e.g. the SD card, or none without one).
     pub fn storage_boxed(mut self, storage: Box<dyn Storage>) -> Self {
         self.storage = Some(storage);
+        self
+    }
+
+    /// A monotonic clock in microseconds, for measuring the time each
+    /// plugin's code takes ([`quireink_sdk::usage::PluginUsage`]).
+    pub fn clock(mut self, clock: fn() -> u64) -> Self {
+        self.clock = Some(clock);
         self
     }
 
@@ -340,6 +357,15 @@ impl KernelBuilder {
     /// [`settings::TEXT_COLOR`](quireink_sdk::builtin::settings::TEXT_COLOR)
     /// and [`settings::PAPER_COLOR`](quireink_sdk::builtin::settings::PAPER_COLOR)
     /// (see [`Kernel::colors`]); without, they are not offered.
+    /// The buttons that lie in a row below the screen, left to right, each
+    /// under an equal share of its width (e.g. the X4's four): a row of
+    /// hints above them shows what they do
+    /// ([`settings::BUTTON_HINTS`](core_settings::BUTTON_HINTS)).
+    pub fn button_row(mut self, buttons: &'static [&'static str]) -> Self {
+        self.button_row = buttons;
+        self
+    }
+
     pub fn colors(mut self, available: bool) -> Self {
         self.colors = available;
         self
@@ -375,8 +401,14 @@ impl KernelBuilder {
         let rows = self.frame_rows.unwrap_or(display.height);
         let framebuffer = Framebuffer::banded(display.width, display.height, rows, display.format)
             .map_err(KernelError::Graphics)?;
+        let meter = meter::Meter::new(self.clock);
+        let storage = Box::new(meter::Metered {
+            inner: self.storage.unwrap_or_else(|| Box::new(NoStorage)),
+            meter: meter.clone(),
+        });
         let mut kernel = Kernel {
             shared: Shared {
+                meter,
                 device: self.device,
                 settings: Settings::new(),
                 translator: Translator::new(),
@@ -387,6 +419,7 @@ impl KernelBuilder {
                 actions: Actions::new(),
                 plugins: Plugins::new(),
                 status: SystemStatus::default(),
+                usage: quireink_sdk::usage::Usage::default(),
                 status_items: StatusItems::new(),
                 widgets: quireink_sdk::widgets::Widgets::new(),
                 services: quireink_sdk::services::Services::new(),
@@ -403,7 +436,7 @@ impl KernelBuilder {
                 screens: Vec::new(),
                 font_dirs: Vec::new(),
                 secrets: Default::default(),
-                storage: self.storage.unwrap_or_else(|| Box::new(NoStorage)),
+                storage,
                 keymap: Keymap::default(),
             },
             pending: None,
@@ -429,7 +462,13 @@ impl KernelBuilder {
             restart: false,
             sleep: false,
             screenshot: None,
+            button_row: self.button_row,
+            hint_height: 0,
+            hints: Vec::new(),
+            hints_until: None,
+            pictures_shown: false,
             last_activity: Instant(0),
+            shown_since: Instant(0),
             scope: None,
             requests: Vec::new(),
             copied: None,
@@ -455,9 +494,17 @@ impl KernelBuilder {
         kernel.shared.menus.set_sleep(kernel.shared.sleep);
         kernel.shared.menus.set_rotation(self.rotation);
         kernel.shared.menus.set_colors(self.colors);
+        kernel
+            .shared
+            .menus
+            .set_button_row(!kernel.button_row.is_empty());
         // Colour screens open documents with colour pictures (ADR 0015).
         let color = kernel.shared.device.display.format.is_color();
         kernel.shared.formats.set_color(color);
+        // Pictures no larger than the screen shows them.
+        let display = kernel.shared.device.display;
+        let fit = quireink_sdk::image::Fit::screen(display.width.into(), display.height.into());
+        kernel.shared.formats.set_image_fit(fit);
 
         // Passwords and keys.
         if let Ok(data) = quireink_sdk::read_file(
@@ -606,6 +653,8 @@ impl KernelBuilder {
             .iter()
             .map(|(id, spec)| (id.clone(), spec.title.clone()))
             .collect();
+        // Screens are made for the row of hints from the first one on.
+        kernel.hint_height = kernel.wanted_hint_height();
         Ok(kernel)
     }
 }
@@ -625,6 +674,9 @@ struct ActiveScreen {
     id: Id,
     /// The slot it was opened for, if any.
     slot: Option<Id>,
+    /// Made for the part above the row of hints (when the row shows), as
+    /// it asked ([`Hints::Shown`]).
+    hinted: bool,
     /// What it was opened with, e.g. the book.
     params: Params,
     screen: Box<dyn Screen>,
@@ -647,7 +699,7 @@ pub struct Kernel {
     /// Every key map source, to rebuild the key map when the preset changes.
     keymap_sources: Vec<(Origin, Cow<'static, str>)>,
     keymap_presets: Vec<(Id, Cow<'static, str>)>,
-    subscriptions: Vec<(Id, EventHandler)>,
+    subscriptions: Vec<(Id, Id, EventHandler)>,
     /// When the active screen wants `on_timer`.
     screen_timer: Option<Instant>,
     /// Events plugins asked for at a time ([`Command::Schedule`]).
@@ -681,9 +733,22 @@ pub struct Kernel {
     sleep: bool,
     /// A screenshot to save with the next frame drawn: its path.
     screenshot: Option<String>,
+    /// The buttons in a row below the screen (see
+    /// [`KernelBuilder::button_row`]).
+    button_row: &'static [&'static str],
+    /// The height of the row of hints above them, 0 while it is off.
+    hint_height: u16,
+    /// What the row shows, as it was last drawn.
+    hints: Vec<Hint>,
+    /// Until when the row shows over a screen that has it only on a press.
+    hints_until: Option<Instant>,
+    /// The frame shown has large pictures (see [`PICTURES_PERCENT`]).
+    pictures_shown: bool,
     /// When the device was last used (input, a page turned), for sleeping
     /// by itself ([`settings::SLEEP_AFTER`](core_settings::SLEEP_AFTER)).
     last_activity: Instant,
+    /// Since when the screen on top has been counted as shown.
+    shown_since: Instant,
     /// The active settings scope: its file and the screen that set it.
     scope: Option<(String, Option<usize>)>,
     /// HTTP requests for the shell to make.
@@ -756,9 +821,11 @@ impl Kernel {
             sleep: false,
             rotation: false,
             colors: false,
+            button_row: &[],
             frame_rows: None,
             row_align: 1,
             storage: None,
+            clock: None,
             setting_defaults: Vec::new(),
             plugin_dirs: Vec::new(),
             font_dirs: Vec::new(),
@@ -820,6 +887,8 @@ impl Kernel {
     /// Opens the home slot and emits [`events::STARTED`]. Call once after
     /// building.
     pub fn start(&mut self, now: Instant) -> Effects {
+        // The kernel's work, but for the plugins' it calls.
+        let _running = self.shared.meter.enter(meter::CORE);
         self.now = now;
         self.last_activity = now;
         self.output.commands.push(Command::open_slot(slots::HOME));
@@ -831,8 +900,10 @@ impl Kernel {
 
     /// Handles an input event.
     pub fn handle(&mut self, now: Instant, event: InputEvent) -> Effects {
+        let _running = self.shared.meter.enter(meter::CORE);
         self.now = now;
         self.last_activity = now;
+        self.shared.usage.inputs = self.shared.usage.inputs.saturating_add(1);
         // Plugins' input filters come first.
         let verdict = {
             let env = self.shared.env(now);
@@ -849,7 +920,10 @@ impl Kernel {
         }
         match event {
             InputEvent::Button { name, state } => {
-                if let Some(recognized) = self.recognizer.button(name, state, now) {
+                // Without a long press to tell apart, at once.
+                let long = InputKey::LongButton(Cow::Borrowed(name));
+                let at_once = self.resolve(&long).is_none();
+                if let Some(recognized) = self.recognizer.button(name, state, now, at_once) {
                     self.recognized(recognized);
                 }
             }
@@ -881,9 +955,24 @@ impl Kernel {
         let mut described = Vec::new();
         {
             let mut canvas = aside.canvas().describing(&mut described);
+            let content = Rect::new(0, 0, env.device.display.width, env.device.display.height);
             for (active, own) in self.stack[base..].iter_mut().zip(&regions[base..]) {
-                let area = own.unwrap_or(bounds);
+                let area = own.unwrap_or(content);
                 active.screen.draw(&mut canvas.clipped(area), &env);
+            }
+            if content.height < bounds.height {
+                let row = Rect::new(
+                    0,
+                    content.height,
+                    bounds.width,
+                    bounds.height - content.height,
+                );
+                quireink_sdk::ui::draw_button_hints(
+                    &mut canvas.clipped(row),
+                    &env,
+                    row,
+                    &self.hints,
+                );
             }
         }
         quireink_sdk::semantics::parts(described)
@@ -938,6 +1027,7 @@ impl Kernel {
     /// plenty). Status lines redraw when what they show changed
     /// ([`events::STATUS_CHANGED`]).
     pub fn set_status(&mut self, now: Instant, status: SystemStatus) -> Effects {
+        let _running = self.shared.meter.enter(meter::CORE);
         self.now = now;
         let old = self.shared.status;
         self.shared.status = status;
@@ -947,10 +1037,18 @@ impl Kernel {
             (Some(a), Some(b)) => (a.unix_millis_at(now) - b.unix_millis_at(now)).abs() > 30_000,
             (a, b) => a.is_some() != b.is_some(),
         };
-        if old.battery != status.battery || offset(&old) != offset(&status) || jumped {
+        // What status lines show: not the voltage, which moves a little at
+        // every reading.
+        let shown = |s: &SystemStatus| s.battery.map(|b| (b.percent, b.charging));
+        if shown(&old) != shown(&status) || offset(&old) != offset(&status) || jumped {
             self.output
                 .commands
                 .push(Command::Emit(events::STATUS_CHANGED, Params::new()));
+        }
+        if status.battery.is_some() {
+            self.output
+                .commands
+                .push(Command::Emit(events::BATTERY_MEASURED, Params::new()));
         }
         self.finish()
     }
@@ -967,7 +1065,9 @@ impl Kernel {
 
     /// Advances time, e.g. when a requested [`Effect::WakeAt`] is due.
     pub fn tick(&mut self, now: Instant) -> Effects {
+        let _running = self.shared.meter.enter(meter::CORE);
         self.now = now;
+        self.hide_hints();
         if self.sleep_due().is_some_and(|at| at <= now) {
             self.last_activity = now;
             // Busy: reading aloud, downloading, serving. Else asleep.
@@ -1034,6 +1134,8 @@ impl Kernel {
         let Some(region) = self.unrendered.take() else {
             return;
         };
+        // The kernel's, but for the screens' own drawing.
+        let _running = self.shared.meter.enter(meter::CORE);
         let bounds = self.framebuffer.bounds();
         // Rows are passed whole: drawn in bands, the rest of a row would be
         // left from another band. And aligned as the shell asks.
@@ -1095,6 +1197,13 @@ impl Kernel {
                 break;
             }
         }
+        // Large pictures on the screen now: the next change of most of it
+        // refreshes in full.
+        let pictured = self.framebuffer.take_pictured();
+        let screen = u32::from(bounds.width) * u32::from(bounds.height);
+        let big = pictured.saturating_mul(100) >= screen.saturating_mul(PICTURES_PERCENT);
+        let most = u32::from(region.width) * u32::from(region.height) * 2 >= screen;
+        self.pictures_shown = big || (self.pictures_shown && !most);
         if let Some(path) = shot {
             let key = if writer.is_some_and(|w| w.is_complete()) {
                 "core.screenshot-saved"
@@ -1122,6 +1231,22 @@ impl Kernel {
         }
     }
 
+    /// Draws the whole screen anew and passes it to `out` as
+    /// [`Kernel::render`] does, while nothing on it changes: for a shell
+    /// that sends a screenshot elsewhere, e.g. over USB. While changes wait
+    /// to be rendered it does nothing and returns `false`.
+    pub fn capture(&mut self, out: &mut dyn FnMut(u16, FrameView<'_>)) -> bool {
+        if self.unrendered.is_some() {
+            return false;
+        }
+        let rendered = self.rendered;
+        self.unrendered = Some(self.framebuffer.bounds());
+        self.render(out);
+        // What the panel was last sent stays what rerender sends again.
+        self.rendered = rendered;
+        true
+    }
+
     /// The framebuffer, for tests of a kernel that holds the whole screen.
     #[cfg(test)]
     pub(crate) fn frame(&self) -> FrameView<'_> {
@@ -1130,6 +1255,17 @@ impl Kernel {
 
     pub fn device(&self) -> &DeviceInfo {
         &self.shared.device
+    }
+
+    /// The device's storage, e.g. for a shell that copies files onto it.
+    /// The panel took `millis` for a refresh: shells that know say so
+    /// ([`Usage::panel_ms`](quireink_sdk::usage::Usage::panel_ms)).
+    pub fn panel_busy(&mut self, millis: u64) {
+        self.shared.usage.panel_ms = self.shared.usage.panel_ms.saturating_add(millis);
+    }
+
+    pub fn storage(&self) -> &dyn Storage {
+        self.shared.storage.as_ref()
     }
 
     pub fn settings(&self) -> &Settings {
@@ -1537,6 +1673,7 @@ impl Kernel {
 
     /// Delivers the answer to a request from [`Kernel::take_requests`].
     pub fn http_response(&mut self, now: Instant, response: HttpResponse) -> Effects {
+        let _running = self.shared.meter.enter(meter::CORE);
         self.now = now;
         if let Some(at) = self.awaiting.iter().position(|(id, ..)| *id == response.id) {
             let (_, reply, params, save_to) = self.awaiting.remove(at);
@@ -1585,6 +1722,7 @@ impl Kernel {
 
     /// What happened with a socket or a broadcast.
     pub fn socket_event(&mut self, now: Instant, event: SocketEvent) -> Effects {
+        let _running = self.shared.meter.enter(meter::CORE);
         self.now = now;
         let mut out = Vec::new();
         self.sockets.event(event, &*self.shared.storage, &mut out);
@@ -1595,11 +1733,16 @@ impl Kernel {
     /// The device goes to sleep or the app to the background; plugins hear
     /// [`events::SUSPEND`].
     pub fn suspend(&mut self, now: Instant) -> Effects {
+        let _running = self.shared.meter.enter(meter::CORE);
         self.now = now;
+        self.shared.usage.sleeps = self.shared.usage.sleeps.saturating_add(1);
         self.output
             .commands
             .push(Command::Emit(events::SUSPEND, Params::new()));
-        self.finish()
+        let effects = self.finish();
+        // What plugins saved, and what storage kept back, written.
+        let _ = self.shared.storage.sync();
+        effects
     }
 
     /// The screen has another size, e.g. turned (see
@@ -1621,17 +1764,8 @@ impl Kernel {
                 self.framebuffer = framebuffer;
                 self.shared.device.display.width = width;
                 self.shared.device.display.height = height;
-                self.end_notice();
-                self.unrendered = None;
-                self.rendered = None;
-                let env = self.shared.env(now);
-                for active in &mut self.stack {
-                    if let Some(spec) = self.registry.screens.get(&active.id) {
-                        active.screen = (spec.factory)(&env, &active.params);
-                    }
-                }
-                let bounds = self.framebuffer.bounds();
-                self.screen_changed(bounds, false);
+                self.hint_height = self.wanted_hint_height();
+                self.remake_screens();
             }
         }
         self.finish()
@@ -1639,8 +1773,11 @@ impl Kernel {
 
     /// Back from [`Kernel::suspend`].
     pub fn resume(&mut self, now: Instant) -> Effects {
+        let _running = self.shared.meter.enter(meter::CORE);
         self.now = now;
         self.last_activity = now;
+        // The time asleep is no screen's.
+        self.shown_since = now;
         self.output
             .commands
             .push(Command::Emit(events::RESUME, Params::new()));
@@ -1879,6 +2016,9 @@ impl Kernel {
         }
         for (item, need) in staging.menu_needs.drain(..) {
             self.shared.menus.set_need(item, need);
+        }
+        for (screen, hints) in staging.screen_hints.drain(..) {
+            self.registry.hints.insert(screen, hints);
         }
         for item in staging.status_items.drain(..) {
             self.shared.status_items.add(item);
@@ -2176,6 +2316,9 @@ impl Kernel {
     fn recognized(&mut self, recognized: Recognized) {
         match recognized {
             Recognized::Button { name, long } => {
+                if self.button_row.contains(&name) {
+                    self.show_hints();
+                }
                 let name = Cow::Borrowed(name);
                 self.route_key(if long {
                     InputKey::LongButton(name)
@@ -2184,6 +2327,18 @@ impl Kernel {
                 });
             }
             Recognized::Gesture(gesture) => {
+                if gesture.kind == GestureKind::Tap
+                    && let Some(row) = self.hint_row()
+                    && row.contains(gesture.start)
+                {
+                    let count = self.button_row.len() as u32;
+                    let x = u32::try_from(gesture.start.x).unwrap_or(0);
+                    let cell = (x * count / u32::from(row.width).max(1)) as usize;
+                    if let Some(button) = self.button_row.get(cell) {
+                        self.route_key(InputKey::Button(Cow::Borrowed(button)));
+                    }
+                    return;
+                }
                 let overlay = self
                     .stack
                     .len()
@@ -2248,6 +2403,7 @@ impl Kernel {
             Some(spec) => {
                 if let Some(handler) = &spec.handler {
                     let env = self.shared.env(self.now);
+                    let _running = self.shared.meter.enter(action.namespace());
                     handler(&env, &mut self.output.commands);
                 }
             }
@@ -2271,9 +2427,22 @@ impl Kernel {
 
     fn finish(&mut self) -> Effects {
         self.run_commands();
+        // The time since, to the screen on top; the numbers for plugins.
+        let top = self.stack.last().map_or(meter::CORE, |s| s.id.namespace());
+        let shown = self.now.since(self.shown_since);
+        self.shared.meter.shown(top, shown);
+        self.shown_since = self.now;
+        self.shared.meter.snapshot(&mut self.shared.usage.plugins);
         // A screen that set a scope may have closed.
         self.check_scope_owner();
         self.run_commands();
+        if let Some(row) = self.hint_row() {
+            let hints = self.current_hints();
+            if hints != self.hints {
+                self.hints = hints;
+                self.invalidate(row);
+            }
+        }
         if mem::take(&mut self.output.redraw)
             && let Some(top) = self.stack.len().checked_sub(1)
         {
@@ -2299,7 +2468,12 @@ impl Kernel {
                 .int(core_settings::FULL_REFRESH_INTERVAL.as_str())
                 .clamp(0, i64::from(u32::MAX)) as u32;
             let screen = self.framebuffer.bounds();
-            let requested = requested.unwrap_or(RefreshMode::Partial);
+            let mut requested = requested.unwrap_or(RefreshMode::Partial);
+            // Leaving large pictures: a fast refresh would keep their ghost.
+            let area = |r: Rect| u32::from(r.width) * u32::from(r.height);
+            if self.pictures_shown && area(dirty) * 2 >= area(screen) {
+                requested = RefreshMode::Full;
+            }
             let (mode, region) = self.refresh.decide(requested, dirty, screen, interval);
             let refresh = quireink_sdk::filters::Refresh {
                 mode,
@@ -2309,6 +2483,11 @@ impl Kernel {
             let env = self.shared.env(self.now);
             let refresh = self.shared.refresh_filters.apply(&env, refresh, screen);
             effects.refresh = Some((refresh.region, refresh.mode));
+            self.shared.usage.refreshed(refresh.mode, refresh.region);
+            let top = self.stack.last().map_or(meter::CORE, |s| s.id.namespace());
+            self.shared
+                .meter
+                .refreshed(top, refresh.mode, refresh.region);
         }
         if let Some(at) = self.output.wake_at.take() {
             self.screen_timer = Some(self.screen_timer.map_or(at, |t| t.min(at)));
@@ -2319,6 +2498,7 @@ impl Kernel {
         // After a screenshot is drawn, a message says where it went.
         let shot = self.screenshot.is_some().then(|| self.now.add_millis(300));
         effects.wake_at = [
+            self.hints_until,
             input,
             self.screen_timer,
             notice,
@@ -2386,7 +2566,10 @@ impl Kernel {
                     self.last_activity = self.now;
                 }
                 let env = self.shared.env(self.now);
-                for (_, handler) in self.subscriptions.iter().filter(|(id, _)| *id == event) {
+                for (_, plugin, handler) in
+                    self.subscriptions.iter().filter(|(id, ..)| *id == event)
+                {
+                    let _running = self.shared.meter.enter(plugin.as_str());
                     handler(&env, &params, &mut self.output.commands);
                 }
                 for index in 0..self.stack.len() {
@@ -2463,6 +2646,7 @@ impl Kernel {
                 );
                 self.output.commands.extend(out);
             }
+            Command::ShowHints => self.show_hints(),
             Command::Back => {
                 if self.stack.len() > 1 {
                     self.close_above(self.stack.len() - 2);
@@ -2518,11 +2702,19 @@ impl Kernel {
                 format!("unknown screen `{id}`"),
             );
         };
-        let env = self.shared.env(self.now);
-        let screen = (spec.factory)(&env, params);
+        // Made as the full screen it opens over, which an overlay shares;
+        // a full screen that wants the other size is made again for it.
+        // Made once, at the size it asked for: above the row of hints, or
+        // all of the screen.
+        let hinted = self.registry.hints_of(&id) == Hints::Shown;
+        self.shared.device.display.height = self.content_height(hinted);
+        let running = self.shared.meter.enter(id.namespace());
+        let screen = (spec.factory)(&self.shared.env(self.now), params);
+        drop(running);
         self.stack.push(ActiveScreen {
             id,
             slot,
+            hinted,
             params: params.clone(),
             screen,
         });
@@ -2542,13 +2734,15 @@ impl Kernel {
         };
         let env = self.shared.env(self.now);
         let params = Params::new().with(builtin_params::TEXT, text);
+        let running = self.shared.meter.enter(id.namespace());
         let screen = (spec.factory)(&env, &params);
+        drop(running);
         let seconds = self
             .shared
             .settings
             .int(core_settings::NOTICE_SECONDS.as_str())
             .clamp(1, 60) as u32;
-        let region = screen.region(&env).unwrap_or(self.framebuffer.bounds());
+        let region = screen.region(&env).unwrap_or(self.content());
         self.end_notice();
         self.notice = Some((screen, self.now.add_millis(u64::from(seconds) * 1000)));
         self.invalidate(region);
@@ -2589,7 +2783,7 @@ impl Kernel {
             return;
         };
         let env = self.shared.env(self.now);
-        let region = screen.region(&env).unwrap_or(self.framebuffer.bounds());
+        let region = screen.region(&env).unwrap_or(self.content());
         self.invalidate(region);
         self.output.request_refresh(RefreshMode::Fast);
     }
@@ -2604,6 +2798,7 @@ impl Kernel {
             });
             self.stack.truncate(i);
         }
+        self.sync_content();
     }
 
     /// Closes all screens above `index`.
@@ -2630,8 +2825,185 @@ impl Kernel {
 
     /// The area a screen occupies.
     fn region_of(&self, index: usize) -> Rect {
-        self.overlay(index)
-            .unwrap_or_else(|| self.framebuffer.bounds())
+        self.overlay(index).unwrap_or_else(|| self.content())
+    }
+
+    /// The part of the screen that screens have: all of it, or the part
+    /// above the row of hints.
+    fn content(&self) -> Rect {
+        let display = self.shared.device.display;
+        Rect::new(0, 0, display.width, display.height)
+    }
+
+    /// The row of hints, while it shows: below a screen that keeps it, or
+    /// over the bottom of one that has it on a press, for a while.
+    fn hint_row(&self) -> Option<Rect> {
+        let panel = self.framebuffer.bounds();
+        let top = self.shared.device.display.height;
+        if top < panel.height {
+            return Some(Rect::new(0, top, panel.width, panel.height - top));
+        }
+        let height = self.hint_height.min(panel.height / 2);
+        (height > 0 && self.hints_until.is_some_and(|until| self.now < until))
+            .then(|| Rect::new(0, panel.height - height, panel.width, height))
+    }
+
+    /// When the full screen shown has the row of hints.
+    fn base_hints(&self) -> Hints {
+        let env = self.shared.env(self.now);
+        self.stack
+            .iter()
+            .rev()
+            .find(|s| s.screen.region(&env).is_none())
+            .map_or(Hints::Shown, |s| self.registry.hints_of(&s.id))
+    }
+
+    /// Shows the row for a while over a screen that has it on a press.
+    fn show_hints(&mut self) {
+        if self.hint_height == 0 || self.base_hints() != Hints::OnPress {
+            return;
+        }
+        self.hints_until = Some(self.now.add_millis(HINTS_MS));
+        self.hints.clear();
+        self.output.request_refresh(RefreshMode::Fast);
+    }
+
+    /// Takes the row away again once its time is over: the screen below
+    /// is drawn there again.
+    fn hide_hints(&mut self) {
+        if !self.hints_until.is_some_and(|until| until <= self.now) {
+            return;
+        }
+        self.hints_until = None;
+        let panel = self.framebuffer.bounds();
+        let height = self.hint_height.min(panel.height / 2);
+        self.invalidate(Rect::new(0, panel.height - height, panel.width, height));
+        self.output.request_refresh(RefreshMode::Fast);
+    }
+
+    /// The height screens have: all of the screen's, or the part above
+    /// the row of hints.
+    fn content_height(&self, hinted: bool) -> u16 {
+        let panel = self.framebuffer.bounds().height;
+        let row = if hinted { self.hint_height } else { 0 };
+        panel - row.min(panel / 2)
+    }
+
+    /// Sizes the content for the screen on top, after screens closed; all
+    /// of the screen is drawn again if that changed it.
+    fn sync_content(&mut self) {
+        self.hints_until = None;
+        let before = self.shared.device.display.height;
+        if let Some(hinted) = self.stack.last().map(|s| s.hinted) {
+            self.shared.device.display.height = self.content_height(hinted);
+        }
+        if self.shared.device.display.height != before {
+            self.hints.clear();
+            let panel = self.framebuffer.bounds();
+            self.invalidate(panel);
+        }
+    }
+
+    /// The height the row of hints takes: 0 where there is no row of
+    /// buttons below the screen, it is switched off or the screen is
+    /// turned (the buttons are no longer below it).
+    fn wanted_hint_height(&self) -> u16 {
+        let shown = !self.button_row.is_empty()
+            && self
+                .shared
+                .settings
+                .bool(core_settings::BUTTON_HINTS.as_str())
+            && self.rotation() == quireink_platform::Rotation::Deg0;
+        if shown {
+            quireink_sdk::ui::button_hints_height(&self.shared.env(self.now))
+        } else {
+            0
+        }
+    }
+
+    /// Makes every open screen anew when the row of hints came, went or
+    /// changed its height.
+    fn apply_hint_height(&mut self) {
+        let height = self.wanted_hint_height();
+        if height == self.hint_height {
+            return;
+        }
+        self.hint_height = height;
+        self.remake_screens();
+    }
+
+    /// Makes every open screen anew for the size it has now, e.g. after
+    /// the screen was resized or the row of hints changed.
+    fn remake_screens(&mut self) {
+        let now = self.now;
+        for i in 0..self.stack.len() {
+            let Some(spec) = self.registry.screens.get(&self.stack[i].id) else {
+                continue;
+            };
+            self.shared.device.display.height = self.content_height(self.stack[i].hinted);
+            let env = self.shared.env(now);
+            let active = &mut self.stack[i];
+            let _running = self.shared.meter.enter(active.id.namespace());
+            active.screen = (spec.factory)(&env, &active.params);
+        }
+        self.hints.clear();
+        self.end_notice();
+        self.sync_content();
+        self.unrendered = None;
+        self.rendered = None;
+        let bounds = self.framebuffer.bounds();
+        self.screen_changed(bounds, false);
+    }
+
+    /// What the row of hints shows for each button in it: what the button
+    /// runs here, as the screen on top names it.
+    fn current_hints(&self) -> Vec<Hint> {
+        use quireink_sdk::builtin::actions;
+        let env = self.shared.env(self.now);
+        let top = self.stack.last();
+        self.button_row
+            .iter()
+            .map(|button| {
+                let Some(action) = self.resolve(&InputKey::Button(Cow::Borrowed(button))) else {
+                    return Hint::Hidden;
+                };
+                match top.map_or(Hint::Default, |t| t.screen.hint(&action, &env)) {
+                    // Nowhere to go back to from the first screen.
+                    Hint::Default if action == actions::BACK && self.stack.len() < 2 => {
+                        Hint::Hidden
+                    }
+                    Hint::Default => self.default_hint(&action),
+                    hint => hint,
+                }
+            })
+            .collect()
+    }
+
+    /// What an action is called in the row of hints: arrows for moving,
+    /// short words for the rest.
+    fn default_hint(&self, action: &Id) -> Hint {
+        use quireink_sdk::builtin::actions;
+        let icon = match action {
+            a if *a == actions::LEFT => Some("chevron-left"),
+            a if *a == actions::RIGHT => Some("chevron-right"),
+            a if *a == actions::UP || *a == actions::PREV_PAGE => Some("chevron-up"),
+            a if *a == actions::DOWN || *a == actions::NEXT_PAGE => Some("chevron-down"),
+            a if *a == actions::NOTHING => return Hint::Hidden,
+            _ => None,
+        };
+        if let Some(icon) = icon {
+            return Hint::Icon(icon);
+        }
+        let translator = &self.shared.translator;
+        let own = format!("core.hint.{}", action.as_str());
+        let text = match translator.get(&own) {
+            Some(text) => text.to_string(),
+            None => match self.shared.actions.get(action.as_str()) {
+                Some(spec) => translator.tr(&spec.title).to_string(),
+                None => return Hint::Hidden,
+            },
+        };
+        Hint::Text(text)
     }
 
     /// Actions bound by any key map preset, for validation.
@@ -2675,7 +3047,8 @@ impl Kernel {
         let env = self.shared.env(self.now);
         let regions: Vec<Option<Rect>> = self.stack.iter().map(|s| s.screen.region(&env)).collect();
         let base = regions.iter().rposition(Option::is_none).unwrap_or(0);
-        let bounds = self.framebuffer.bounds();
+        let bounds = self.content();
+        let row = self.hint_row();
         let mut canvas = self.framebuffer.canvas();
         let mut canvas = canvas.clipped(region);
         canvas.clear(Color::WHITE);
@@ -2683,7 +3056,13 @@ impl Kernel {
             let Some(area) = own.unwrap_or(bounds).intersection(&region) else {
                 continue;
             };
+            let _running = self.shared.meter.enter(active.id.namespace());
             active.screen.draw(&mut canvas.clipped(area), &env);
+        }
+        if let Some(row) = row
+            && let Some(area) = row.intersection(&region)
+        {
+            quireink_sdk::ui::draw_button_hints(&mut canvas.clipped(area), &env, row, &self.hints);
         }
         // A message over everything.
         if let Some((notice, _)) = &mut self.notice
@@ -2705,8 +3084,10 @@ impl Kernel {
             return Handled::No;
         };
         let env = self.shared.env(self.now);
+        let running = self.shared.meter.enter(active.id.namespace());
         let mut cx = Cx::new(&env, &mut self.output);
         let handled = f(active.screen.as_mut(), &mut cx);
+        drop(running);
         // `request_redraw` means the caller's own region. A screen below an
         // overlay is still partly visible (e.g. the page behind a menu that
         // changes a reading setting); one below a full screen is redrawn
@@ -3023,7 +3404,11 @@ impl Kernel {
         self.screen_timer = None;
         self.output.wake_at = None;
         self.invalidate(region);
-        self.output.request_refresh(if overlays_only {
+        let flash = self
+            .shared
+            .settings
+            .bool(core_settings::FLASH_SCREENS.as_str());
+        self.output.request_refresh(if overlays_only || !flash {
             RefreshMode::Partial
         } else {
             RefreshMode::Full
@@ -3048,6 +3433,13 @@ impl Kernel {
         }
         if *id == core_settings::READING_FONT {
             self.apply_reading_font();
+        }
+        // Its size follows the interface's.
+        if *id == core_settings::BUTTON_HINTS
+            || *id == core_settings::UI_SIZE
+            || *id == core_settings::ROTATION
+        {
+            self.apply_hint_height();
         }
         if *id == core_settings::LANGUAGE
             || *id == core_settings::NIGHT_MODE
@@ -3099,6 +3491,8 @@ struct Shared {
     actions: Actions,
     plugins: Plugins,
     status: SystemStatus,
+    /// What the device did since start (see [`quireink_sdk::usage`]).
+    usage: quireink_sdk::usage::Usage,
     status_items: StatusItems,
     widgets: quireink_sdk::widgets::Widgets,
     services: quireink_sdk::services::Services,
@@ -3128,6 +3522,8 @@ struct Shared {
     secrets: quireink_sdk::secrets::Secrets,
     storage: Box<dyn Storage>,
     keymap: Keymap,
+    /// What each plugin takes.
+    meter: alloc::rc::Rc<meter::Meter>,
 }
 
 impl Shared {
@@ -3145,6 +3541,7 @@ impl Shared {
             actions: &self.actions,
             plugins: &self.plugins,
             status: &self.status,
+            usage: &self.usage,
             status_items: &self.status_items,
             widgets: &self.widgets,
             services: &self.services,

@@ -53,6 +53,7 @@ impl Plugin for TxtFormat {
             open: Box::new(|storage, path, _| {
                 TxtDocument::open(storage, path).map(|d| Box::new(d) as Box<dyn Document>)
             }),
+            prepared: None,
         })?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/en.ini")))?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/de.ini")))?;

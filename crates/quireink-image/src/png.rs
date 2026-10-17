@@ -5,7 +5,7 @@ use alloc::vec::Vec;
 use miniz_oxide::inflate::TINFLStatus;
 use miniz_oxide::inflate::core::{DecompressorOxide, decompress, inflate_flags};
 
-use crate::{Downscaler, ImageError, ImageSink, Reader, factor_for, zeroed};
+use crate::{Downscaler, Fit, ImageError, ImageSink, Reader, zeroed};
 
 /// The deflate history.
 const WINDOW: usize = 32 * 1024;
@@ -220,7 +220,7 @@ impl Rows<'_> {
 
 pub(crate) fn decode(
     reader: &mut Reader<'_>,
-    max_side: u32,
+    fit: Fit,
     sink: &mut dyn ImageSink,
 ) -> Result<(), ImageError> {
     let mut signature = [0u8; 8];
@@ -300,12 +300,12 @@ pub(crate) fn decode(
                         palette[i] = ((y * a + 255 * (255 - a)) / 255) as u8;
                         rgb[i] = [over(r), over(g), over(b)];
                     }
-                    let factor = factor_for(h.width, h.height, max_side);
+                    let size = fit.size(h.width, h.height);
                     let sink = sink.take().ok_or(ImageError::Invalid("state"))?;
                     let color = sink.wants_color();
                     let channels = if color { 3 } else { 1 };
-                    let scaler = Downscaler::new(h.width, factor, channels)?;
-                    sink.start(scaler.out_width(), h.height.div_ceil(factor))?;
+                    let scaler = Downscaler::new(h.width, h.height, size, channels)?;
+                    sink.start(scaler.out_width(), scaler.out_height())?;
                     let row_len = h.row_bytes() + 1;
                     rows = Some(Rows {
                         palette,

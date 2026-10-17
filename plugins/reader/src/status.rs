@@ -40,6 +40,9 @@ pub const GROUP: Id = Id::new_static("reader.group.status");
 pub const PERCENT: Id = Id::new_static("reader.status.battery-percent");
 /// Text size of the status lines, in points.
 pub const SIZE: Id = Id::new_static("reader.status.size");
+/// How far the status lines sit from the edge of the screen, in tenths of
+/// a millimetre: closer than the text's margin, so the text has the room.
+pub const EDGE: Id = Id::new_static("reader.status.edge");
 /// The status lines to switch between, above and below the text (ids
 /// separated by commas; the first shows at first).
 pub const LINES: [Id; 2] = [
@@ -127,6 +130,18 @@ pub(crate) fn register(r: &mut dyn Registrar) -> Result<(), RegisterError> {
         .group(GROUP)
         .unit("core.unit.pt")
         .description("reader.status.size.help"),
+    )?;
+    r.add_setting(
+        SettingSpec::new(
+            EDGE,
+            "reader.status.edge",
+            SettingKind::Int { min: 0, max: 150 },
+            SettingValue::Int(15),
+        )
+        .group(GROUP)
+        .unit("core.unit.tenth-mm")
+        .step(5)
+        .description("reader.status.edge.help"),
     )?;
     // Below the text: the items, the progress bar, nothing; above: none.
     let line_defaults = [

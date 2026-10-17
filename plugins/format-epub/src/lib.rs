@@ -87,6 +87,7 @@ impl Plugin for EpubFormat {
                 EpubDocument::open_options(storage, path, options)
                     .map(|d| Box::new(d) as Box<dyn Document>)
             }),
+            prepared: Some(Box::new(EpubDocument::prepared)),
         })?;
         r.add_format(FormatSpec {
             id: HTML,
@@ -100,6 +101,7 @@ impl Plugin for EpubFormat {
                 HtmlDocument::open(storage, path, options.publisher_styles)
                     .map(|d| Box::new(d) as Box<dyn Document>)
             }),
+            prepared: None,
         })?;
         r.add_format(FormatSpec {
             id: FB2,
@@ -109,6 +111,7 @@ impl Plugin for EpubFormat {
                 Fb2Document::open_options(storage, path, options)
                     .map(|d| Box::new(d) as Box<dyn Document>)
             }),
+            prepared: None,
         })?;
         r.add_format(FormatSpec {
             id: MARKDOWN,
@@ -118,6 +121,7 @@ impl Plugin for EpubFormat {
                 MarkdownDocument::open(storage, path, options.publisher_styles)
                     .map(|d| Box::new(d) as Box<dyn Document>)
             }),
+            prepared: None,
         })?;
         r.add_format(FormatSpec {
             id: CBZ,
@@ -127,6 +131,7 @@ impl Plugin for EpubFormat {
                 CbzDocument::open_options(storage, path, options)
                     .map(|d| Box::new(d) as Box<dyn Document>)
             }),
+            prepared: None,
         })?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/en.ini")))?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/de.ini")))?;

@@ -439,18 +439,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "embedded-sdmmc"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce3c7f9ea039eeafc4a49597b7bd5ae3a1c8e51b2803a381cb0f29ce90fe1ec6"
-dependencies = [
- "byteorder",
- "embedded-hal 1.0.0",
- "embedded-io 0.6.1",
- "heapless 0.8.0",
-]
-
-[[package]]
 name = "embedded-storage"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1133,6 +1121,7 @@ dependencies = [
  "quireink-core",
  "quireink-plugin-about",
  "quireink-plugin-aids",
+ "quireink-plugin-battery",
  "quireink-plugin-browser",
  "quireink-plugin-calibre",
  "quireink-plugin-diagnostics",
@@ -1246,6 +1235,13 @@ dependencies = [
 
 [[package]]
 name = "quireink-plugin-aids"
+version = "0.3.0"
+dependencies = [
+ "quireink-sdk",
+]
+
+[[package]]
+name = "quireink-plugin-battery"
 version = "0.3.0"
 dependencies = [
  "quireink-sdk",
@@ -1551,9 +1547,9 @@ version = "0.3.0"
 name = "quireink-xteink"
 version = "0.1.0"
 dependencies = [
+ "critical-section",
  "embedded-hal 1.0.0",
  "embedded-hal-bus",
- "embedded-sdmmc",
  "esp-alloc",
  "esp-backtrace",
  "esp-bootloader-esp-idf",

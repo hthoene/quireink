@@ -9,6 +9,14 @@ use quireink_platform::{
     ColorPanel, DeviceInfo, DisplayInfo, InputCaps, MemoryClass, PixelFormat, Rotation, buttons,
 };
 
+/// The X4's front buttons, left to right, as `quireink-x4` names them.
+const X4_ROW: [&str; 4] = [
+    buttons::BACK,
+    buttons::CONFIRM,
+    buttons::LEFT,
+    buttons::RIGHT,
+];
+
 /// An emulated device.
 #[derive(Debug, Clone, Copy)]
 pub struct Profile {
@@ -37,6 +45,9 @@ pub struct Profile {
     /// QuireInk shows its sleep screen and the device sleeps (the power
     /// button); Android shows its own.
     pub sleep: bool,
+    /// The buttons in a row below the screen, left to right (see
+    /// `KernelBuilder::button_row`).
+    pub button_row: &'static [&'static str],
     /// One-line description for `--list-profiles`.
     pub summary: &'static str,
 }
@@ -52,8 +63,9 @@ pub const PROFILES: &[Profile] = &[
                 width: 480,
                 height: 800,
                 dpi: 220,
-                // Unverified: 4 gray levels via the controller's LUTs.
-                format: PixelFormat::Gray2,
+                // As the firmware draws: black and white, what the panel
+                // shows until its four grays (the controller's LUTs) come.
+                format: PixelFormat::Mono1,
                 rotation: Rotation::Deg90,
                 color: None,
             },
@@ -80,12 +92,17 @@ pub const PROFILES: &[Profile] = &[
         font_packs: true,
         // 96 of 800 rows: 11.3 KiB instead of 94 KiB, nine bands a frame.
         // The controller takes 8 rows (turned) in a byte.
-        frame_rows: Some(96),
+        frame_rows: Some(192),
         row_align: 8,
         // A 4.3" screen: smaller text, so menus and pages hold enough.
-        settings: &[("core.ui-size", "9"), ("reader.font-size", "9")],
+        settings: &[
+            ("core.ui-size", "9"),
+            ("reader.font-size", "9"),
+            ("core.flash-screens", "false"),
+        ],
         speech: false,
         sleep: true,
+        button_row: &X4_ROW,
         summary: "ESP32-C3, 4.3\" 800x480, buttons only, 192 KiB heap budget",
     },
     Profile {
@@ -124,9 +141,14 @@ pub const PROFILES: &[Profile] = &[
         frame_rows: Some(96),
         row_align: 8,
         // A 4.3" screen: smaller text, so menus and pages hold enough.
-        settings: &[("core.ui-size", "9"), ("reader.font-size", "9")],
+        settings: &[
+            ("core.ui-size", "9"),
+            ("reader.font-size", "9"),
+            ("core.flash-screens", "false"),
+        ],
         speech: false,
         sleep: true,
+        button_row: &[],
         summary: "ESP32-S3 (unverified), 4.3\" 800x480, touch + buttons, 256 KiB heap budget",
     },
     Profile {
@@ -158,6 +180,7 @@ pub const PROFILES: &[Profile] = &[
         settings: &[],
         speech: true,
         sleep: false,
+        button_row: &[],
         summary: "Android, 7\" Carta 1300 1264x1680, touch + page buttons",
     },
     Profile {
@@ -192,6 +215,7 @@ pub const PROFILES: &[Profile] = &[
         settings: &[],
         speech: false,
         sleep: true,
+        button_row: &[],
         summary: "Linux, 7\" Kaleido 3 colour 1264x1680, touch + page buttons",
     },
     Profile {
@@ -223,6 +247,7 @@ pub const PROFILES: &[Profile] = &[
         settings: &[],
         speech: false,
         sleep: true,
+        button_row: &[],
         summary: "Linux, 6.8\" 1236x1648, touch only",
     },
     Profile {
@@ -254,6 +279,7 @@ pub const PROFILES: &[Profile] = &[
         settings: &[],
         speech: false,
         sleep: true,
+        button_row: &[],
         summary: "Linux, 6\" 1072x1448, touch only",
     },
     Profile {
@@ -286,6 +312,7 @@ pub const PROFILES: &[Profile] = &[
         settings: &[("core.keymap-preset", "core.two-buttons")],
         speech: false,
         sleep: true,
+        button_row: &[],
         summary: "Generic 6\" 600x800, only page buttons (also: Bluetooth page turners)",
     },
 ];

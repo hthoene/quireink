@@ -5,6 +5,7 @@ use alloc::vec::Vec;
 use core::fmt;
 
 use quireink_document::{Document, DocumentError};
+use quireink_image::Fit;
 use quireink_platform::Storage;
 
 use crate::id::Id;
@@ -13,6 +14,10 @@ use crate::plugin::RegisterError;
 /// Opens a file of a format as a [`Document`].
 pub type FormatOpener =
     Box<dyn Fn(&dyn Storage, &str, &OpenOptions) -> Result<Box<dyn Document>, DocumentError>>;
+
+/// Whether a document opens at once as `options` say (see
+/// [`FormatSpec::prepared`]).
+pub type FormatPrepared = Box<dyn Fn(&dyn Storage, &str, &OpenOptions) -> bool>;
 
 /// How a document is opened.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,7 +32,13 @@ pub struct OpenOptions {
     pub css: String,
     /// Pictures in colour, for colour screens (ADR 0015); gray otherwise.
     pub color: bool,
+    /// The size pictures are decoded to at most: as large as they show on
+    /// the screen, so a small device does not decode what it cannot show.
+    pub image_fit: Fit,
 }
+
+/// The size of pictures where the screen does not say otherwise.
+pub const IMAGE_FIT: Fit = Fit::side(1600);
 
 impl Default for OpenOptions {
     fn default() -> Self {
@@ -35,6 +46,7 @@ impl Default for OpenOptions {
             publisher_styles: true,
             css: String::new(),
             color: false,
+            image_fit: IMAGE_FIT,
         }
     }
 }
@@ -56,6 +68,12 @@ impl OpenOptions {
         self.color = on;
         self
     }
+
+    /// With pictures decoded no larger than `fit` allows.
+    pub fn image_fit(mut self, fit: Fit) -> Self {
+        self.image_fit = fit;
+        self
+    }
 }
 
 /// A file format contribution (TXT, EPUB, FB2, …).
@@ -68,6 +86,10 @@ pub struct FormatSpec {
     /// also double ones such as `fb2.zip`.
     pub extensions: Vec<Cow<'static, str>>,
     pub open: FormatOpener,
+    /// Whether a document opens at once, or is prepared first (e.g.
+    /// converted into a cache), which takes a while the first time: a
+    /// reader says so meanwhile. `None`: always at once.
+    pub prepared: Option<FormatPrepared>,
 }
 
 impl fmt::Debug for FormatSpec {
@@ -85,6 +107,8 @@ pub struct Formats {
     specs: Vec<FormatSpec>,
     /// The screen shows colour: documents open with colour pictures.
     color: bool,
+    /// The screen's size for pictures, if set.
+    image_fit: Option<Fit>,
 }
 
 impl Formats {
@@ -98,10 +122,18 @@ impl Formats {
         self.color = on;
     }
 
+    /// The screen's size for pictures: they are decoded no larger than it
+    /// shows them, upright or turned (set by the kernel from the device).
+    pub fn set_image_fit(&mut self, fit: Fit) {
+        self.image_fit = Some(fit);
+    }
+
     /// How documents open here unless asked otherwise: as the book
-    /// intends, with pictures in colour on colour screens.
+    /// intends, with pictures in colour on colour screens, as large as the
+    /// screen shows them.
     pub fn options(&self) -> OpenOptions {
-        OpenOptions::default().color(self.color)
+        let fit = self.image_fit.map_or(IMAGE_FIT, |f| f.min(IMAGE_FIT));
+        OpenOptions::default().color(self.color).image_fit(fit)
     }
 
     /// Releases unused capacity once registration is complete.
@@ -158,6 +190,14 @@ impl Formats {
         self.open_with(storage, path, &self.options())
     }
 
+    /// Whether `path` opens at once with `options`, or is prepared first,
+    /// which takes a while (see [`FormatSpec::prepared`]).
+    pub fn prepared(&self, storage: &dyn Storage, path: &str, options: &OpenOptions) -> bool {
+        self.for_path(path)
+            .and_then(|spec| spec.prepared.as_ref())
+            .is_none_or(|prepared| prepared(storage, path, options))
+    }
+
     /// Opens `path` with the matching format and `options`.
     pub fn open_with(
         &self,
@@ -187,6 +227,7 @@ mod tests {
             title: Cow::Borrowed(""),
             extensions: vec![Cow::Borrowed(ext)],
             open: Box::new(|_, _, _| Err(DocumentError::UnsupportedFormat)),
+            prepared: None,
         }
     }
 

@@ -49,7 +49,7 @@ use quireink_sdk::builtin::{actions, events, params, slots};
 use quireink_sdk::ui::choice::{self, Choice};
 use quireink_sdk::ui::{self, UiStyle};
 use quireink_sdk::{
-    Canvas, Color, Command, Cx, Env, Gesture, GestureKind, Handled, Id, Manifest, MenuEntry,
+    Canvas, Color, Command, Cx, Env, Gesture, GestureKind, Handled, Hint, Id, Manifest, MenuEntry,
     Params, Plugin, Point, PointerEvent, PointerPhase, Priority, Rect, RefreshMode, RegisterError,
     Registrar, SDK_VERSION, Screen, ScreenSpec, Version,
 };
@@ -817,6 +817,14 @@ impl Screen for Dashboard {
             self.layout(&env);
             cx.request_redraw();
         }
+    }
+
+    fn hint(&self, action: &Id, env: &Env<'_>) -> Hint {
+        // While the home screen is arranged, back ends it.
+        if *action == actions::BACK && self.edit.is_some() {
+            return Hint::Text(env.i18n.tr("home.hint.done").to_string());
+        }
+        Hint::Default
     }
 
     fn on_action(&mut self, action: &Id, cx: &mut Cx<'_, '_>) -> Handled {

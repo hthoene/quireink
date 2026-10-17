@@ -1,5 +1,6 @@
 use alloc::borrow::Cow;
 use alloc::boxed::Box;
+use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
 
@@ -31,6 +32,37 @@ impl fmt::Debug for ScreenSpec {
             .field("title", &self.title)
             .finish_non_exhaustive()
     }
+}
+
+/// When a screen shows the row of hints for the buttons below it, on
+/// devices that have such a row (see
+/// [`Registrar::set_screen_hints`](crate::Registrar::set_screen_hints)).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Hints {
+    /// Always, below it: the screen has the part above the row. Also for
+    /// menus over a screen without it.
+    #[default]
+    Shown,
+    /// For a few seconds after one of the buttons in the row was pressed
+    /// (or [`Command::ShowHints`](crate::Command::ShowHints)), over its
+    /// bottom edge: the screen has all of the screen, e.g. the reader.
+    OnPress,
+    /// Never.
+    Hidden,
+}
+
+/// How the row of hints below the screen labels a button under it (see
+/// [`Screen::hint`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Hint {
+    /// What the action is usually called.
+    Default,
+    /// A word for what the button does here.
+    Text(String),
+    /// An icon ([`icons`](crate::icons)), e.g. an arrow.
+    Icon(&'static str),
+    /// Nothing: the button does nothing here.
+    Hidden,
 }
 
 /// Whether an event was consumed.
@@ -93,6 +125,16 @@ pub trait Screen {
     fn on_pointer(&mut self, event: &PointerEvent, cx: &mut Cx<'_, '_>) -> Handled {
         let _ = (event, cx);
         Handled::No
+    }
+
+    /// How the row of hints below the screen labels the button that runs
+    /// `action` here, on devices with buttons in a row under the screen
+    /// ([`settings::BUTTON_HINTS`](crate::builtin::settings::BUTTON_HINTS)):
+    /// the action's usual name unless the screen says better what the
+    /// button does, or that it does nothing.
+    fn hint(&self, action: &Id, env: &Env<'_>) -> Hint {
+        let _ = (action, env);
+        Hint::Default
     }
 
     /// Called whenever the screen becomes the visible one: after it was

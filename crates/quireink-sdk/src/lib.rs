@@ -66,6 +66,7 @@ mod settings;
 pub mod status;
 pub mod time;
 pub mod ui;
+pub mod usage;
 mod version;
 pub mod web;
 pub mod widgets;
@@ -78,7 +79,7 @@ pub use command::{
 pub use env::{Env, Metrics};
 pub use event::EventHandler;
 pub use fonts::{FontHandle, FontSet, FontSpec, Fonts};
-pub use formats::{FormatOpener, FormatSpec, Formats, OpenOptions};
+pub use formats::{FormatOpener, FormatPrepared, FormatSpec, Formats, IMAGE_FIT, OpenOptions};
 pub use gesture::{Direction, Gesture, GestureKind};
 pub use hyphenation::{Hyphenation, HyphenationSpec};
 pub use id::{Id, InvalidId};
@@ -87,7 +88,7 @@ pub use menus::{MenuEntry, MenuItem, MenuNeed, MenuSection, Menus};
 pub use params::Params;
 pub use plugin::{Manifest, Plugin, Priority, RegisterError, Registrar, SlotSpec};
 pub use plugins::{PluginInfo, PluginState, Plugins, RequiredFor};
-pub use screen::{Cx, Handled, Output, Screen, ScreenFactory, ScreenSpec};
+pub use screen::{Cx, Handled, Hint, Hints, Output, Screen, ScreenFactory, ScreenSpec};
 pub use settings::{
     Level, SettingError, SettingGroupSpec, SettingKind, SettingSpec, SettingValue, Settings,
 };
@@ -153,17 +154,17 @@ pub mod image {
         }
     }
 
-    /// Decodes the JPEG or PNG file `from` into the gray file `to`, no side
-    /// longer than `side` (as far as the format scales), for
+    /// Decodes the JPEG or PNG file `from` into the gray file `to`, no
+    /// larger than `fit` allows, for
     /// [`ui::draw_image`](crate::ui::draw_image); `None` if it is no image
     /// QuireInk reads.
     pub fn gray_from_file(
         storage: &dyn Storage,
         from: &str,
         to: &str,
-        side: u32,
+        fit: Fit,
     ) -> Option<ImageRef> {
-        picture_from_file(storage, from, to, side, false)
+        picture_from_file(storage, from, to, fit, false)
     }
 
     /// [`gray_from_file`], or in colour (for colour screens) with `color`.
@@ -171,7 +172,7 @@ pub mod image {
         storage: &dyn Storage,
         from: &str,
         to: &str,
-        side: u32,
+        fit: Fit,
         color: bool,
     ) -> Option<ImageRef> {
         let mut head = [0u8; 8];
@@ -184,12 +185,12 @@ pub mod image {
         };
         if color {
             let mut writer = ColorWriter::new(storage, to);
-            decode(format, &mut source, side, &mut writer)
+            decode(format, &mut source, fit, &mut writer)
                 .and_then(|()| writer.finish())
                 .ok()?;
         } else {
             let mut writer = GrayWriter::new(storage, to);
-            decode(format, &mut source, side, &mut writer)
+            decode(format, &mut source, fit, &mut writer)
                 .and_then(|()| writer.finish())
                 .ok()?;
         }

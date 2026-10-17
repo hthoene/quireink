@@ -1,6 +1,10 @@
 //! A disk of 512-byte blocks (an SD card) as the bytes a FAT file system
-//! reads and writes: [`BlockDisk`] keeps one block in memory and writes
-//! it back when another is needed or on flush.
+//! reads and writes: [`BlockDisk`] keeps the [`SLOTS`] blocks used last in
+//! memory (the FAT, folders and the files being read stay at hand: each
+//! block read from a card costs a command and its wait) and writes changed
+//! ones back when their place is needed or on flush. Whole blocks of a
+//! file read or written pass by them, several in one command: a picture
+//! streamed through would push the FAT and the folders out.
 //!
 //! [`BlockDisk::volume`] finds the FAT volume on a card: most cards hold a
 //! partition table (MBR, sometimes GPT) and the file system in a partition
@@ -12,6 +16,8 @@ use fatfs::{IoBase, Read, Seek, SeekFrom, Write};
 
 /// Size of a block.
 pub const BLOCK: usize = 512;
+/// Blocks kept in memory.
+pub const SLOTS: usize = 24;
 
 /// The disk failed to read or write a block.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,6 +41,29 @@ pub trait Blocks {
     fn read_block(&mut self, index: u32, block: &mut [u8; BLOCK]) -> Result<(), DiskError>;
     /// Writes `block` as block `index`.
     fn write_block(&mut self, index: u32, block: &[u8; BLOCK]) -> Result<(), DiskError>;
+    /// Reads blocks from `index` on into `data` (whole blocks), in one
+    /// command where the disk can.
+    fn read_blocks(&mut self, index: u32, data: &mut [u8]) -> Result<(), DiskError> {
+        (index..)
+            .zip(data.chunks_exact_mut(BLOCK))
+            .try_for_each(|(i, block)| {
+                let mut one = [0u8; BLOCK];
+                self.read_block(i, &mut one)?;
+                block.copy_from_slice(&one);
+                Ok(())
+            })
+    }
+    /// Writes `data` (whole blocks) as blocks from `index` on, in one
+    /// command where the disk can.
+    fn write_blocks(&mut self, index: u32, data: &[u8]) -> Result<(), DiskError> {
+        (index..)
+            .zip(data.chunks_exact(BLOCK))
+            .try_for_each(|(i, block)| {
+                let mut one = [0u8; BLOCK];
+                one.copy_from_slice(block);
+                self.write_block(i, &one)
+            })
+    }
     /// Number of blocks.
     fn blocks(&mut self) -> Result<u32, DiskError>;
 }
@@ -137,6 +166,25 @@ fn gpt<B: Blocks>(disk: &mut B) -> Result<Vec<(u64, u64)>, DiskError> {
     Ok(found)
 }
 
+/// A block kept in memory.
+#[derive(Debug, Clone, Copy)]
+struct Slot {
+    /// The disk's block it holds, if any.
+    index: Option<u32>,
+    /// Changed since it was read.
+    dirty: bool,
+    /// When it was used last (a count of uses).
+    used: u32,
+    data: [u8; BLOCK],
+}
+
+const EMPTY: Slot = Slot {
+    index: None,
+    dirty: false,
+    used: 0,
+    data: [0; BLOCK],
+};
+
 /// The bytes of a [`Blocks`] disk, or of the part of it a volume takes.
 #[derive(Debug)]
 pub struct BlockDisk<B: Blocks> {
@@ -145,10 +193,9 @@ pub struct BlockDisk<B: Blocks> {
     first: u32,
     position: u64,
     size: u64,
-    block: [u8; BLOCK],
-    /// The block in `block`, and whether it changed.
-    cached: Option<u32>,
-    dirty: bool,
+    slots: [Slot; SLOTS],
+    /// Uses so far, to find the block used longest ago.
+    uses: u32,
 }
 
 impl<B: Blocks> BlockDisk<B> {
@@ -197,29 +244,57 @@ impl<B: Blocks> BlockDisk<B> {
             first,
             position: 0,
             size: u64::from(blocks) * BLOCK as u64,
-            block: [0; BLOCK],
-            cached: None,
-            dirty: false,
+            slots: [EMPTY; SLOTS],
+            uses: 0,
         }
     }
 
-    /// Makes block `index` the one in memory, writing back the one there.
-    fn load(&mut self, index: u32, read: bool) -> Result<(), DiskError> {
-        if self.cached == Some(index) {
-            return Ok(());
+    /// The slot holding block `index`, read into the one used longest ago
+    /// (written back first if it changed); `read` false for a block about
+    /// to be written whole.
+    fn load(&mut self, index: u32, read: bool) -> Result<usize, DiskError> {
+        self.uses = self.uses.wrapping_add(1);
+        if let Some(i) = self.slots.iter().position(|s| s.index == Some(index)) {
+            self.slots[i].used = self.uses;
+            return Ok(i);
         }
-        self.write_back()?;
+        let i = (0..SLOTS)
+            .min_by_key(|&i| self.slots[i].index.map_or(0, |_| self.slots[i].used))
+            .unwrap_or(0);
+        self.write_back(i)?;
+        let slot = &mut self.slots[i];
+        slot.index = None;
         if read {
-            self.disk.read_block(index, &mut self.block)?;
+            self.disk.read_block(index, &mut slot.data)?;
         }
-        self.cached = Some(index);
-        Ok(())
+        slot.index = Some(index);
+        slot.used = self.uses;
+        Ok(i)
     }
 
-    fn write_back(&mut self) -> Result<(), DiskError> {
-        if let (true, Some(index)) = (self.dirty, self.cached) {
-            self.disk.write_block(index, &self.block)?;
-            self.dirty = false;
+    /// The disk, for tests.
+    #[cfg(test)]
+    pub(crate) fn disk(&self) -> &B {
+        &self.disk
+    }
+
+    /// Whether block `index` is kept in a slot.
+    fn kept(&self, index: u32) -> bool {
+        self.slots.iter().any(|s| s.index == Some(index))
+    }
+
+    /// Whole blocks from `index` on, at most `whole`, that are not kept.
+    fn passing(&self, index: u32, whole: usize) -> usize {
+        (0..whole as u32)
+            .take_while(|&k| !self.kept(index + k))
+            .count()
+    }
+
+    fn write_back(&mut self, i: usize) -> Result<(), DiskError> {
+        let slot = &mut self.slots[i];
+        if let (true, Some(index)) = (slot.dirty, slot.index) {
+            self.disk.write_block(index, &slot.data)?;
+            slot.dirty = false;
         }
         Ok(())
     }
@@ -244,9 +319,18 @@ impl<B: Blocks> Read for BlockDisk<B> {
         let mut done = 0;
         while done < len {
             let (index, offset) = self.place();
-            self.load(index, true)?;
+            let whole = if offset == 0 { (len - done) / BLOCK } else { 0 };
+            let passing = self.passing(index, whole);
+            if passing > 0 {
+                let bytes = &mut buf[done..done + passing * BLOCK];
+                self.disk.read_blocks(index, bytes)?;
+                done += passing * BLOCK;
+                self.position += (passing * BLOCK) as u64;
+                continue;
+            }
+            let slot = self.load(index, true)?;
             let n = (BLOCK - offset).min(len - done);
-            buf[done..done + n].copy_from_slice(&self.block[offset..offset + n]);
+            buf[done..done + n].copy_from_slice(&self.slots[slot].data[offset..offset + n]);
             done += n;
             self.position += n as u64;
         }
@@ -261,11 +345,20 @@ impl<B: Blocks> Write for BlockDisk<B> {
         let mut done = 0;
         while done < len {
             let (index, offset) = self.place();
+            let whole = if offset == 0 { (len - done) / BLOCK } else { 0 };
+            let passing = self.passing(index, whole);
+            if passing > 0 {
+                let bytes = &buf[done..done + passing * BLOCK];
+                self.disk.write_blocks(index, bytes)?;
+                done += passing * BLOCK;
+                self.position += (passing * BLOCK) as u64;
+                continue;
+            }
             let n = (BLOCK - offset).min(len - done);
             // A whole block need not be read first.
-            self.load(index, n < BLOCK)?;
-            self.block[offset..offset + n].copy_from_slice(&buf[done..done + n]);
-            self.dirty = true;
+            let slot = &mut self.slots[self.load(index, n < BLOCK)?];
+            slot.data[offset..offset + n].copy_from_slice(&buf[done..done + n]);
+            slot.dirty = true;
             done += n;
             self.position += n as u64;
         }
@@ -273,7 +366,7 @@ impl<B: Blocks> Write for BlockDisk<B> {
     }
 
     fn flush(&mut self) -> Result<(), DiskError> {
-        self.write_back()
+        (0..SLOTS).try_for_each(|i| self.write_back(i))
     }
 }
 

@@ -31,6 +31,7 @@ use quireink_platform::{Color, Point, Rect, Storage};
 use crate::builtin::{actions, fonts, settings};
 use crate::env::Env;
 use crate::fonts::FontHandle;
+use crate::screen::Hint;
 use crate::settings::{SettingKind, SettingSpec, SettingValue};
 
 /// Sizes of the standard UI elements, in pixels.
@@ -804,6 +805,62 @@ pub fn fit(font: &FontHandle<'_>, size: f32, text: &str, width: f32) -> String {
     result
 }
 
+/// The height of the row of hints below the screen (see
+/// [`draw_button_hints`]).
+pub fn button_hints_height(env: &Env<'_>) -> u16 {
+    let style = UiStyle::new(env);
+    let line = style.font(env).map_or(style.small * 1.3, |f| {
+        f.line_metrics(style.small).line_height
+    });
+    ((line * 1.5) as u32 + style.line).max(env.metrics.mm(4)) as u16
+}
+
+/// The row of hints below the screen: a line above it, then what each
+/// button under it does, centred in an equal share of the width, as the
+/// buttons lie.
+pub fn draw_button_hints(canvas: &mut Canvas<'_>, env: &Env<'_>, area: Rect, hints: &[Hint]) {
+    let style = UiStyle::new(env);
+    fill(canvas, area, Color::WHITE);
+    let line = style.line.min(u32::from(area.height));
+    canvas.fill_rect(
+        i32::from(area.x),
+        i32::from(area.y),
+        u32::from(area.width),
+        line,
+        Color::BLACK,
+    );
+    let Some(font) = style.font(env) else {
+        return;
+    };
+    let count = hints.len() as u32;
+    let row = Rect::new(
+        area.x,
+        area.y + line as u16,
+        area.width,
+        area.height - line as u16,
+    );
+    for (i, hint) in hints.iter().enumerate() {
+        let (i, width) = (i as u32, u32::from(area.width));
+        let left = u32::from(area.x) + width * i / count;
+        let right = u32::from(area.x) + width * (i + 1) / count;
+        let cell = Rect::new(left as u16, row.y, (right - left) as u16, row.height);
+        let room = (right - left).saturating_sub(2 * style.gap) as f32;
+        let middle = left as f32 + (right - left) as f32 / 2.0;
+        match hint {
+            Hint::Text(text) => {
+                let text = fit(&font, style.small, text, room);
+                let x = middle - font.measure(style.small, &text) / 2.0;
+                draw_label(canvas, &font, style.small, x, cell, &text, Color::BLACK);
+            }
+            Hint::Icon(name) => {
+                let x = middle - icon_width(env, name, style.text) / 2.0;
+                draw_icon(canvas, env, name, style.text, x, cell, Color::BLACK);
+            }
+            Hint::Default | Hint::Hidden => {}
+        }
+    }
+}
+
 /// Fills a rectangle with the style's corners.
 pub fn fill_round(canvas: &mut Canvas<'_>, style: &UiStyle, area: Rect, color: Color) {
     canvas.fill_round_rect(
@@ -1464,15 +1521,15 @@ pub fn draw_image(canvas: &mut Canvas<'_>, storage: &dyn Storage, image: &ImageR
     if first >= last {
         return;
     }
-    let mut source = alloc::vec![0u8; file.width as usize];
+    let mut rows = RowChunk::new(file.width as usize);
     let mut row = alloc::vec![0u8; w as usize];
     let mut loaded = None;
     for y in first..last {
         let sy = ((y - top) as u64 * u64::from(file.height) / h as u64) as u32;
         if loaded != Some(sy) {
-            if !file.read_row(storage, sy, &mut source) {
+            let Some(source) = rows.get(sy, |y, out| file.read_rows(storage, y, out)) else {
                 return;
-            }
+            };
             loaded = Some(sy);
             let sw = file.width as usize;
             for (x, out) in row.iter_mut().enumerate() {
@@ -1483,6 +1540,45 @@ pub fn draw_image(canvas: &mut Canvas<'_>, storage: &dyn Storage, image: &ImageR
             }
         }
         canvas.draw_gray_row(left, y, &row);
+    }
+}
+
+/// Bytes of a picture's rows read at a time.
+const ROWS_BYTES: usize = 8192;
+
+/// Rows of a picture read several at a time: a card serves whole blocks
+/// in one command faster than a row at a time.
+struct RowChunk {
+    data: Vec<u8>,
+    row: usize,
+    first: u32,
+    count: u32,
+}
+
+impl RowChunk {
+    /// For rows of `row` bytes.
+    fn new(row: usize) -> Self {
+        let rows = (ROWS_BYTES / row.max(1)).max(1);
+        Self {
+            data: alloc::vec![0; rows * row],
+            row,
+            first: 0,
+            count: 0,
+        }
+    }
+
+    /// Row `y`, read with those after it unless at hand; `read` reads rows
+    /// from a row on and says how many.
+    fn get(&mut self, y: u32, read: impl FnOnce(u32, &mut [u8]) -> u32) -> Option<&[u8]> {
+        if !(self.first..self.first + self.count).contains(&y) {
+            self.first = y;
+            self.count = read(y, &mut self.data);
+            if self.count == 0 {
+                return None;
+            }
+        }
+        let at = (y - self.first) as usize * self.row;
+        Some(&self.data[at..at + self.row])
     }
 }
 
@@ -1505,15 +1601,15 @@ fn draw_color_image(
         return;
     }
     let sw = file.width as usize;
-    let mut source = alloc::vec![0u8; sw * 3];
+    let mut rows = RowChunk::new(sw * 3);
     let mut row = alloc::vec![0u8; w as usize * 3];
     let mut loaded = None;
     for y in first..last {
         let sy = ((y - top) as u64 * u64::from(file.height) / h as u64) as u32;
         if loaded != Some(sy) {
-            if !file.read_row(storage, sy, &mut source) {
+            let Some(source) = rows.get(sy, |y, out| file.read_rows(storage, y, out)) else {
                 return;
-            }
+            };
             loaded = Some(sy);
             for x in 0..w as usize {
                 let from = x * sw / w as usize;

@@ -14,7 +14,7 @@ use crate::{ImageError, ImageSink};
 const MAGIC: &[u8; 4] = b"QICI";
 const HEADER: u64 = 12;
 /// Rows are appended in chunks of about this size.
-const FLUSH: usize = 6144;
+const FLUSH: usize = 12288;
 
 /// A decoded colour image in storage.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,6 +39,18 @@ impl ColorFile {
             width,
             height,
         })
+    }
+
+    /// Reads rows from `y` on into `out`, as many whole ones as fit and
+    /// the image has (see [`GrayFile::read_rows`](crate::GrayFile)).
+    pub fn read_rows(&self, storage: &dyn Storage, y: u32, out: &mut [u8]) -> u32 {
+        let row = self.width as usize * 3;
+        let rows = (out.len() / row.max(1)).min(self.height.saturating_sub(y) as usize);
+        let at = HEADER + u64::from(y) * row as u64;
+        if rows == 0 || !crate::gray::read_all(storage, &self.path, at, &mut out[..rows * row]) {
+            return 0;
+        }
+        rows as u32
     }
 
     /// Reads row `y` into `out` (at most `width` pixels, three bytes each).

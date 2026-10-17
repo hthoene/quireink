@@ -26,8 +26,15 @@ use quireink_sdk::status::context as status_context;
 
 /// Pages laid out per background step; small enough to keep input snappy.
 const PAGES_PER_STEP: usize = 8;
+/// On small devices, where laying out a page takes half a second (the X4),
+/// one: buttons wait no longer than that.
+const PAGES_PER_STEP_SMALL: usize = 1;
 /// Pause between background steps.
 const STEP_DELAY_MS: u64 = 2;
+/// The position is written at most this often while pages turn; always
+/// when the book is closed or the device sleeps. A card is slow to write
+/// to, and turning pages quickly should not wait for it.
+const SAVE_EVERY_MS: u64 = 5000;
 /// Pages remembered for going back before the index covers them.
 const HISTORY: usize = 64;
 /// Places jumps were made from (links, contents, search, page numbers),
@@ -339,17 +346,28 @@ impl Typography {
         } else {
             (status::shown(env, true), status::shown(env, false))
         };
-        let lines = f32::from(u8::from(top) + u8::from(bottom));
         let width = (f32::from(display.width) - 2.0 * margin).max(1.0);
-        // Text never runs up to a status line, also on pages it fills to
-        // the last pixel.
+        // Status lines sit close to the edge, in the text's margin; the
+        // text keeps its margin, and never runs up to a status line, also
+        // on pages it fills to the last pixel.
+        let edge = m.tenth_mm(settings.int(status::EDGE.as_str()).clamp(0, 150) as u32) as f32;
         let status_gap = m.mm(2) as f32;
         let status_room = status_height + status_gap;
-        let height = (f32::from(display.height) - 2.0 * margin - lines * status_room).max(1.0);
-        let y = margin + if top { status_room } else { 0.0 };
+        let screen = f32::from(display.height);
+        let y = if top {
+            margin.max(edge + status_room)
+        } else {
+            margin
+        };
+        let end = if bottom {
+            (screen - margin).min(screen - edge - status_room)
+        } else {
+            screen - margin
+        };
+        let height = (end - y).max(1.0);
         let line = |y: f32| Rect::new(margin as u16, y as u16, width as u16, status_height as u16);
-        let top_status = top.then(|| line(margin));
-        let status = bottom.then(|| line(y + height + status_gap));
+        let top_status = top.then(|| line(edge));
+        let status = bottom.then(|| line(screen - edge - status_height));
         let hyphenation = (settings.bool(HYPHENATE.as_str())
             && env.hyphenation.get(language).is_some())
         .then(|| language.to_string());
@@ -439,6 +457,10 @@ struct Book {
     typography: Typography,
     page: Page,
     history: Vec<Locator>,
+    /// When the position was written last, and whether the page shown has
+    /// changed since.
+    saved_at: Option<quireink_sdk::Instant>,
+    unsaved: bool,
     index: Option<PageIndex>,
     /// Where background pagination continues.
     indexing: Option<Locator>,
@@ -558,6 +580,9 @@ pub(crate) struct ReaderScreen {
     auto_turn: Option<quireink_sdk::Instant>,
     /// Where skimming began, while skimming.
     skim_from: Option<Locator>,
+    /// The book to open once the screen says it is being prepared (the
+    /// first opening takes a while).
+    preparing: Option<Params>,
 }
 
 /// A sentence read aloud, by words of the page that starts at `page`.
@@ -593,8 +618,18 @@ fn aloud_area(env: &Env<'_>, words: &[WordBox], range: core::ops::Range<usize>) 
 
 impl ReaderScreen {
     pub(crate) fn open(env: &Env<'_>, params: &Params) -> Self {
+        let prepared = params
+            .get(params::PATH)
+            .is_none_or(|path| env.formats.prepared(env.storage, path, &open_options(env)));
+        let (book, preparing) = if prepared {
+            (Book::open(env, params), None)
+        } else {
+            let message = env.i18n.tr("reader.preparing").to_string();
+            (Err(message), Some(params.clone()))
+        };
         Self {
-            book: Book::open(env, params),
+            book,
+            preparing,
             selection: None,
             linking: None,
             last_search: String::new(),
@@ -604,6 +639,28 @@ impl ReaderScreen {
             auto_turn: None,
             skim_from: None,
         }
+    }
+
+    /// Opens the book the screen says is being prepared, if it does;
+    /// whether it did.
+    fn prepare(&mut self, cx: &mut Cx<'_, '_>) -> bool {
+        let Some(params) = self.preparing.take() else {
+            return false;
+        };
+        let env = *cx.env();
+        self.book = Book::open(&env, &params);
+        // Shown as a screen opening is: the book replaces the notice.
+        cx.request_redraw();
+        let flash = env
+            .settings
+            .bool(quireink_sdk::builtin::settings::FLASH_SCREENS.as_str());
+        cx.request_refresh(if flash {
+            RefreshMode::Full
+        } else {
+            RefreshMode::Partial
+        });
+        self.on_show(cx);
+        true
     }
 
     /// Opens the skimming overlay where the book is.
@@ -1413,14 +1470,7 @@ impl Book {
             .get(params::PATH)
             .ok_or_else(|| env.i18n.tr("reader.no-book").to_string())?;
         let error = |e: DocumentError| format!("{}\n{e}", env.i18n.tr("reader.error"));
-        let styles = env
-            .settings
-            .bool(crate::settings::PUBLISHER_STYLES.as_str());
-        let options = env
-            .formats
-            .options()
-            .publisher_styles(styles)
-            .css(env.stylesheets.join("\n"));
+        let options = open_options(env);
         let document = env
             .formats
             .open_with(env.storage, path, &options)
@@ -1455,6 +1505,8 @@ impl Book {
             indexing: None,
             page: Page::default(),
             history: Vec::new(),
+            saved_at: None,
+            unsaved: false,
             dir,
             title,
             document,
@@ -1624,7 +1676,32 @@ impl Book {
         self.document.progress(self.page.start) * 100.0
     }
 
-    fn save_position(&self, env: &Env<'_>) {
+    /// Writes the position now, or soon if it was written a moment ago;
+    /// `true` while it waits ([`Book::save_due`]).
+    fn position_changed(&mut self, env: &Env<'_>) -> bool {
+        let recent = self
+            .saved_at
+            .is_some_and(|at| env.now.since(at) < SAVE_EVERY_MS);
+        self.unsaved = recent;
+        if !recent {
+            self.save_position(env);
+        }
+        recent
+    }
+
+    /// Writes the position if it waits; `force` also before its time.
+    fn save_due(&mut self, env: &Env<'_>, force: bool) {
+        let due = self
+            .saved_at
+            .is_none_or(|at| env.now.since(at) >= SAVE_EVERY_MS);
+        if self.unsaved && (force || due) {
+            self.unsaved = false;
+            self.save_position(env);
+        }
+    }
+
+    fn save_position(&mut self, env: &Env<'_>) {
+        self.saved_at = Some(env.now);
         let start = self.page.start;
         let text = format!(
             "[progress]\nsection = {}\noffset = {}\npercent = {:.1}\n",
@@ -1667,7 +1744,9 @@ impl Book {
         self.page = page;
         self.update_chapter(&env);
         self.update_links(&env);
-        self.save_position(&env);
+        if self.position_changed(&env) {
+            cx.wake_at(env.now.add_millis(SAVE_EVERY_MS));
+        }
         if !self.web() {
             cx.command(Command::Emit(events::PAGE_TURNED, self.event_params(&env)));
             // The last page: the book is read to the end.
@@ -1702,9 +1781,13 @@ impl Book {
                 None => Locator::START,
             },
         };
-        let mut starts = Vec::with_capacity(PAGES_PER_STEP);
+        let per_step = match env.device.memory {
+            quireink_sdk::MemoryClass::Small => PAGES_PER_STEP_SMALL,
+            _ => PAGES_PER_STEP,
+        };
+        let mut starts = Vec::with_capacity(per_step);
         let mut done = false;
-        for _ in 0..PAGES_PER_STEP {
+        for _ in 0..per_step {
             let Ok(page) = self.layout(env, next) else {
                 // Unreadable: give up indexing, reading still works.
                 return false;
@@ -2516,6 +2599,9 @@ impl Screen for ReaderScreen {
     /// The book is closed: said, where it was left.
     fn on_close(&mut self, cx: &mut Cx<'_, '_>) {
         let env = *cx.env();
+        if let Ok(book) = &mut self.book {
+            book.save_due(&env, true);
+        }
         if let Ok(book) = &self.book
             && !book.web()
         {
@@ -2610,6 +2696,12 @@ impl Screen for ReaderScreen {
     }
 
     fn on_show(&mut self, cx: &mut Cx<'_, '_>) {
+        if self.preparing.is_some() {
+            // Shown saying so first, then prepared.
+            let now = cx.env().now;
+            cx.wake_at(now);
+            return;
+        }
         // Done skimming: *Back* returns to where it began.
         if let (Some(from), Ok(book)) = (self.skim_from.take(), &mut self.book)
             && book.page.start != from
@@ -2645,9 +2737,13 @@ impl Screen for ReaderScreen {
 
     fn on_timer(&mut self, cx: &mut Cx<'_, '_>) {
         let env = *cx.env();
+        if self.prepare(cx) {
+            return;
+        }
         let Ok(book) = &mut self.book else {
             return;
         };
+        book.save_due(&env, false);
         if book.index_step(&env) {
             cx.wake_at(env.now.add_millis(STEP_DELAY_MS));
         }
@@ -2657,6 +2753,8 @@ impl Screen for ReaderScreen {
     }
 
     fn on_action(&mut self, action: &Id, cx: &mut Cx<'_, '_>) -> Handled {
+        // A button pressed while the book is being prepared waits for it.
+        self.prepare(cx);
         // Any button pauses reading aloud (also "Read aloud"), and does
         // nothing else.
         if self.aloud.is_some() {
@@ -2914,6 +3012,10 @@ impl Screen for ReaderScreen {
         let Ok(book) = &mut self.book else {
             return;
         };
+        // Asleep the device may lose its power: the position first.
+        if *event == events::SUSPEND {
+            book.save_due(cx.env(), true);
+        }
         let this_book = params.get(params::PATH) == Some(book.path.as_str());
         if *event == crate::SPOKEN && this_book {
             self.spoken(params, cx);
@@ -3050,6 +3152,18 @@ impl Screen for ReaderScreen {
             cx.wake_at(now);
         }
     }
+}
+
+/// How the reader opens books: with the publisher's styles as set, and
+/// the plugins' stylesheets.
+fn open_options(env: &Env<'_>) -> quireink_sdk::OpenOptions {
+    let styles = env
+        .settings
+        .bool(crate::settings::PUBLISHER_STYLES.as_str());
+    env.formats
+        .options()
+        .publisher_styles(styles)
+        .css(env.stylesheets.join("\n"))
 }
 
 /// Draws an image at its place on the page.

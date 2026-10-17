@@ -132,6 +132,11 @@ pub trait Registrar {
     /// `need`, e.g. reading aloud only where the device can speak.
     fn set_menu_need(&mut self, item: Id, need: crate::MenuNeed) -> Result<(), RegisterError>;
 
+    /// When `screen` shows the row of hints for the buttons below it
+    /// ([`Hints::Shown`](crate::Hints) unless set), and so the size it is
+    /// made for.
+    fn set_screen_hints(&mut self, screen: Id, hints: crate::Hints) -> Result<(), RegisterError>;
+
     /// Adds a group for the settings screen.
     fn add_setting_group(&mut self, group: SettingGroupSpec) -> Result<(), RegisterError>;
 
