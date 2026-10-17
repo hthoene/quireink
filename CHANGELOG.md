@@ -68,9 +68,15 @@ change the plugin SDK.
   panel (1.6 s instead of 3.5); the slow one only after starting.
 - Pictures of books are decoded no larger than the screen shows them
   (`OpenOptions::image_side`, from the device): a quarter of the pixels
-  on the X4, whose first opening of a book with a large cover takes 15 s
-  instead of 22, its cover page drawn in 1.2 s instead of 3.4. Pictures
-  are dithered in whole numbers.
+  on the X4, its cover page drawn in 1.2 s instead of 3.4. Pictures are
+  dithered in whole numbers. A JPEG made smaller is made smaller as it is
+  decoded, from the lower frequencies of its blocks.
+- Storage on SD cards (the X4): files appended to stay open and are
+  written back when they are wanted otherwise, when another file needs
+  the room, or on `Storage::sync` (new; the kernel calls it before the
+  device sleeps). A cover decoded in hundreds of pieces is no longer
+  looked up and written back for each: with the change above, the first
+  opening of a book with a large cover takes 9 s on the X4 instead of 22.
 - X4 remote: `--profile` shows where the time goes (the functions the
   processor was in, every 5 ms), `--trace` what is read and written.
 - A button with nothing bound to its long press counts as it goes down,

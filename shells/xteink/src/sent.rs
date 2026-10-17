@@ -46,7 +46,8 @@ impl Sent {
             runs.push(byte);
             rest = &rest[count..];
         }
-        runs.shrink_to_fit();
+        // Not shrunk: that would ask for the memory once more, when it may be
+        // short; the bands are gone after the frame anyway.
         self.size += runs.len();
         if self.bands.try_reserve(1).is_err() {
             return self.lose();

@@ -700,4 +700,8 @@ impl Storage for Volumes {
     fn local_path(&self, path: &str, with: &mut dyn FnMut(&str)) {
         self.0.local_path(path, with);
     }
+
+    fn sync(&self) -> Result<(), StorageError> {
+        self.0.sync()
+    }
 }

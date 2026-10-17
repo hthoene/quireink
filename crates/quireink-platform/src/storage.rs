@@ -68,7 +68,14 @@ pub trait Storage {
     fn write(&self, path: &str, data: &[u8]) -> Result<(), StorageError>;
 
     /// Appends to a file, creating it and missing parent directories.
+    /// Storages may keep what is appended back until [`Storage::sync`] or
+    /// until the file is wanted otherwise; reading it sees it at once.
     fn append(&self, path: &str, data: &[u8]) -> Result<(), StorageError>;
+
+    /// Writes back everything kept back, e.g. before the device sleeps.
+    fn sync(&self) -> Result<(), StorageError> {
+        Ok(())
+    }
 
     /// Calls `visit` for each entry of a directory, in no particular order.
     fn list(&self, dir: &str, visit: &mut dyn FnMut(DirEntry<'_>)) -> Result<(), StorageError>;
@@ -246,6 +253,11 @@ impl<B: Storage, M: Storage> Storage for Mounted<B, M> {
     fn local_path(&self, path: &str, with: &mut dyn FnMut(&str)) {
         let (storage, path) = self.route(path);
         storage.local_path(path, with);
+    }
+
+    fn sync(&self) -> Result<(), StorageError> {
+        let base = self.base.sync();
+        self.mounted.sync().and(base)
     }
 }
 

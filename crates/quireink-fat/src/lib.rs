@@ -5,9 +5,13 @@
 //!
 //! The [`OPEN_FILES`] files read last stay open, so reading a book a piece
 //! at a time, often from two files by turns (an index and its text), does
-//! not look them up again for every piece. Files are replaced through
-//! a temporary file beside them, so a write cut short by an empty battery
-//! leaves the old content.
+//! not look them up again for every piece. Files appended to stay open
+//! the same way, written back only when they are wanted otherwise (listed,
+//! renamed, removed, replaced), when they make room for another file, or on
+//! [`Storage::sync`]: a picture decoded into a file in hundreds of pieces
+//! is not looked up and written back hundreds of times. Files are replaced
+//! through a temporary file beside them, so a write cut short by an empty
+//! battery leaves the old content.
 
 #![no_std]
 
@@ -36,12 +40,32 @@ type FatFile<IO> = File<'static, IO, DefaultTimeProvider, LossyOemCpConverter>;
 pub const OPEN_FILES: usize = 8;
 type FatDir<IO> = Dir<'static, IO, DefaultTimeProvider, LossyOemCpConverter>;
 
+/// A file kept open.
+struct Open<IO: ReadWriteSeek + 'static> {
+    path: String,
+    file: FatFile<IO>,
+    /// Appended to since it was last written back.
+    dirty: bool,
+}
+
+impl<IO: ReadWriteSeek + 'static> Open<IO> {
+    /// Writes back what was appended (its size in its folder, the disk's
+    /// blocks).
+    fn flush(&mut self) -> Result<(), StorageError> {
+        if self.dirty {
+            self.dirty = false;
+            self.file.flush().map_err(error)?;
+        }
+        Ok(())
+    }
+}
+
 /// QuireInk's storage on a FAT file system that lives as long as the
 /// device runs (`Box::leak` it).
 pub struct FatStorage<IO: ReadWriteSeek + 'static> {
     fs: &'static FileSystem<IO>,
-    /// The files read last, by their paths, the latest last.
-    open: RefCell<alloc::vec::Vec<(String, FatFile<IO>)>>,
+    /// The files used last, the latest last.
+    open: RefCell<alloc::vec::Vec<Open<IO>>>,
 }
 
 impl<IO: ReadWriteSeek + 'static> core::fmt::Debug for FatStorage<IO> {
@@ -95,14 +119,16 @@ impl<IO: ReadWriteSeek + 'static> FatStorage<IO> {
         }
     }
 
-    /// Runs `f` with `path` open, keeping it open for the next call.
+    /// Runs `f` with `path` open (created first with its folders if
+    /// `create`), keeping it open for the next call.
     fn with_open<T>(
         &self,
         path: &str,
-        f: impl FnOnce(&mut FatFile<IO>) -> Result<T, StorageError>,
+        create: bool,
+        f: impl FnOnce(&mut Open<IO>) -> Result<T, StorageError>,
     ) -> Result<T, StorageError> {
         let mut open = self.open.borrow_mut();
-        match open.iter().position(|(p, _)| p == path) {
+        match open.iter().position(|o| o.path == path) {
             // The latest last.
             Some(i) => {
                 let file = open.remove(i);
@@ -112,25 +138,42 @@ impl<IO: ReadWriteSeek + 'static> FatStorage<IO> {
                 // Checked once, when opened: a book is read 4 bytes at a
                 // time, many times a page.
                 check(path)?;
-                let file = self.root().open_file(path).map_err(error)?;
                 if open.len() == OPEN_FILES {
-                    open.remove(0);
+                    open.remove(0).flush()?;
                 }
-                open.push((path.to_string(), file));
+                let file = if create {
+                    self.create_dir(parent(path))?;
+                    self.root().create_file(path)
+                } else {
+                    self.root().open_file(path)
+                }
+                .map_err(error)?;
+                open.push(Open {
+                    path: path.to_string(),
+                    file,
+                    dirty: false,
+                });
             }
         }
         match open.last_mut() {
-            Some((_, file)) => f(file),
+            Some(file) => f(file),
             None => Err(StorageError::Io),
         }
     }
 
-    /// Forgets the open files at `path` (or below it).
-    fn close(&self, path: &str) {
+    /// Closes the open files at `path` (or below it), writing back what
+    /// was appended to them.
+    fn close(&self, path: &str) -> Result<(), StorageError> {
         let below = format!("{path}/");
-        self.open
-            .borrow_mut()
-            .retain(|(p, _)| p != path && !p.starts_with(&below));
+        let mut result = Ok(());
+        self.open.borrow_mut().retain_mut(|o| {
+            let keep = o.path != path && !o.path.starts_with(&below);
+            if !keep && let Err(e) = o.flush() {
+                result = Err(e);
+            }
+            keep
+        });
+        result
     }
 
     fn write_all(file: &mut FatFile<IO>, data: &[u8]) -> Result<(), StorageError> {
@@ -141,7 +184,7 @@ impl<IO: ReadWriteSeek + 'static> FatStorage<IO> {
 
 impl<IO: ReadWriteSeek + 'static> Storage for FatStorage<IO> {
     fn read_at(&self, path: &str, offset: u64, buf: &mut [u8]) -> Result<usize, StorageError> {
-        self.with_open(path, |file| {
+        self.with_open(path, false, |Open { file, .. }| {
             file.seek(SeekFrom::Start(offset)).map_err(error)?;
             let mut read = 0;
             while read < buf.len() {
@@ -155,12 +198,14 @@ impl<IO: ReadWriteSeek + 'static> Storage for FatStorage<IO> {
     }
 
     fn size(&self, path: &str) -> Result<u64, StorageError> {
-        self.with_open(path, |file| file.seek(SeekFrom::End(0)).map_err(error))
+        self.with_open(path, false, |o| {
+            o.file.seek(SeekFrom::End(0)).map_err(error)
+        })
     }
 
     fn write(&self, path: &str, data: &[u8]) -> Result<(), StorageError> {
         check(path)?;
-        self.close(path);
+        self.close(path)?;
         self.create_dir(parent(path))?;
         let temp = format!("{path}.tmp");
         let root = self.root();
@@ -177,18 +222,29 @@ impl<IO: ReadWriteSeek + 'static> Storage for FatStorage<IO> {
     }
 
     fn append(&self, path: &str, data: &[u8]) -> Result<(), StorageError> {
-        check(path)?;
-        self.close(path);
-        self.create_dir(parent(path))?;
-        let mut file = self.root().create_file(path).map_err(error)?;
-        file.seek(SeekFrom::End(0)).map_err(error)?;
-        Self::write_all(&mut file, data)
+        self.with_open(path, true, |o| {
+            o.file.seek(SeekFrom::End(0)).map_err(error)?;
+            o.dirty = true;
+            o.file.write_all(data).map_err(error)
+        })
+    }
+
+    fn sync(&self) -> Result<(), StorageError> {
+        let mut result = Ok(());
+        for o in self.open.borrow_mut().iter_mut() {
+            if let Err(e) = o.flush() {
+                result = Err(e);
+            }
+        }
+        result
     }
 
     fn list(&self, dir: &str, visit: &mut dyn FnMut(DirEntry<'_>)) -> Result<(), StorageError> {
         if !dir.is_empty() {
             check(dir)?;
         }
+        // The sizes in the folders, as appended.
+        self.sync()?;
         for entry in self.dir(dir)?.iter() {
             let entry = entry.map_err(error)?;
             let name = entry.file_name();
@@ -207,7 +263,7 @@ impl<IO: ReadWriteSeek + 'static> Storage for FatStorage<IO> {
 
     fn remove(&self, path: &str) -> Result<(), StorageError> {
         check(path)?;
-        self.close(path);
+        self.close(path)?;
         match self.root().remove(path) {
             Ok(()) | Err(fatfs::Error::NotFound) => Ok(()),
             Err(e) => Err(error(e)),
@@ -220,13 +276,13 @@ impl<IO: ReadWriteSeek + 'static> Storage for FatStorage<IO> {
         if from == to {
             return Ok(());
         }
-        self.close(from);
-        self.close(to);
+        self.close(from)?;
+        self.close(to)?;
         self.create_dir(parent(to))?;
         let root = self.root();
         // A file there is replaced.
         if self.size(to).is_ok() {
-            self.close(to);
+            self.close(to)?;
             root.remove(to).map_err(error)?;
         }
         root.rename(from, &root, to).map_err(error)
@@ -247,7 +303,7 @@ impl<IO: ReadWriteSeek + 'static> Storage for FatStorage<IO> {
 
     fn remove_dir_all(&self, path: &str) -> Result<(), StorageError> {
         check(path)?;
-        self.close(path);
+        self.close(path)?;
         let dir = match self.dir(path) {
             Ok(dir) => dir,
             Err(StorageError::NotFound) => return Ok(()),
@@ -488,6 +544,47 @@ mod tests {
         // Written again while open: read as written.
         s.write(&names[0], b"short").unwrap();
         assert_eq!(s.read_at(&names[0], 0, &mut buf), Ok(5));
+    }
+
+    #[test]
+    fn appended_by_turns_and_written_back() {
+        let s = storage();
+        s.write("book.epub", &[7u8; 5000]).unwrap();
+        let files: Vec<String> = (0..OPEN_FILES + 2)
+            .map(|n| alloc::format!(".cache/{n}.bin"))
+            .collect();
+        let mut buf = [0u8; 100];
+        // More files than stay open, appended to by turns, with a book
+        // read between.
+        for round in 0..30u8 {
+            for (n, name) in files.iter().enumerate() {
+                s.append(name, &[round, n as u8]).unwrap();
+            }
+            assert_eq!(
+                s.read_at("book.epub", u64::from(round) * 100, &mut buf),
+                Ok(100)
+            );
+        }
+        for (n, name) in files.iter().enumerate() {
+            assert_eq!(s.size(name), Ok(60));
+            let mut all = [0u8; 60];
+            assert_eq!(s.read_at(name, 0, &mut all), Ok(60));
+            let want: Vec<u8> = (0..30u8).flat_map(|r| [r, n as u8]).collect();
+            assert_eq!(&all[..], &want[..], "{name}");
+        }
+        // Listed with their sizes as appended.
+        assert!(names(&s, ".cache").iter().all(|(_, _, size)| *size == 60));
+        // Written back on sync: opened anew, a file has it all.
+        s.append(&files[0], b"end").unwrap();
+        s.sync().unwrap();
+        let mut fresh = s.root().open_file(&files[0]).unwrap();
+        assert_eq!(fresh.seek(SeekFrom::End(0)).unwrap(), 63);
+        // And moved with it all.
+        s.append(&files[1], b"end").unwrap();
+        s.rename(&files[1], "moved.bin").unwrap();
+        assert_eq!(s.size("moved.bin"), Ok(63));
+        let mut fresh = s.root().open_file("moved.bin").unwrap();
+        assert_eq!(fresh.seek(SeekFrom::End(0)).unwrap(), 63);
     }
 
     #[test]

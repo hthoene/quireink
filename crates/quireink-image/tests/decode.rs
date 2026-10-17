@@ -85,6 +85,16 @@ fn reduce(image: &Collect, factor: u32) -> Vec<u8> {
 }
 
 #[test]
+fn jpeg_made_smaller_as_it_is_decoded() {
+    // 800×1104 for 400 at most: decoded at half its size (its blocks' lower
+    // frequencies), not whole and averaged by 3; at least 400 stays.
+    let image = decoded(include_bytes!("data/alice-cover.jpg"), 400);
+    assert_eq!((image.width, image.height), (400, 552));
+    let diff = difference(&reduce(&image, 2), include_bytes!("data/alice-cover.gray4"));
+    assert!(diff < 4.0, "mean difference {diff}");
+}
+
+#[test]
 fn progressive_jpeg_matches_reference() {
     // 4:2:0 colour, ten scans, restart markers.
     let data = include_bytes!("data/alice-progressive.jpg");

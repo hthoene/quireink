@@ -91,4 +91,9 @@ impl Storage for Traced {
         note(|| format!("remove_dir_all {path}"));
         self.0.remove_dir_all(path)
     }
+
+    fn sync(&self) -> Result<(), StorageError> {
+        note(|| "sync".into());
+        self.0.sync()
+    }
 }

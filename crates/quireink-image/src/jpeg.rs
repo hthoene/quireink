@@ -158,12 +158,6 @@ impl<'r, 'a> Bits<'r, 'a> {
     }
 }
 
-/// Inverse DCT of one block (dequantized coefficients in natural order),
-/// written to `out` with stride `stride`, clamped to 0 to 255.
-fn idct(coef: &[i32; 64], out: &mut [u8], stride: usize) {
-    idct_scaled(coef, 8, out, stride);
-}
-
 /// The cosine basis c[u][x] = C(u) cos((2x+1)uπ/2n) / 2, scaled by 2^12,
 /// for blocks of n = 8, 4, 2 or 1 pixels a side.
 const C8: [[i32; 8]; 8] = [
@@ -450,17 +444,32 @@ fn scan(
     let luma = components[0];
     // Luma at less than full resolution is rare; it is stretched.
     let (sx, sy) = (h_max / luma.h, v_max / luma.v);
-    let mcu_w = 8 * h_max;
-    let mcu_h = 8 * v_max;
-    let mcus_x = (width as usize).div_ceil(mcu_w);
-    let mcus_y = (height as usize).div_ceil(mcu_h);
+    let mcus_x = (width as usize).div_ceil(8 * h_max);
+    let mcus_y = (height as usize).div_ceil(8 * v_max);
+
+    // Each block decoded at n×n pixels of its 8×8 (8, 4, 2 or 1): an image
+    // made smaller is made smaller as it is decoded, from its lowest
+    // frequencies, not decoded whole and averaged. Then averaged further
+    // only while it stays at least `max_side` on its longer side.
+    let factor = factor_for(width, height, max_side);
+    let n = match factor {
+        1 => 8,
+        2..=3 => 4,
+        4..=7 => 2,
+        _ => 1,
+    };
+    let scale = (8 / n) as u32;
+    let (out_width, out_height) = (width.div_ceil(scale), height.div_ceil(scale));
+    let rest = (out_width.max(out_height) / max_side.max(1)).max(1);
+    let mcu_w = n * h_max;
+    let mcu_h = n * v_max;
     let row_width = mcus_x * mcu_w;
 
-    let factor = factor_for(width, height, max_side);
     // Colour where it is wanted and the image has it (luma and chroma).
     let color = sink.wants_color() && components.len() == 3;
-    let mut scaler = Downscaler::new(width, factor, if color { 3 } else { 1 })?;
-    sink.start(scaler.out_width(), height.div_ceil(factor))?;
+    let mut scaler = Downscaler::new(out_width, rest, if color { 3 } else { 1 })?;
+    sink.start(scaler.out_width(), out_height.div_ceil(rest))?;
+    let height = out_height;
 
     // One row of MCUs of luma at full resolution, and for colour of each
     // chroma component stretched to it.
@@ -543,7 +552,7 @@ fn scan(
                         if index != 0 && !color {
                             continue;
                         }
-                        idct(&coef, &mut block, 8);
+                        idct_scaled(&coef, n, &mut block, n);
                         // Place the block, stretched where the component
                         // has less resolution than the largest.
                         let (sx, sy) = if index == 0 {
@@ -556,12 +565,12 @@ fn scan(
                             1 => &mut chroma[0],
                             _ => &mut chroma[1],
                         };
-                        let x0 = (mx * h_max + bx * sx) * 8;
-                        let y0 = by * sy * 8;
-                        for y in 0..8 * sy {
-                            for x in 0..8 * sx {
+                        let x0 = (mx * h_max + bx * sx) * n;
+                        let y0 = by * sy * n;
+                        for y in 0..n * sy {
+                            for x in 0..n * sx {
                                 let at = (y0 + y) * row_width + x0 + x;
-                                plane[at] = block[(y / sy) * 8 + x / sx];
+                                plane[at] = block[(y / sy) * n + x / sx];
                             }
                         }
                     }
@@ -626,7 +635,7 @@ mod tests {
         // DC 80 → 80/8 = 10 above mid-gray.
         coef[0] = 80;
         let mut out = [0u8; 64];
-        idct(&coef, &mut out, 8);
+        idct_scaled(&coef, 8, &mut out, 8);
         assert!(out.iter().all(|&v| (137..=139).contains(&v)), "{out:?}");
     }
 }

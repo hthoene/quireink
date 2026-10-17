@@ -1693,7 +1693,10 @@ impl Kernel {
         self.output
             .commands
             .push(Command::Emit(events::SUSPEND, Params::new()));
-        self.finish()
+        let effects = self.finish();
+        // What plugins saved, and what storage kept back, written.
+        let _ = self.shared.storage.sync();
+        effects
     }
 
     /// The screen has another size, e.g. turned (see
