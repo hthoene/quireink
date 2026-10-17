@@ -6,6 +6,11 @@ change the plugin SDK.
 
 ## [Unreleased]
 
+- X4: on battery the processor sleeps (light sleep, about 0.1 mA) while
+  there is nothing to do, waking every 30 ms to read the buttons and for
+  what is due; before, it spun at full speed (about 20 mA) all the time
+  it was awake. On USB it stays awake for the computer (`idle sleep
+  <seconds>` over USB tries the battery's way for a while).
 - Battery use (new plugin, under Tools): records the battery about once
   a minute while the device is awake, with what it did, and shows the
   charge now, this time awake (pages, refreshes), the use on battery an

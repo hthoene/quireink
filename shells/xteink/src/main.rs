@@ -66,6 +66,9 @@ const FRAME_ROWS: u16 = 192;
 const POLL_MS: u64 = 10;
 /// How often the battery is read.
 const STATUS_MS: u64 = 60_000;
+/// On battery, the longest the processor sleeps between readings of the
+/// buttons (a press lasts 80 ms and more).
+const IDLE_MS: u64 = 30;
 /// SPI speeds: an SD card starts slowly.
 const CARD_START_KHZ: u32 = 400;
 const SPI_MHZ: u32 = 20;
@@ -246,6 +249,11 @@ fn main() -> ! {
         warn!("{warning}");
     }
 
+    // Light sleeps while idle on battery, the deep one at the end.
+    let mut low_power = LowPower::new(p.LPWR);
+    // Light sleeps on USB too for a while (`idle sleep` over USB), for
+    // trying them.
+    let mut sleep_on_usb_until: Option<Instant> = None;
     let mut status_read: Option<Instant> = None;
     let mut wake_at: Option<Instant> = None;
     let effects = kernel.start(now());
@@ -301,7 +309,8 @@ fn main() -> ! {
             power_latch.set_low();
             power.listen(Event::LowLevel);
             let _ = power.apply_wakeup_config(&WakeupConfig::default().with_low_power_path(true));
-            let mut low_power = LowPower::new(p.LPWR);
+            // Only the power button wakes it, no alarm of a light sleep.
+            low_power.clear_wakeup_deadline();
             low_power.sleep_deep(RtcSleepConfig::deep());
         }
 
@@ -336,7 +345,10 @@ fn main() -> ! {
         }
 
         let command = remote.poll();
-        if let Some(remote::Command::Refresh(full)) = command {
+        if let Some(remote::Command::IdleSleep(seconds)) = command {
+            sleep_on_usb_until = Some(Instant(now().0 + seconds * 1000));
+            esp_println::println!("QI:OK");
+        } else if let Some(remote::Command::Refresh(full)) = command {
             let refresh = if full { Refresh::Full } else { Refresh::Fast };
             let result = display.refresh(refresh, false);
             esp_println::println!("QI:OK {result:?}");
@@ -384,7 +396,32 @@ fn main() -> ! {
             }
             sleep |= apply(&mut kernel, &mut display, effects, &mut wake_at);
         }
-        delay.delay_millis(POLL_MS as u32);
+        if sleep_on_usb_until.is_some_and(|until| until <= now()) {
+            sleep_on_usb_until = None;
+        }
+        if usb.is_high() && sleep_on_usb_until.is_none() {
+            // In reach of a computer (its log, remote control), which a
+            // light sleep would cut off.
+            delay.delay_millis(POLL_MS as u32);
+        } else {
+            // On battery the processor sleeps until there is something to
+            // do or the buttons are to be read again: a light sleep takes
+            // some 0.1 mA, spinning at full speed some 20.
+            let mut until = now().0 + IDLE_MS;
+            if let Some(at) = wake_at {
+                until = until.min(at.0);
+            }
+            if let Some(read) = status_read {
+                until = until.min(read.0 + STATUS_MS);
+            }
+            if until > now().0 {
+                low_power.set_wakeup_deadline(
+                    esp_hal::time::Instant::EPOCH + esp_hal::time::Duration::from_millis(until),
+                );
+                low_power.sleep_light(RtcSleepConfig::default());
+                input::sample_now();
+            }
+        }
     }
 }
 

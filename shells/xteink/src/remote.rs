@@ -26,6 +26,9 @@
 //! - `put <size> <path>`: a file for the storage (the SD card), answered
 //!   with `QI:READY`; then lines `data <hex>` until all its bytes came, and
 //!   `QI:OK <size>` once it is written;
+//! - `idle sleep <seconds>`: while idle, light sleep as on battery for
+//!   that long (`QI:OK`; the connection goes meanwhile), then spin again
+//!   as on USB;
 //! - `get <path>`: a file of the storage, as `QI:SIZE <size>`, then
 //!   `QI:DATA <hex>` lines and `QI:END` (e.g. the battery's log).
 //!
@@ -66,6 +69,8 @@ pub enum Command {
     /// The panel refreshed from the controller's memory, full or fast (for
     /// the main loop, which has the display).
     Refresh(bool),
+    /// Light sleep while idle even on USB, for so many seconds.
+    IdleSleep(u64),
     /// A file of so many bytes for that path.
     Put(usize, String),
     Get(String),
@@ -134,7 +139,7 @@ impl Remote {
         match command {
             Command::Press(name, ms) => return Some((name, ms)),
             // The main loop does it; asked here, nothing.
-            Command::Refresh(_) => println!("QI:ERR refresh"),
+            Command::Refresh(_) | Command::IdleSleep(_) => println!("QI:ERR refresh"),
             Command::Shot => {
                 shot(kernel, display);
             }
@@ -284,6 +289,10 @@ fn parse(line: &str) -> Option<Command> {
         "refresh" => match words.next()? {
             "full" => Command::Refresh(true),
             "fast" => Command::Refresh(false),
+            _ => return None,
+        },
+        "idle" => match words.next()? {
+            "sleep" => Command::IdleSleep(words.next()?.parse().ok()?),
             _ => return None,
         },
         "trace" => match words.next()? {

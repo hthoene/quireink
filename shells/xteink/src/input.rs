@@ -155,6 +155,16 @@ pub fn start(mut sampler: Sampler) {
     critical_section::with(|cs| SAMPLER.replace(cs, Some(sampler)));
 }
 
+/// Reads the buttons now, e.g. after a light sleep, in which the timer
+/// that reads them stops.
+pub fn sample_now() {
+    critical_section::with(|cs| {
+        if let Some(sampler) = SAMPLER.borrow_ref_mut(cs).as_mut() {
+            sampler.read();
+        }
+    });
+}
+
 /// The next press or release, oldest first.
 pub fn next() -> Option<Change> {
     critical_section::with(|cs| {
