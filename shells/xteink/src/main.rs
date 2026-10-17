@@ -19,6 +19,7 @@ extern crate alloc;
 
 mod card;
 mod input;
+mod power;
 mod remote;
 mod sent;
 mod traced;
@@ -34,7 +35,7 @@ use esp_hal::delay::Delay;
 use esp_hal::gpio::{Event, Input, InputConfig, Level, Output, OutputConfig, Pull, WakeupConfig};
 use esp_hal::main;
 use esp_hal::peripherals::ADC1;
-use esp_hal::rtc_cntl::sleep::{LowPower, RtcSleepConfig};
+use esp_hal::rtc_cntl::sleep::LowPower;
 use esp_hal::spi::Mode;
 use esp_hal::spi::master::{Config as SpiConfig, Spi};
 use esp_hal::time::Rate;
@@ -69,6 +70,10 @@ const STATUS_MS: u64 = 60_000;
 /// On battery, the longest the processor sleeps between readings of the
 /// buttons (a press lasts 80 ms and more).
 const IDLE_MS: u64 = 30;
+/// The X4 starts again if its main loop does not come by for this long
+/// (the longest work, a book's first opening, takes some 5 s): by the
+/// RTC's watchdog (counting in light sleep too), and the timer group's.
+const WATCHDOG_S: (u64, u64) = (20, 30);
 /// SPI speeds: an SD card starts slowly.
 const CARD_START_KHZ: u32 = 400;
 const SPI_MHZ: u32 = 20;
@@ -125,7 +130,9 @@ fn main() -> ! {
     esp_alloc::heap_allocator!(size: HEAP_SIZE);
     esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: RECLAIMED_SIZE);
     let delay = Delay::new();
-    info!("QuireInk starting");
+    power::note_start();
+    let (place, naps, reason) = power::last_run();
+    info!("QuireInk starting (reset: {reason:?}, last at {place}, naps {naps})");
 
     // One SPI bus for the display and the card, with DMA for all but
     // short transfers: the processor fed the bus a word at a time and
@@ -213,6 +220,11 @@ fn main() -> ! {
     let power = Input::new(p.GPIO3, InputConfig::default().with_pull(Pull::Up));
     let usb = Input::new(p.GPIO20, InputConfig::default());
     let timers = TimerGroup::new(p.TIMG0);
+    power::watch(
+        esp_hal::rtc_cntl::Rtc::new(p.RTC_TIMER),
+        TimerGroup::new(p.TIMG1).wdt,
+        WATCHDOG_S,
+    );
     input::start(input::Sampler::new(
         PeriodicTimer::new(timers.timer0),
         adc,
@@ -250,7 +262,7 @@ fn main() -> ! {
     }
 
     // Light sleeps while idle on battery, the deep one at the end.
-    let mut low_power = LowPower::new(p.LPWR);
+    power::init(LowPower::new(p.LPWR));
     // Light sleeps on USB too for a while (`idle sleep` over USB), for
     // trying them.
     let mut sleep_on_usb_until: Option<Instant> = None;
@@ -268,6 +280,7 @@ fn main() -> ! {
             info!("sleeping");
             // Released first: held, the button would wake it at once.
             while input::power_down() {
+                power::feed();
                 delay.delay_millis(10);
             }
             // On USB power it stays in reach of a computer (its log, remote
@@ -276,6 +289,7 @@ fn main() -> ! {
             if usb.is_high() {
                 loop {
                     delay.delay_millis(POLL_MS as u32);
+                    power::feed();
                     if input::power_down() {
                         break;
                     }
@@ -290,6 +304,7 @@ fn main() -> ! {
                     }
                 }
                 while input::power_down() {
+                    power::feed();
                     delay.delay_millis(10);
                 }
                 input::rearm();
@@ -309,13 +324,16 @@ fn main() -> ! {
             power_latch.set_low();
             power.listen(Event::LowLevel);
             let _ = power.apply_wakeup_config(&WakeupConfig::default().with_low_power_path(true));
-            // Only the power button wakes it, no alarm of a light sleep.
-            low_power.clear_wakeup_deadline();
-            low_power.sleep_deep(RtcSleepConfig::deep());
+            power::deep();
         }
 
+        power::feed();
+        power::mark(power::at::LOOP);
+        let battery = usb.is_low() || sleep_on_usb_until.is_some();
+        power::allow(battery);
         let at = now();
         if status_read.is_none_or(|read| at.since(read) >= STATUS_MS) {
+            power::mark(power::at::STATUS);
             status_read = Some(at);
             let millivolts = input::millivolts();
             let status = SystemStatus {
@@ -339,6 +357,7 @@ fn main() -> ! {
             };
             kernel_time = at.max(kernel_time);
             let started = now();
+            power::mark(power::at::INPUT);
             let effects = kernel.handle(Instant(kernel_time), InputEvent::Button { name, state });
             info!("{name}: {} ms", now().since(started));
             sleep |= apply(&mut kernel, &mut display, effects, &mut wake_at);
@@ -346,7 +365,8 @@ fn main() -> ! {
 
         let command = remote.poll();
         if let Some(remote::Command::IdleSleep(seconds)) = command {
-            sleep_on_usb_until = Some(Instant(now().0 + seconds * 1000));
+            // At most ten minutes: the link is gone meanwhile.
+            sleep_on_usb_until = Some(Instant(now().0 + seconds.min(600) * 1000));
             esp_println::println!("QI:OK");
         } else if let Some(remote::Command::Refresh(full)) = command {
             let refresh = if full { Refresh::Full } else { Refresh::Fast };
@@ -387,6 +407,7 @@ fn main() -> ! {
         }
 
         if wake_at.is_some_and(|due| due <= now()) {
+            power::mark(power::at::TICK);
             let started = now();
             kernel_time = started.0;
             let effects = kernel.tick(started);
@@ -397,30 +418,23 @@ fn main() -> ! {
             sleep |= apply(&mut kernel, &mut display, effects, &mut wake_at);
         }
         if sleep_on_usb_until.is_some_and(|until| until <= now()) {
-            sleep_on_usb_until = None;
+            // Started again: whatever the light sleeps did to the USB link,
+            // the computer finds the X4 again.
+            power::mark(power::at::TRIED);
+            esp_hal::system::software_reset();
         }
-        if usb.is_high() && sleep_on_usb_until.is_none() {
-            // In reach of a computer (its log, remote control), which a
-            // light sleep would cut off.
-            delay.delay_millis(POLL_MS as u32);
-        } else {
-            // On battery the processor sleeps until there is something to
-            // do or the buttons are to be read again: a light sleep takes
-            // some 0.1 mA, spinning at full speed some 20.
-            let mut until = now().0 + IDLE_MS;
-            if let Some(at) = wake_at {
-                until = until.min(at.0);
-            }
-            if let Some(read) = status_read {
-                until = until.min(read.0 + STATUS_MS);
-            }
-            if until > now().0 {
-                low_power.set_wakeup_deadline(
-                    esp_hal::time::Instant::EPOCH + esp_hal::time::Duration::from_millis(until),
-                );
-                low_power.sleep_light(RtcSleepConfig::default());
-                input::sample_now();
-            }
+        // On battery the processor sleeps until there is something to do
+        // or the buttons are to be read again; on USB it stays in reach of
+        // the computer (see `power`).
+        let mut until = now().0 + if battery { IDLE_MS } else { POLL_MS };
+        if let Some(at) = wake_at {
+            until = until.min(at.0);
+        }
+        if let Some(read) = status_read {
+            until = until.min(read.0 + STATUS_MS);
+        }
+        if !power::nap_until(until) {
+            delay.delay_millis(until.saturating_sub(now().0) as u32);
         }
     }
 }
@@ -471,6 +485,7 @@ where
         esp_hal::system::software_reset();
     }
     if let Some((area, mode)) = effects.refresh() {
+        power::mark(power::at::SHOWING);
         let refresh = match mode {
             // Every pixel driven with a warm panel's waveform (1.6 s), as the
             // stock firmware cleans the panel every few pages.

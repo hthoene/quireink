@@ -10,7 +10,13 @@ change the plugin SDK.
   there is nothing to do, waking every 30 ms to read the buttons and for
   what is due; before, it spun at full speed (about 20 mA) all the time
   it was awake. On USB it stays awake for the computer (`idle sleep
-  <seconds>` over USB tries the battery's way for a while).
+  <seconds>` over USB tries the battery's way for a while, then starts
+  again).
+- X4: two watchdogs start it again if the firmware stops coming by: the
+  RTC's after 20 s, counting in light sleep too (a sleep that does not
+  end), and a timer group's after 30 s; before, a hang kept it on until
+  the battery was empty. Where it was is kept through the reset (`boot`
+  over USB says it, with the reason).
 - Battery use (new plugin, under Tools): records the battery about once
   a minute while the device is awake, with what it did, and shows the
   charge now, this time awake (pages, refreshes), the use on battery an

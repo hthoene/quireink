@@ -26,9 +26,15 @@
 //! - `put <size> <path>`: a file for the storage (the SD card), answered
 //!   with `QI:READY`; then lines `data <hex>` until all its bytes came, and
 //!   `QI:OK <size>` once it is written;
-//! - `idle sleep <seconds>`: while idle, light sleep as on battery for
-//!   that long (`QI:OK`; the connection goes meanwhile), then spin again
-//!   as on USB;
+//! - `idle sleep <seconds>`: light sleep as on battery for that long
+//!   (`QI:OK`; the connection goes meanwhile), then start again;
+//! - `hang <seconds>`: hangs that long (at most a minute) without the
+//!   watchdog fed, to try that it starts the X4 again (`QI:OK` if not);
+//! - `boot`: `QI:BOOT <reason> <place> <naps>`, why the X4 last started,
+//!   where the run before was then (see `power::at`) and its light sleeps,
+//!   e.g. after a watchdog's reset or an `idle sleep`;
+//! - `nap <seconds>`: one light sleep that long (at most a minute), then a
+//!   new start, to try that the RTC's watchdog starts it again first;
 //! - `get <path>`: a file of the storage, as `QI:SIZE <size>`, then
 //!   `QI:DATA <hex>` lines and `QI:END` (e.g. the battery's log).
 //!
@@ -74,6 +80,9 @@ pub enum Command {
     /// A file of so many bytes for that path.
     Put(usize, String),
     Get(String),
+    Boot,
+    Hang(u64),
+    Nap(u64),
 }
 
 /// Reads commands from USB, a line at a time.
@@ -157,6 +166,21 @@ impl Remote {
             }
             Command::Put(size, path) => self.receive(kernel, size, &path),
             Command::Get(path) => send(kernel, &path),
+            Command::Hang(seconds) => {
+                println!("QI:HANGING");
+                let until = esp_hal::time::Instant::now()
+                    + esp_hal::time::Duration::from_secs(seconds.min(60));
+                while esp_hal::time::Instant::now() < until {}
+                println!("QI:OK");
+            }
+            Command::Nap(seconds) => {
+                println!("QI:NAPPING");
+                crate::power::try_long_nap(seconds.min(60));
+            }
+            Command::Boot => {
+                let (place, naps, reason) = crate::power::last_run();
+                println!("QI:BOOT {reason:?} {place} {naps}");
+            }
             Command::Profile(true) => {
                 crate::input::profile(true);
                 println!("QI:OK");
@@ -223,6 +247,7 @@ impl Remote {
         let mut piece = Vec::with_capacity(CHUNK);
         let (mut got, mut last) = (0, millis());
         while got < size {
+            crate::power::feed();
             let Some(line) = self.next_line() else {
                 if millis() - last > QUIET_MS {
                     return println!("QI:ERR {path}: {got} of {size} bytes came");
@@ -260,6 +285,7 @@ fn send(kernel: &Kernel, path: &str) {
     let mut line = String::with_capacity(buf.len() * 2);
     let mut at = 0u64;
     while at < size {
+        crate::power::feed();
         let Ok(n) = storage.read_at(path, at, &mut buf) else {
             return println!("QI:ERR {path}: not readable");
         };
@@ -285,6 +311,9 @@ fn parse(line: &str) -> Option<Command> {
         "screen" => Command::Screen,
         "describe" => Command::Describe,
         "heap" => Command::Heap,
+        "boot" => Command::Boot,
+        "hang" => Command::Hang(words.next()?.parse().ok()?),
+        "nap" => Command::Nap(words.next()?.parse().ok()?),
         "input" => Command::Input,
         "refresh" => match words.next()? {
             "full" => Command::Refresh(true),
