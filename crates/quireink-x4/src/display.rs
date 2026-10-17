@@ -139,6 +139,9 @@ pub struct Display<SPI, DC, RST, BUSY, D> {
     /// Nothing shown since [`Display::init`]: the controller does not know
     /// what the panel shows, so a fast refresh would compare with nothing.
     fresh: bool,
+    /// The temperature written for a half refresh holds: the next refresh
+    /// reads the panel's own again.
+    warm: bool,
     buffer: Vec<u8>,
 }
 
@@ -159,6 +162,7 @@ where
             delay,
             powered: false,
             fresh: true,
+            warm: false,
             buffer: Vec::new(),
         }
     }
@@ -347,10 +351,23 @@ where
             Refresh::Half => {
                 // A warm panel's waveform: shorter.
                 self.command(cmd::WRITE_TEMPERATURE, &[0x5A])?;
+                self.warm = true;
                 0xD4
+            }
+            // After a half refresh the written temperature still holds, and
+            // fast refreshes for a hot panel drive too weakly at room
+            // temperature: the text of the page before stayed. The panel's
+            // own temperature again (0x20) first.
+            Refresh::Fast if self.warm => {
+                self.warm = false;
+                0x3C
             }
             Refresh::Fast => 0x1C,
         };
+        if refresh == Refresh::Full {
+            // Reads the panel's own temperature (0x20 in 0x34).
+            self.warm = false;
+        }
         if !self.powered {
             // Clock and analog power on first.
             sequence |= 0xC0;
@@ -811,5 +828,25 @@ mod tests {
         let sequences: Vec<u8> = c.refreshes.iter().map(|&(_, two)| two).collect();
         assert_eq!(sequences, [0xF4, 0x1C, 0xD7]);
         assert_eq!(c.commands.last(), Some(&cmd::DEEP_SLEEP));
+    }
+
+    #[test]
+    fn after_a_half_refresh_the_panels_own_temperature() {
+        let controller = Controller::new();
+        let mut display = Display::new(
+            Spi(controller.clone()),
+            Dc(controller.clone()),
+            Pin,
+            Busy,
+            Delay,
+        );
+        display.init().unwrap();
+        for refresh in [Refresh::Full, Refresh::Half, Refresh::Fast, Refresh::Fast] {
+            display.refresh(refresh, false).unwrap();
+        }
+        let c = controller.borrow();
+        let sequences: Vec<u8> = c.refreshes.iter().map(|&(_, two)| two).collect();
+        // The fast one right after reads the temperature (0x20) again.
+        assert_eq!(sequences, [0xF4, 0xD4, 0x3C, 0x1C]);
     }
 }

@@ -376,7 +376,7 @@ where
     if effects.restart() {
         esp_hal::system::software_reset();
     }
-    if let Some((_, mode)) = effects.refresh() {
+    if let Some((area, mode)) = effects.refresh() {
         let refresh = match mode {
             // Every pixel driven, with the shorter waveform of a warm panel:
             // the ghosts go as well, in a third of the time (the display
@@ -422,7 +422,11 @@ where
             warn!("display: {e:?}");
         }
         info!(
-            "frame: drawn in {} ms, shown in {} ms, sent again in {} ms",
+            "frame {mode:?} {},{} {}x{}: drawn in {} ms, shown in {} ms, sent again in {} ms",
+            area.x,
+            area.y,
+            area.width,
+            area.height,
             drawn.since(started),
             shown.since(drawn),
             now().since(shown)
