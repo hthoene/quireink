@@ -2,7 +2,7 @@
 //! it did meanwhile (screen refreshes, input, pages turned), and shows how
 //! much it uses an hour awake and for 100 pages, and how long it lasts.
 //!
-//! The record is a log on the device's storage (see [`log`]), kept for
+//! The record is a log on the device's storage (see its `log` module), kept for
 //! analysis on a computer too: where the battery goes is what to make
 //! leaner next.
 
