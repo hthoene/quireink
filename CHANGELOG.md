@@ -57,6 +57,8 @@ change the plugin SDK.
   the loop of bold ones; the X4 turns black and white bands eight by
   eight pixels at once for its panel. A long chapter of notes no longer
   runs out of memory while converted.
+- X4: the full refresh against ghosts takes the shorter waveform of a warm
+  panel (1.6 s instead of 3.5); the slow one only after starting.
 - X4 remote: `--profile` shows where the time goes (the functions the
   processor was in, every 5 ms), `--trace` what is read and written.
 - X4: on USB power, sleep shows the sleep screen and keeps the USB

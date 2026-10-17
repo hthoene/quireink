@@ -375,7 +375,10 @@ where
     }
     if let Some((_, mode)) = effects.refresh() {
         let refresh = match mode {
-            RefreshMode::Full => Refresh::Full,
+            // Every pixel driven, with the shorter waveform of a warm panel:
+            // the ghosts go as well, in a third of the time (the display
+            // takes its slow full refresh after starting by itself).
+            RefreshMode::Full => Refresh::Half,
             RefreshMode::Partial | RefreshMode::Fast => Refresh::Fast,
         };
         let planes = if refresh == Refresh::Fast {
