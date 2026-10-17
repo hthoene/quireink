@@ -227,7 +227,8 @@ fn main() -> ! {
                         break;
                     }
                     if let Some(command) = remote.poll()
-                        && let Some((name, _)) = remote::answer(&mut kernel, command)
+                        && let Some((name, _)) =
+                            remote::answer(&mut kernel, &DEVICE.display, command)
                     {
                         esp_println::println!("QI:OK");
                         if name == quireink_platform::buttons::POWER {
@@ -295,7 +296,7 @@ fn main() -> ! {
         }
 
         if let Some(command) = remote.poll()
-            && let Some((name, ms)) = remote::answer(&mut kernel, command)
+            && let Some((name, ms)) = remote::answer(&mut kernel, &DEVICE.display, command)
         {
             if remote_release.is_some() {
                 esp_println::println!("QI:BUSY");

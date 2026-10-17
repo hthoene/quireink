@@ -21,7 +21,7 @@ use core::fmt::Write;
 use esp_hal::peripherals::USB_DEVICE;
 use esp_println::println;
 use quireink_core::Kernel;
-use quireink_platform::FrameView;
+use quireink_platform::{DisplayInfo, FrameView};
 use quireink_x4::buttons;
 
 /// A line is never longer.
@@ -107,11 +107,15 @@ fn button(name: &str) -> Option<&'static str> {
 
 /// Answers a command that only asks (the screen, a screenshot, what it
 /// shows, the heap); a button press it gives back for the caller to make.
-pub fn answer(kernel: &mut Kernel, command: Command) -> Option<(&'static str, u64)> {
+pub fn answer(
+    kernel: &mut Kernel,
+    display: &DisplayInfo,
+    command: Command,
+) -> Option<(&'static str, u64)> {
     match command {
         Command::Press(name, ms) => return Some((name, ms)),
         Command::Shot => {
-            shot(kernel);
+            shot(kernel, display);
         }
         Command::Describe => describe(kernel),
         Command::Screen => {
@@ -129,9 +133,9 @@ pub fn answer(kernel: &mut Kernel, command: Command) -> Option<(&'static str, u6
     None
 }
 
-/// Sends the screen; `false` while changes wait to be shown (ask again).
-pub fn shot(kernel: &mut Kernel) -> bool {
-    let display = &kernel.device().display;
+/// Sends the whole screen, `display` (screens may have less of it); `false`
+/// while changes wait to be shown (ask again).
+pub fn shot(kernel: &mut Kernel, display: &DisplayInfo) -> bool {
     let header = (
         display.width,
         display.height,
