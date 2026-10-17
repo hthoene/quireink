@@ -26,6 +26,8 @@ pub struct Framebuffer {
     inverted: bool,
     /// Saturation of RGB pixels drawn, in percent (100: as they are).
     saturation: u16,
+    /// Pixels of pictures drawn since [`Framebuffer::take_pictured`].
+    pictured: u32,
 }
 
 impl Framebuffer {
@@ -64,6 +66,7 @@ impl Framebuffer {
             dirty: None,
             inverted: false,
             saturation: 100,
+            pictured: 0,
         })
     }
 
@@ -289,7 +292,14 @@ impl Framebuffer {
     /// Sets the pixel at `(x, y)` (inside the band) to `gray`, ordered
     /// dithered for formats with few gray levels, so photos and
     /// illustrations keep their tones.
+    /// Pixels of pictures (photos, illustrations) drawn since the last
+    /// call: panels that keep ghosts of them want a full refresh after.
+    pub fn take_pictured(&mut self) -> u32 {
+        core::mem::take(&mut self.pictured)
+    }
+
     pub(crate) fn put_gray(&mut self, x: u16, y: u16, gray: u8) {
+        self.pictured = self.pictured.saturating_add(1);
         /// 4×4 Bayer matrix.
         const BAYER: [[u8; 4]; 4] = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
         let gray = match self.format.gray_levels() {
@@ -311,6 +321,7 @@ impl Framebuffer {
     /// formats; on gray ones to its gray, as [`Framebuffer::put_gray`].
     pub(crate) fn put_rgb(&mut self, x: u16, y: u16, rgb: [u8; 3]) {
         if self.format.is_color() {
+            self.pictured = self.pictured.saturating_add(1);
             let rgb = saturate(rgb, self.saturation);
             let value = self.encode(Color::rgb(rgb[0], rgb[1], rgb[2]));
             self.store(x, y, value);

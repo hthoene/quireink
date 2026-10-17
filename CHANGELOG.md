@@ -69,6 +69,9 @@ change the plugin SDK.
 - X4: the buttons are read with the ADC calibrated for its offset.
   Uncalibrated, every reading came out some 1600 too high: the lower page
   button turned back, and the two left front buttons did nothing.
+- A screen with large pictures (over 15 % of it, such as a book's cover
+  page) is left with a full refresh: e-paper keeps strong ghosts of them
+  after a fast one. Covers in a list stay below that.
 - X4: on USB power, sleep shows the sleep screen and keeps the USB
   connection, so a computer can still read the log and wake it.
 

@@ -88,6 +88,10 @@ pub use quireink_sdk as sdk;
 
 /// Commands may trigger further commands; this bounds runaway loops.
 const MAX_COMMAND_ROUNDS: usize = 16;
+/// A frame with pictures over this share of the screen (percent) is left
+/// with a full refresh: e-paper keeps ghosts of large pictures where text
+/// leaves none. Covers in a list stay below it.
+const PICTURES_PERCENT: u32 = 15;
 /// How long the row of hints shows on a screen that has it on a press.
 const HINTS_MS: u64 = 4000;
 /// Default memory for glyphs rasterized at runtime.
@@ -446,6 +450,7 @@ impl KernelBuilder {
             hint_height: 0,
             hints: Vec::new(),
             hints_until: None,
+            pictures_shown: false,
             last_activity: Instant(0),
             scope: None,
             requests: Vec::new(),
@@ -720,6 +725,8 @@ pub struct Kernel {
     hints: Vec<Hint>,
     /// Until when the row shows over a screen that has it only on a press.
     hints_until: Option<Instant>,
+    /// The frame shown has large pictures (see [`PICTURES_PERCENT`]).
+    pictures_shown: bool,
     /// When the device was last used (input, a page turned), for sleeping
     /// by itself ([`settings::SLEEP_AFTER`](core_settings::SLEEP_AFTER)).
     last_activity: Instant,
@@ -1151,6 +1158,13 @@ impl Kernel {
                 break;
             }
         }
+        // Large pictures on the screen now: the next change of most of it
+        // refreshes in full.
+        let pictured = self.framebuffer.take_pictured();
+        let screen = u32::from(bounds.width) * u32::from(bounds.height);
+        let big = pictured.saturating_mul(100) >= screen.saturating_mul(PICTURES_PERCENT);
+        let most = u32::from(region.width) * u32::from(region.height) * 2 >= screen;
+        self.pictures_shown = big || (self.pictures_shown && !most);
         if let Some(path) = shot {
             let key = if writer.is_some_and(|w| w.is_complete()) {
                 "core.screenshot-saved"
@@ -2392,7 +2406,12 @@ impl Kernel {
                 .int(core_settings::FULL_REFRESH_INTERVAL.as_str())
                 .clamp(0, i64::from(u32::MAX)) as u32;
             let screen = self.framebuffer.bounds();
-            let requested = requested.unwrap_or(RefreshMode::Partial);
+            let mut requested = requested.unwrap_or(RefreshMode::Partial);
+            // Leaving large pictures: a fast refresh would keep their ghost.
+            let area = |r: Rect| u32::from(r.width) * u32::from(r.height);
+            if self.pictures_shown && area(dirty) * 2 >= area(screen) {
+                requested = RefreshMode::Full;
+            }
             let (mode, region) = self.refresh.decide(requested, dirty, screen, interval);
             let refresh = quireink_sdk::filters::Refresh {
                 mode,

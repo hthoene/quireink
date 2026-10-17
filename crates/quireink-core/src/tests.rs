@@ -2265,3 +2265,76 @@ fn a_row_of_hints_names_the_buttons_below_the_screen() {
     assert_eq!(made.borrow().last(), Some(&("home", 90)));
     assert_eq!(kernel.hint_row(), None);
 }
+
+/// A home screen that shows a picture over all of it while asked to.
+struct PicturePlugin(Rc<RefCell<bool>>);
+
+struct PictureScreen(Rc<RefCell<bool>>);
+
+impl Screen for PictureScreen {
+    fn draw(&mut self, canvas: &mut Canvas<'_>, env: &Env<'_>) {
+        if *self.0.borrow() {
+            let row = alloc::vec![128u8; usize::from(env.device.display.width)];
+            for y in 0..i32::from(env.device.display.height) {
+                canvas.draw_gray_row(0, y, &row);
+            }
+        } else {
+            canvas.fill_rect(0, 0, 10, 10, Color::BLACK);
+        }
+    }
+
+    fn on_action(&mut self, _: &Id, _: &mut Cx<'_, '_>) -> Handled {
+        Handled::No
+    }
+}
+
+impl Plugin for PicturePlugin {
+    fn manifest(&self) -> Manifest {
+        Manifest {
+            id: Id::new_static("picture"),
+            name: Cow::Borrowed("Picture"),
+            description: Cow::Borrowed(""),
+            version: Version::new(1, 0, 0),
+            sdk: SDK_VERSION,
+        }
+    }
+
+    fn register(&self, r: &mut dyn Registrar) -> Result<(), RegisterError> {
+        let shown = self.0.clone();
+        r.add_screen(ScreenSpec {
+            id: Id::new_static("picture.home"),
+            title: Cow::Borrowed("picture"),
+            factory: Box::new(move |_, _| Box::new(PictureScreen(shown.clone()))),
+        })?;
+        r.bind_slot(
+            slots::HOME,
+            Id::new_static("picture.home"),
+            Priority::DEFAULT,
+        )
+    }
+}
+
+#[test]
+fn leaving_a_large_picture_refreshes_in_full() {
+    let shown = Rc::new(RefCell::new(false));
+    let mut kernel = Kernel::builder(DEVICE)
+        .plugin(PicturePlugin(shown.clone()))
+        .build()
+        .unwrap();
+    kernel.start(Instant(0));
+    render(&mut kernel);
+    let mode = |effects: crate::Effects| effects.refresh().map(|(_, mode)| mode);
+    // A picture shown (drawn when rendered): asked as it is; leaving it,
+    // in full.
+    *shown.borrow_mut() = true;
+    kernel.apply(Command::Redraw(RefreshMode::Partial));
+    let effects = kernel.finish();
+    assert_eq!(mode(effects), Some(RefreshMode::Partial));
+    render(&mut kernel);
+    assert!(kernel.pictures_shown);
+    *shown.borrow_mut() = false;
+    kernel.apply(Command::Redraw(RefreshMode::Partial));
+    assert_eq!(mode(kernel.finish()), Some(RefreshMode::Full));
+    render(&mut kernel);
+    assert!(!kernel.pictures_shown);
+}
