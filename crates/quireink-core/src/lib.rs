@@ -486,8 +486,8 @@ impl KernelBuilder {
         kernel.shared.formats.set_color(color);
         // Pictures no larger than the screen shows them.
         let display = kernel.shared.device.display;
-        let side = u32::from(display.width.max(display.height));
-        kernel.shared.formats.set_image_side(side);
+        let fit = quireink_sdk::image::Fit::screen(display.width.into(), display.height.into());
+        kernel.shared.formats.set_image_fit(fit);
 
         // Passwords and keys.
         if let Ok(data) = quireink_sdk::read_file(

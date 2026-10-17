@@ -17,7 +17,7 @@ use alloc::vec::Vec;
 use crate::jpeg::{
     Bits, Component, Huffman, ZIGZAG, idct_scaled, read_huffman, read_quant, ycbcr_to_rgb,
 };
-use crate::{Downscaler, ImageError, ImageSink, Reader, factor_for, zeroed};
+use crate::{Downscaler, Fit, ImageError, ImageSink, Reader, block_side, zeroed};
 
 const MISSING: ImageError = ImageError::Invalid("missing Huffman table");
 
@@ -156,7 +156,7 @@ fn next_marker(reader: &mut Reader<'_>) -> Result<u8, ImageError> {
 pub(crate) fn decode(
     reader: &mut Reader<'_>,
     mut frame: Frame,
-    max_side: u32,
+    fit: Fit,
     sink: &mut dyn ImageSink,
 ) -> Result<(), ImageError> {
     let (width, height) = (frame.width as usize, frame.height as usize);
@@ -174,13 +174,11 @@ pub(crate) fn decode(
     };
     // The smallest output scale the requested size allows, else smaller
     // ones where memory is short; colour where it is wanted, else gray.
-    let factor = factor_for(frame.width, frame.height, max_side) as usize;
-    let largest = match factor {
-        1 => 8,
-        2..=3 => 4,
-        4..=7 => 2,
-        _ => 1,
-    };
+    let largest = block_side(
+        frame.width,
+        frame.height,
+        fit.size(frame.width, frame.height),
+    );
     let color = sink.wants_color() && frame.components.len() == 3;
     let mut coefficients = None;
     for kept in if color { [3, 1] } else { [1, 1] } {
@@ -234,7 +232,7 @@ pub(crate) fn decode(
             Err(_) => break,
         };
     }
-    output(&frame, &layout, &coefficients, max_side, sink)
+    output(&frame, &layout, &coefficients, fit, sink)
 }
 
 /// The kept coefficients of `components`, `n`×`n` a block.
@@ -533,12 +531,12 @@ fn decode_block(
 }
 
 /// Turns the kept coefficients into rows of gray (or colour, where
-/// chroma is kept), scaled down to fit `max_side`.
+/// chroma is kept), made as small as `fit` allows.
 fn output(
     frame: &Frame,
     layout: &Layout,
     coefficients: &[Coefficients],
-    max_side: u32,
+    fit: Fit,
     sink: &mut dyn ImageSink,
 ) -> Result<(), ImageError> {
     let n = coefficients.first().map_or(1, |c| c.n);
@@ -546,9 +544,14 @@ fn output(
     let scale = 8 / n;
     let out_width = (frame.width as usize).div_ceil(scale);
     let out_height = (frame.height as usize).div_ceil(scale);
-    let factor = factor_for(out_width as u32, out_height as u32, max_side);
-    let mut scaler = Downscaler::new(out_width as u32, factor, if color { 3 } else { 1 })?;
-    sink.start(scaler.out_width(), (out_height as u32).div_ceil(factor))?;
+    let size = fit.size(frame.width, frame.height);
+    let mut scaler = Downscaler::new(
+        out_width as u32,
+        out_height as u32,
+        size,
+        if color { 3 } else { 1 },
+    )?;
+    sink.start(scaler.out_width(), scaler.out_height())?;
 
     // One row of MCUs of each kept component at the output scale, each
     // stretched where it has less resolution than the largest.

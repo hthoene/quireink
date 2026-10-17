@@ -66,17 +66,27 @@ change the plugin SDK.
   refresh, which looked like a page turned by itself.
 - X4: the full refresh against ghosts takes the shorter waveform of a warm
   panel (1.6 s instead of 3.5); the slow one only after starting.
-- Pictures of books are decoded no larger than the screen shows them
-  (`OpenOptions::image_side`, from the device): a quarter of the pixels
-  on the X4, its cover page drawn in 1.2 s instead of 3.4. Pictures are
-  dithered in whole numbers. A JPEG made smaller is made smaller as it is
-  decoded, from the lower frequencies of its blocks.
+- Pictures of books are decoded no larger than the screen shows them,
+  upright or turned (`OpenOptions::image_fit`, a `Fit` from the device;
+  it was a longer side), in their proportions to the pixel: a cover on
+  the X4 is kept at 480 × 676, not 1500 × 2114, and its page drawn in
+  1 s instead of 3.4. A JPEG made smaller is made smaller as it is
+  decoded, from the lower frequencies of its blocks, then averaged to its
+  size; pictures are dithered in whole numbers. Sleep screen pictures are
+  kept at the screen's size too.
 - Storage on SD cards (the X4): files appended to stay open and are
   written back when they are wanted otherwise, when another file needs
   the room, or on `Storage::sync` (new; the kernel calls it before the
   device sleeps). A cover decoded in hundreds of pieces is no longer
-  looked up and written back for each: with the change above, the first
-  opening of a book with a large cover takes 9 s on the X4 instead of 22.
+  looked up and written back for each.
+- X4: the first opening of a book with a large cover takes 8.5 s instead
+  of 22, through the changes above and below.
+- X4: the SD card is read and written by QuireInk's own driver
+  (`quireink_x4::card`), a command at a time with the bus held, not a
+  bus transaction for every byte as `embedded-sdmmc` did.
+- X4: pages with pictures are sent to the panel's second memory as they
+  were kept, packed, in 80 ms, not drawn again in 2 s: the heap has the
+  64 KB more the bootloader leaves free.
 - X4 remote: `--profile` shows where the time goes (the functions the
   processor was in, every 5 ms), `--trace` what is read and written.
 - A button with nothing bound to its long press counts as it goes down,

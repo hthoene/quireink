@@ -179,13 +179,13 @@ fn picture(env: &Env<'_>) -> Option<ImageRef> {
         .storage
         .write(&data("next.txt"), format!("{}", next + 1).as_bytes());
     let display = env.device.display;
-    let side = u32::from(display.width.max(display.height));
+    let fit = quireink_sdk::image::Fit::screen(display.width.into(), display.height.into());
     // In colour on colour screens (ADR 0015).
     quireink_sdk::image::picture_from_file(
         env.storage,
         &format!("{folder}/{name}"),
         &data("picture.gray"),
-        side,
+        fit,
         env.device.display.format.is_color(),
     )
 }

@@ -190,7 +190,7 @@ impl HtmlDocument {
                     Default::default(),
                     self.styles,
                     false,
-                    convert::IMAGE_SIDE,
+                    convert::IMAGE_FIT,
                 )?
             }
         };

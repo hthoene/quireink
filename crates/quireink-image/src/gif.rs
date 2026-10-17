@@ -11,7 +11,7 @@
 
 use alloc::vec::Vec;
 
-use crate::{Downscaler, ImageError, ImageSink, Reader, factor_for, luma, zeroed};
+use crate::{Downscaler, Fit, ImageError, ImageSink, Reader, luma, zeroed};
 
 /// The most codes LZW in GIF uses (12 bits).
 const MAX_CODES: usize = 4096;
@@ -196,7 +196,7 @@ impl Lzw {
 
 pub(crate) fn decode(
     reader: &mut Reader<'_>,
-    max_side: u32,
+    fit: Fit,
     sink: &mut dyn ImageSink,
 ) -> Result<(), ImageError> {
     let mut signature = [0u8; 6];
@@ -237,7 +237,7 @@ pub(crate) fn decode(
                 }
                 skip_blocks(reader)?;
             }
-            0x2c => return picture(reader, width, height, global, transparent, max_side, sink),
+            0x2c => return picture(reader, width, height, global, transparent, fit, sink),
             0x3b => return Err(ImageError::Invalid("GIF without a picture")),
             _ => return Err(ImageError::Invalid("GIF block")),
         }
@@ -252,7 +252,7 @@ fn picture(
     height: u32,
     global: Option<[[u8; 3]; 256]>,
     transparent: Option<u8>,
-    max_side: u32,
+    fit: Fit,
     sink: &mut dyn ImageSink,
 ) -> Result<(), ImageError> {
     let left = u32::from(u16_le(reader)?);
@@ -291,9 +291,9 @@ fn picture(
     // The part of the picture on the screen.
     let right = (left + w).min(width);
     let bottom = (top + h).min(height);
-    let factor = factor_for(width, height, max_side);
-    let mut scaler = Downscaler::new(width, factor, channels)?;
-    sink.start(scaler.out_width(), height.div_ceil(factor))?;
+    let size = fit.size(width, height);
+    let mut scaler = Downscaler::new(width, height, size, channels)?;
+    sink.start(scaler.out_width(), scaler.out_height())?;
     let mut row: Vec<u8> = zeroed(width as usize * channels)?;
     row.fill(WHITE);
     let blank = row.clone();

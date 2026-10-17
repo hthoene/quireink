@@ -6,7 +6,7 @@
 
 use alloc::vec::Vec;
 
-use crate::{Downscaler, ImageError, ImageSink, Reader, factor_for, zeroed};
+use crate::{Downscaler, Fit, ImageError, ImageSink, Reader, block_side, zeroed};
 
 /// Natural order of the zig-zag sequence.
 pub(crate) const ZIGZAG: [u8; 64] = [
@@ -242,7 +242,7 @@ pub(crate) fn idct_scaled(coef: &[i32; 64], n: usize, out: &mut [u8], stride: us
 
 pub(crate) fn decode(
     reader: &mut Reader<'_>,
-    max_side: u32,
+    fit: Fit,
     sink: &mut dyn ImageSink,
 ) -> Result<(), ImageError> {
     if reader.byte()? != 0xff || reader.byte()? != 0xd8 {
@@ -326,7 +326,7 @@ pub(crate) fn decode(
                     ac_tables,
                     restart_interval,
                 };
-                return crate::progressive::decode(reader, frame, max_side, sink);
+                return crate::progressive::decode(reader, frame, fit, sink);
             }
             0xda => {
                 let count = usize::from(reader.byte()?);
@@ -351,7 +351,7 @@ pub(crate) fn decode(
                     &dc_tables,
                     &ac_tables,
                     (width, height, restart_interval),
-                    max_side,
+                    fit,
                     sink,
                 );
             }
@@ -425,7 +425,7 @@ fn scan(
     dc_tables: &[Option<Huffman>; 4],
     ac_tables: &[Option<Huffman>; 4],
     (width, height, restart_interval): (u32, u32, u32),
-    max_side: u32,
+    fit: Fit,
     sink: &mut dyn ImageSink,
 ) -> Result<(), ImageError> {
     for c in components.iter() {
@@ -449,26 +449,20 @@ fn scan(
 
     // Each block decoded at n×n pixels of its 8×8 (8, 4, 2 or 1): an image
     // made smaller is made smaller as it is decoded, from its lowest
-    // frequencies, not decoded whole and averaged. Then averaged further
-    // only while it stays at least `max_side` on its longer side.
-    let factor = factor_for(width, height, max_side);
-    let n = match factor {
-        1 => 8,
-        2..=3 => 4,
-        4..=7 => 2,
-        _ => 1,
-    };
+    // frequencies, not decoded whole and averaged; then averaged to the
+    // size it shows at.
+    let size = fit.size(width, height);
+    let n = block_side(width, height, size);
     let scale = (8 / n) as u32;
     let (out_width, out_height) = (width.div_ceil(scale), height.div_ceil(scale));
-    let rest = (out_width.max(out_height) / max_side.max(1)).max(1);
     let mcu_w = n * h_max;
     let mcu_h = n * v_max;
     let row_width = mcus_x * mcu_w;
 
     // Colour where it is wanted and the image has it (luma and chroma).
     let color = sink.wants_color() && components.len() == 3;
-    let mut scaler = Downscaler::new(out_width, rest, if color { 3 } else { 1 })?;
-    sink.start(scaler.out_width(), out_height.div_ceil(rest))?;
+    let mut scaler = Downscaler::new(out_width, out_height, size, if color { 3 } else { 1 })?;
+    sink.start(scaler.out_width(), scaler.out_height())?;
     let height = out_height;
 
     // One row of MCUs of luma at full resolution, and for colour of each

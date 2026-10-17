@@ -5,6 +5,7 @@ use alloc::vec::Vec;
 use core::fmt;
 
 use quireink_document::{Document, DocumentError};
+use quireink_image::Fit;
 use quireink_platform::Storage;
 
 use crate::id::Id;
@@ -27,13 +28,13 @@ pub struct OpenOptions {
     pub css: String,
     /// Pictures in colour, for colour screens (ADR 0015); gray otherwise.
     pub color: bool,
-    /// The longer side, in pixels, pictures are decoded to at most: the
-    /// screen's, so a small device does not decode what it cannot show.
-    pub image_side: u32,
+    /// The size pictures are decoded to at most: as large as they show on
+    /// the screen, so a small device does not decode what it cannot show.
+    pub image_fit: Fit,
 }
 
-/// The longer side of pictures where the screen does not say otherwise.
-pub const IMAGE_SIDE: u32 = 1600;
+/// The size of pictures where the screen does not say otherwise.
+pub const IMAGE_FIT: Fit = Fit::side(1600);
 
 impl Default for OpenOptions {
     fn default() -> Self {
@@ -41,7 +42,7 @@ impl Default for OpenOptions {
             publisher_styles: true,
             css: String::new(),
             color: false,
-            image_side: IMAGE_SIDE,
+            image_fit: IMAGE_FIT,
         }
     }
 }
@@ -64,9 +65,9 @@ impl OpenOptions {
         self
     }
 
-    /// With pictures decoded to at most `side` pixels on their longer side.
-    pub fn image_side(mut self, side: u32) -> Self {
-        self.image_side = side;
+    /// With pictures decoded no larger than `fit` allows.
+    pub fn image_fit(mut self, fit: Fit) -> Self {
+        self.image_fit = fit;
         self
     }
 }
@@ -98,8 +99,8 @@ pub struct Formats {
     specs: Vec<FormatSpec>,
     /// The screen shows colour: documents open with colour pictures.
     color: bool,
-    /// The screen's longer side, if set.
-    image_side: Option<u32>,
+    /// The screen's size for pictures, if set.
+    image_fit: Option<Fit>,
 }
 
 impl Formats {
@@ -113,18 +114,18 @@ impl Formats {
         self.color = on;
     }
 
-    /// The screen's longer side, in pixels: pictures are decoded no larger
-    /// (set by the kernel from the device).
-    pub fn set_image_side(&mut self, side: u32) {
-        self.image_side = Some(side);
+    /// The screen's size for pictures: they are decoded no larger than it
+    /// shows them, upright or turned (set by the kernel from the device).
+    pub fn set_image_fit(&mut self, fit: Fit) {
+        self.image_fit = Some(fit);
     }
 
     /// How documents open here unless asked otherwise: as the book
     /// intends, with pictures in colour on colour screens, as large as the
     /// screen shows them.
     pub fn options(&self) -> OpenOptions {
-        let side = self.image_side.map_or(IMAGE_SIDE, |s| s.min(IMAGE_SIDE));
-        OpenOptions::default().color(self.color).image_side(side)
+        let fit = self.image_fit.map_or(IMAGE_FIT, |f| f.min(IMAGE_FIT));
+        OpenOptions::default().color(self.color).image_fit(fit)
     }
 
     /// Releases unused capacity once registration is complete.

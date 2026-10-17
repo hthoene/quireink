@@ -27,6 +27,7 @@ use core::cell::Cell;
 use quireink_sdk::document::{
     Block, Document, DocumentError, ImageRef, Link, Locator, Metadata, TocEntry,
 };
+use quireink_sdk::image::Fit;
 use quireink_sdk::xml::{Token, Tokenizer, decode, local_name};
 use quireink_sdk::{Env, Storage};
 
@@ -293,18 +294,18 @@ impl Base64 {
     }
 }
 
-/// Decodes the pictures `wanted` (binary id, cache file, longest side)
+/// Decodes the pictures `wanted` (binary id, cache file, size)
 /// from their `<binary>` elements: each into a temporary file, then into
 /// the cache. One that cannot be decoded is left out.
 pub(crate) fn decode_binaries(
     storage: &dyn Storage,
     path: &str,
     encoding: Encoding,
-    wanted: &[(String, String, u32)],
+    wanted: &[(String, String, Fit)],
     dir: &str,
     color: bool,
 ) -> Result<(), DocumentError> {
-    let wanted: Vec<&(String, String, u32)> = wanted
+    let wanted: Vec<&(String, String, Fit)> = wanted
         .iter()
         .filter(|(_, cache, _)| quireink_sdk::image::ImageFile::open(storage, cache).is_none())
         .collect();
@@ -335,9 +336,9 @@ pub(crate) fn decode_binaries(
         }
         Token::End { name } if local_name(name) == "binary" => {
             if let Some(at) = current.take() {
-                let (_, cache, side) = wanted[at];
+                let (_, cache, fit) = wanted[at];
                 if failed.is_none()
-                    && convert::decode_file(storage, &temp, cache, *side, color).is_ok()
+                    && convert::decode_file(storage, &temp, cache, *fit, color).is_ok()
                 {
                     done.push(at);
                 }
@@ -374,8 +375,8 @@ pub struct Fb2Document {
     styles: bool,
     /// Pictures in colour (ADR 0015).
     color: bool,
-    /// Pictures decoded at most this large (longer side, in pixels).
-    image_side: u32,
+    /// Pictures decoded at most this large.
+    image_fit: Fit,
     /// Size of the file: the length until it is converted.
     size: u32,
     length: Cell<u32>,
@@ -397,7 +398,7 @@ impl Fb2Document {
         options: &quireink_sdk::OpenOptions,
     ) -> Result<Self, DocumentError> {
         let (styles, color) = (options.publisher_styles, options.color);
-        let image_side = options.image_side;
+        let image_fit = options.image_fit;
         let size = storage.size(path)?;
         let mut head = [0u8; 4096];
         let n = storage.read_at(path, 0, &mut head)?;
@@ -470,7 +471,7 @@ impl Fb2Document {
             cover: found.cover,
             styles,
             color,
-            image_side,
+            image_fit,
             size: u32::try_from(size).unwrap_or(u32::MAX - 1),
             length: Cell::new(UNKNOWN),
         })
@@ -493,7 +494,7 @@ impl Fb2Document {
                     Default::default(),
                     self.styles,
                     self.color,
-                    self.image_side,
+                    self.image_fit,
                 )?
             }
         };
@@ -653,7 +654,7 @@ impl Document for Fb2Document {
             storage,
             &self.path,
             self.encoding,
-            &[(id.clone(), cache, convert::COVER_SIDE)],
+            &[(id.clone(), cache, convert::COVER_FIT)],
             &self.paths.dir,
             self.color,
         )?;

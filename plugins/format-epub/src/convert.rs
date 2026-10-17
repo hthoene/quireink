@@ -42,6 +42,7 @@ use alloc::vec::Vec;
 
 use quireink_sdk::Storage;
 use quireink_sdk::document::{Align, BlockKind, DocumentError, Run, TextStyle};
+use quireink_sdk::image::Fit;
 use quireink_sdk::xml::{Token, Tokenizer, decode, local_name};
 use quireink_sdk::zip::{Entry, ZipArchive};
 
@@ -119,12 +120,11 @@ pub(crate) struct CachePaths {
     pub end: String,
 }
 
-/// Images are decoded at most this large (longer side, in pixels) where the
-/// screen does not say (see `OpenOptions::image_side`); readers scale them
-/// to the page.
-pub(crate) const IMAGE_SIDE: u32 = quireink_sdk::IMAGE_SIDE;
-/// Longest side of a decoded cover: enough for the library and home screen.
-pub(crate) const COVER_SIDE: u32 = 300;
+/// Images are decoded at most this large where the screen does not say
+/// (see `OpenOptions::image_fit`); readers scale them to the page.
+pub(crate) const IMAGE_FIT: Fit = quireink_sdk::IMAGE_FIT;
+/// A decoded cover: enough for the library and home screen.
+pub(crate) const COVER_FIT: Fit = Fit::side(300);
 
 pub(crate) fn encode_kind(kind: BlockKind) -> (u8, u8) {
     match kind {
@@ -1228,7 +1228,7 @@ pub(crate) fn convert(
     rules: Rules,
     styles: bool,
     color: bool,
-    side: u32,
+    fit: Fit,
 ) -> Result<u32, DocumentError> {
     let name = match source {
         Source::Zip { entry, .. } => entry.name.as_str(),
@@ -1359,16 +1359,16 @@ pub(crate) fn convert(
         for (path, base) in &images {
             if !crate::pictures::has(storage, base, color) {
                 let file = crate::pictures::file(base, color);
-                let _ = decode_image(storage, archive, path, &file, &paths.dir, side, color);
+                let _ = decode_image(storage, archive, path, &file, &paths.dir, fit, color);
             }
         }
     }
     if let Source::Fb2 { path, encoding } = source
         && !images.is_empty()
     {
-        let wanted: Vec<(String, String, u32)> = images
+        let wanted: Vec<(String, String, Fit)> = images
             .into_iter()
-            .map(|(id, base)| (id, crate::pictures::file(&base, color), side))
+            .map(|(id, base)| (id, crate::pictures::file(&base, color), fit))
             .collect();
         let _ = crate::fb2::decode_binaries(storage, path, *encoding, &wanted, &paths.dir, color);
     }
@@ -1423,7 +1423,7 @@ pub(crate) fn decode_image(
     path: &str,
     cache: &str,
     dir: &str,
-    side: u32,
+    fit: Fit,
     color: bool,
 ) -> Result<(), DocumentError> {
     let entry = archive
@@ -1450,7 +1450,7 @@ pub(crate) fn decode_image(
             (temp.as_str(), 0, u64::from(entry.size))
         }
     };
-    let result = decode_range(storage, file, offset, end, cache, side, color);
+    let result = decode_range(storage, file, offset, end, cache, fit, color);
     if file == temp {
         let _ = storage.remove(&temp);
     }
@@ -1463,11 +1463,11 @@ pub(crate) fn decode_file(
     storage: &dyn Storage,
     file: &str,
     cache: &str,
-    side: u32,
+    fit: Fit,
     color: bool,
 ) -> Result<(), DocumentError> {
     let end = storage.size(file)?;
-    decode_range(storage, file, 0, end, cache, side, color)
+    decode_range(storage, file, 0, end, cache, fit, color)
 }
 
 /// Decodes the image in `offset..end` of `file` into `cache`.
@@ -1477,7 +1477,7 @@ fn decode_range(
     offset: u64,
     end: u64,
     cache: &str,
-    side: u32,
+    fit: Fit,
     color: bool,
 ) -> Result<(), DocumentError> {
     use quireink_sdk::image::{ColorWriter, Format, GrayWriter, decode};
@@ -1494,10 +1494,10 @@ fn decode_range(
             };
             if color {
                 let mut writer = ColorWriter::new(storage, cache);
-                decode(format, &mut source, side, &mut writer).and_then(|()| writer.finish())
+                decode(format, &mut source, fit, &mut writer).and_then(|()| writer.finish())
             } else {
                 let mut writer = GrayWriter::new(storage, cache);
-                decode(format, &mut source, side, &mut writer).and_then(|()| writer.finish())
+                decode(format, &mut source, fit, &mut writer).and_then(|()| writer.finish())
             }
         }
         None => Err(quireink_sdk::image::ImageError::Unsupported("image format")),
