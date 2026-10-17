@@ -57,10 +57,13 @@ change the plugin SDK.
   the loop of bold ones; the X4 turns black and white bands eight by
   eight pixels at once for its panel. A long chapter of notes no longer
   runs out of memory while converted.
-- X4: after a half refresh, the next fast one reads the panel's own
-  temperature again; with the warm one written for the half refresh,
-  fast refreshes drove too weakly and the text of the page before stayed
-  under the new page number.
+- X4: the display is driven with the stock firmware's sequences (as the
+  FreeInk SDK records them): fast `FC`, which loads the temperature each
+  time, half `D7`, full `F7`, the stock booster and border; after every
+  refresh both memories of the controller hold the frame shown. Before,
+  a fast refresh sometimes left a page's text on the panel: the page
+  before (or after) stood under the new page number until the next full
+  refresh, which looked like a page turned by itself.
 - X4: the full refresh against ghosts takes the shorter waveform of a warm
   panel (1.6 s instead of 3.5); the slow one only after starting.
 - Pictures of books are decoded no larger than the screen shows them

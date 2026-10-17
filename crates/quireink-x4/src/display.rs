@@ -139,9 +139,6 @@ pub struct Display<SPI, DC, RST, BUSY, D> {
     /// Nothing shown since [`Display::init`]: the controller does not know
     /// what the panel shows, so a fast refresh would compare with nothing.
     fresh: bool,
-    /// The temperature written for a half refresh holds: the next refresh
-    /// reads the panel's own again.
-    warm: bool,
     buffer: Vec<u8>,
 }
 
@@ -162,7 +159,6 @@ where
             delay,
             powered: false,
             fresh: true,
-            warm: false,
             buffer: Vec::new(),
         }
     }
@@ -183,14 +179,16 @@ where
         // The internal temperature sensor.
         self.command(cmd::TEMPERATURE_SENSOR, &[0x80])?;
         // The booster's soft start, as the panel wants it.
-        self.command(cmd::BOOSTER_SOFT_START, &[0xAE, 0xC7, 0xC3, 0xC0, 0x40])?;
+        // The stock firmware's sequences throughout (as the FreeInk SDK
+        // records them for the X4): booster, border, and the updates below.
+        self.command(cmd::BOOSTER_SOFT_START, &[0xAE, 0xC7, 0xC3, 0xC0, 0x80])?;
         // 480 gates, scanned interlaced.
         let gates = PANEL_HEIGHT - 1;
         self.command(
             cmd::DRIVER_OUTPUT,
             &[(gates % 256) as u8, (gates / 256) as u8, 0x02],
         )?;
-        self.command(cmd::BORDER, &[0x01])?;
+        self.command(cmd::BORDER, &[0x80])?;
         self.window(0, PANEL_WIDTH)?;
         for fill in [cmd::FILL_NEW, cmd::FILL_SHOWN] {
             self.command(fill, &[0xF7])?;
@@ -337,47 +335,37 @@ where
     }
 
     /// Shows the new frame; `power_off` turns the panel's power off after
-    /// it, e.g. before sleeping. The first after [`Display::init`] is full
-    /// in any case.
+    /// it, e.g. before sleeping. The first after [`Display::init`] drives
+    /// every pixel in any case (a half refresh).
+    ///
+    /// The stock firmware's whole sequences, each powering up, loading the
+    /// temperature and the waveform: full `F7`, half `D7` (a warm panel's
+    /// waveform), fast `FC` (the panel's partial waveform). A weaker fast
+    /// sequence (`1C`, without the temperature) left text on some pages
+    /// behind: a page turned showed the page before under its number.
     pub fn refresh(&mut self, refresh: Refresh, power_off: bool) -> Result<(), Error> {
-        let refresh = if self.fresh { Refresh::Full } else { refresh };
+        let refresh = if self.fresh { Refresh::Half } else { refresh };
         self.fresh = false;
         // A fast refresh compares with the frame shown; the others
         // drive every pixel.
         let compare = if refresh == Refresh::Fast { 0x00 } else { 0x40 };
         self.command(cmd::UPDATE_CONTROL_1, &[compare])?;
+        self.command(cmd::BORDER, &[0xC0])?;
         let mut sequence = match refresh {
-            Refresh::Full => 0x34,
+            Refresh::Full => 0xF7,
             Refresh::Half => {
-                // A warm panel's waveform: shorter.
                 self.command(cmd::WRITE_TEMPERATURE, &[0x5A])?;
-                self.warm = true;
-                0xD4
+                0xD7
             }
-            // After a half refresh the written temperature still holds, and
-            // fast refreshes for a hot panel drive too weakly at room
-            // temperature: the text of the page before stayed. The panel's
-            // own temperature again (0x20) first.
-            Refresh::Fast if self.warm => {
-                self.warm = false;
-                0x3C
-            }
-            Refresh::Fast => 0x1C,
+            Refresh::Fast => 0xFC,
         };
-        if refresh == Refresh::Full {
-            // Reads the panel's own temperature (0x20 in 0x34).
-            self.warm = false;
-        }
-        if !self.powered {
-            // Clock and analog power on first.
-            sequence |= 0xC0;
-        }
         if power_off {
             sequence |= 0x03;
         }
         self.command(cmd::UPDATE_CONTROL_2, &[sequence])?;
         self.command(cmd::ACTIVATE, &[])?;
-        self.powered = !power_off;
+        // The full and half sequences power down at their end (0x03).
+        self.powered = sequence & 0x03 == 0;
         self.wait()
     }
 
@@ -809,7 +797,7 @@ mod tests {
     }
 
     #[test]
-    fn refreshes_power_on_once_and_off_when_asked() {
+    fn refreshes_power_off_when_asked() {
         let controller = Controller::new();
         let mut display = Display::new(
             Spi(controller.clone()),
@@ -819,19 +807,20 @@ mod tests {
             Delay,
         );
         display.init().unwrap();
-        // The first is full whatever is asked.
+        // The first drives every pixel whatever is asked; a fast one keeps
+        // the panel powered, sleep powers it down first.
         display.refresh(Refresh::Fast, false).unwrap();
         display.refresh(Refresh::Fast, false).unwrap();
-        display.refresh(Refresh::Half, true).unwrap();
+        display.refresh(Refresh::Fast, true).unwrap();
         display.sleep().unwrap();
         let c = controller.borrow();
         let sequences: Vec<u8> = c.refreshes.iter().map(|&(_, two)| two).collect();
-        assert_eq!(sequences, [0xF4, 0x1C, 0xD7]);
+        assert_eq!(sequences, [0xD7, 0xFC, 0xFF]);
         assert_eq!(c.commands.last(), Some(&cmd::DEEP_SLEEP));
     }
 
     #[test]
-    fn after_a_half_refresh_the_panels_own_temperature() {
+    fn the_stock_sequences() {
         let controller = Controller::new();
         let mut display = Display::new(
             Spi(controller.clone()),
@@ -841,12 +830,19 @@ mod tests {
             Delay,
         );
         display.init().unwrap();
-        for refresh in [Refresh::Full, Refresh::Half, Refresh::Fast, Refresh::Fast] {
+        // The first is a half whatever is asked; full, half and fast as the
+        // stock firmware sends them.
+        for refresh in [
+            Refresh::Fast,
+            Refresh::Full,
+            Refresh::Half,
+            Refresh::Fast,
+            Refresh::Fast,
+        ] {
             display.refresh(refresh, false).unwrap();
         }
         let c = controller.borrow();
         let sequences: Vec<u8> = c.refreshes.iter().map(|&(_, two)| two).collect();
-        // The fast one right after reads the temperature (0x20) again.
-        assert_eq!(sequences, [0xF4, 0xD4, 0x3C, 0x1C]);
+        assert_eq!(sequences, [0xD7, 0xF7, 0xD7, 0xFC, 0xFC]);
     }
 }

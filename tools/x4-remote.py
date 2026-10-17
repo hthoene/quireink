@@ -20,6 +20,8 @@ STEPS, separated by commas:
   screen             print the screen's id
   describe           print what the screen shows, part by part
   heap               print the heap used and free, in bytes
+  refresh:full       refresh the panel from what the controller holds (also
+                     refresh:fast), nothing sent
   input              print how the buttons and the battery are read
   shot:out/a.png     a screenshot now
 
@@ -269,6 +271,8 @@ def run(x4, step):
             print(x4.ask("screen", "SCREEN")[-1].split(" ", 1)[-1])
         case ["input"]:
             print(x4.ask("input", "INPUT")[-1])
+        case ["refresh", kind]:
+            print(x4.ask(f"refresh {kind}", "OK")[-1])
         case ["heap"]:
             _, used, free = x4.ask("heap", "HEAP")[-1].split()
             print(f"heap: {used} bytes used, {free} free")

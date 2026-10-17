@@ -310,7 +310,12 @@ fn main() -> ! {
             sleep |= apply(&mut kernel, &mut display, effects, &mut wake_at);
         }
 
-        if let Some(command) = remote.poll()
+        let command = remote.poll();
+        if let Some(remote::Command::Refresh(full)) = command {
+            let refresh = if full { Refresh::Full } else { Refresh::Fast };
+            let result = display.refresh(refresh, false);
+            esp_println::println!("QI:OK {result:?}");
+        } else if let Some(command) = command
             && let Some((name, ms)) = remote.answer(&mut kernel, &DEVICE.display, command)
         {
             if remote_release.is_some() {
@@ -358,6 +363,33 @@ fn main() -> ! {
     }
 }
 
+/// A check of the rows sent to a memory of the controller: their tops,
+/// count and bytes (FNV-1a).
+#[derive(Debug, Default, PartialEq, Eq)]
+struct Check {
+    rows: u32,
+    hash: u32,
+}
+
+impl Check {
+    fn add(&mut self, top: u16, rows: &quireink_platform::FrameView<'_>) {
+        let bytes = rows
+            .data
+            .get(..usize::from(rows.height) * rows.stride)
+            .unwrap_or(&[]);
+        let mut hash = if self.hash == 0 {
+            0x811C_9DC5
+        } else {
+            self.hash
+        };
+        for byte in top.to_le_bytes().iter().chain(bytes) {
+            hash = (hash ^ u32::from(*byte)).wrapping_mul(0x0100_0193);
+        }
+        self.hash = hash;
+        self.rows += u32::from(rows.height);
+    }
+}
+
 /// Carries out what the kernel asks: shows what changed, notes when to
 /// wake it, restarts. Returns whether to sleep.
 fn apply<SPI, DC, RST, BUSY, D>(
@@ -378,9 +410,8 @@ where
     }
     if let Some((area, mode)) = effects.refresh() {
         let refresh = match mode {
-            // Every pixel driven, with the shorter waveform of a warm panel:
-            // the ghosts go as well, in a third of the time (the display
-            // takes its slow full refresh after starting by itself).
+            // Every pixel driven with a warm panel's waveform (1.6 s), as the
+            // stock firmware cleans the panel every few pages.
             RefreshMode::Full => Refresh::Half,
             RefreshMode::Partial | RefreshMode::Fast => Refresh::Fast,
         };
@@ -393,29 +424,41 @@ where
         let started = now();
         // What is sent is kept for sending again after a fast refresh.
         let mut sent = sent::Sent::default();
+        // What went into each memory of the controller, to check that the
+        // frame shown is the frame sent.
+        let (mut written, mut again_written) = (Check::default(), Check::default());
         kernel.render(&mut |top, rows| {
             if let Err(e) = display.write_rows(top, rows, planes) {
                 failed = Some(e);
             }
-            if refresh == Refresh::Fast {
-                sent.keep(top, &rows);
-            }
+            written.add(top, &rows);
+            sent.keep(top, &rows);
         });
         let drawn = now();
         if let Err(e) = display.refresh(refresh, false) {
             failed = Some(e);
         }
         let shown = now();
-        if refresh == Refresh::Fast {
-            // The frame now shown, for the next fast refresh to compare:
-            // as it was sent, or drawn anew if it was not all kept.
+        {
+            // After every refresh, both memories again hold the frame now
+            // shown, as the stock firmware does: the refresh may leave the
+            // memory of the new frame changed, and the next fast refresh
+            // compares the two (sent again as kept, or drawn anew).
             let mut again = |top: u16, rows: quireink_platform::FrameView<'_>| {
-                if let Err(e) = display.write_rows(top, rows, Planes::SHOWN) {
+                if let Err(e) = display.write_rows(top, rows, Planes::BOTH) {
                     failed = Some(e);
                 }
+                again_written.add(top, &rows);
             };
-            if !sent.replay(&mut again) {
+            let kept = sent.replay(&mut again);
+            if !kept {
                 kernel.rerender(&mut again);
+            }
+            if again_written != written {
+                warn!(
+                    "frame shown differs from frame sent ({}): {written:?} then {again_written:?}",
+                    if kept { "kept" } else { "drawn anew" }
+                );
             }
         }
         if let Some(e) = failed {

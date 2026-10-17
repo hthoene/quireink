@@ -21,6 +21,8 @@
 //! - `peek <address> <words>`: memory, as `QI:MEM <address> <hex words>`
 //!   lines of 16 words and `QI:END` (hexadecimal address, at most 4096
 //!   words; only the ROM, e.g. to find where its functions lie);
+//! - `refresh fast`, `refresh full`: the panel refreshed from what the
+//!   controller holds, nothing sent (`QI:OK`): whether it holds the frame;
 //! - `put <size> <path>`: a file for the storage (the SD card), answered
 //!   with `QI:READY`; then lines `data <hex>` until all its bytes came, and
 //!   `QI:OK <size>` once it is written.
@@ -59,6 +61,9 @@ pub enum Command {
     Trace(bool),
     /// Words of the ROM from an address.
     Peek(u32, u32),
+    /// The panel refreshed from the controller's memory, full or fast (for
+    /// the main loop, which has the display).
+    Refresh(bool),
     /// A file of so many bytes for that path.
     Put(usize, String),
 }
@@ -125,6 +130,8 @@ impl Remote {
     ) -> Option<(&'static str, u64)> {
         match command {
             Command::Press(name, ms) => return Some((name, ms)),
+            // The main loop does it; asked here, nothing.
+            Command::Refresh(_) => println!("QI:ERR refresh"),
             Command::Shot => {
                 shot(kernel, display);
             }
@@ -243,6 +250,11 @@ fn parse(line: &str) -> Option<Command> {
         "describe" => Command::Describe,
         "heap" => Command::Heap,
         "input" => Command::Input,
+        "refresh" => match words.next()? {
+            "full" => Command::Refresh(true),
+            "fast" => Command::Refresh(false),
+            _ => return None,
+        },
         "trace" => match words.next()? {
             "start" => Command::Trace(true),
             "stop" => Command::Trace(false),
