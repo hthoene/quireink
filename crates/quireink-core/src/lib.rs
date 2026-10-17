@@ -896,7 +896,10 @@ impl Kernel {
         }
         match event {
             InputEvent::Button { name, state } => {
-                if let Some(recognized) = self.recognizer.button(name, state, now) {
+                // Without a long press to tell apart, at once.
+                let long = InputKey::LongButton(Cow::Borrowed(name));
+                let at_once = self.resolve(&long).is_none();
+                if let Some(recognized) = self.recognizer.button(name, state, now, at_once) {
                     self.recognized(recognized);
                 }
             }

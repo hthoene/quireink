@@ -26,6 +26,7 @@ pub(crate) enum Recognized {
 struct HeldButton {
     name: &'static str,
     since: Instant,
+    /// Recognized already: as a long press, or on the press itself.
     long_fired: bool,
 }
 
@@ -49,11 +50,15 @@ pub(crate) struct Recognizer {
 }
 
 impl Recognizer {
+    /// A button going down or up. With `at_once` (nothing is bound to a
+    /// long press of it) it counts as pressed when it goes down, not when
+    /// it is let go: a page turns as the button is pressed.
     pub(crate) fn button(
         &mut self,
         name: &'static str,
         state: ButtonState,
         now: Instant,
+        at_once: bool,
     ) -> Option<Recognized> {
         let index = self.buttons.iter().position(|b| b.name == name);
         match (state, index) {
@@ -61,9 +66,9 @@ impl Recognizer {
                 self.buttons.push(HeldButton {
                     name,
                     since: now,
-                    long_fired: false,
+                    long_fired: at_once,
                 });
-                None
+                at_once.then_some(Recognized::Button { name, long: false })
             }
             // Key repeat or a missed release: keep the original press time.
             (ButtonState::Pressed, Some(_)) => None,
@@ -267,18 +272,40 @@ mod tests {
     }
 
     #[test]
+    fn without_a_long_press_at_once() {
+        let mut r = Recognizer::default();
+        let pressed = Recognized::Button {
+            name: "page-forward",
+            long: false,
+        };
+        assert_eq!(
+            r.button("page-forward", ButtonState::Pressed, Instant(0), true),
+            Some(pressed)
+        );
+        // Held, it does not fire again; let go, nothing more.
+        assert!(r.tick(Instant(800), &T).is_empty());
+        assert_eq!(
+            r.button("page-forward", ButtonState::Released, Instant(900), true),
+            None
+        );
+    }
+
+    #[test]
     fn short_and_long_button_presses() {
         let mut r = Recognizer::default();
-        assert_eq!(r.button("confirm", ButtonState::Pressed, Instant(0)), None);
         assert_eq!(
-            r.button("confirm", ButtonState::Released, Instant(100)),
+            r.button("confirm", ButtonState::Pressed, Instant(0), false),
+            None
+        );
+        assert_eq!(
+            r.button("confirm", ButtonState::Released, Instant(100), false),
             Some(Recognized::Button {
                 name: "confirm",
                 long: false
             })
         );
 
-        r.button("confirm", ButtonState::Pressed, Instant(1000));
+        r.button("confirm", ButtonState::Pressed, Instant(1000), false);
         assert_eq!(r.next_deadline(&T), Some(Instant(1500)));
         assert!(r.tick(Instant(1400), &T).is_empty());
         assert_eq!(
@@ -291,7 +318,7 @@ mod tests {
         assert_eq!(r.next_deadline(&T), None);
         // Releasing after a long press produces nothing more.
         assert_eq!(
-            r.button("confirm", ButtonState::Released, Instant(1600)),
+            r.button("confirm", ButtonState::Released, Instant(1600), false),
             None
         );
     }

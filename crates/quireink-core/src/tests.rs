@@ -151,15 +151,17 @@ fn render(kernel: &mut Kernel) {
     kernel.render(&mut |_, _| {});
 }
 
+/// A short press; the effects of what it did, on the press (a button
+/// without a long press) or as it is let go.
 fn press(kernel: &mut Kernel, at: u64, name: &'static str) -> crate::Effects {
-    kernel.handle(
+    let pressed = kernel.handle(
         Instant(at),
         InputEvent::Button {
             name,
             state: ButtonState::Pressed,
         },
     );
-    let effects = kernel.handle(
+    let released = kernel.handle(
         Instant(at + 50),
         InputEvent::Button {
             name,
@@ -167,7 +169,11 @@ fn press(kernel: &mut Kernel, at: u64, name: &'static str) -> crate::Effects {
         },
     );
     render(kernel);
-    effects
+    if pressed.refresh().is_some() || pressed.sleep() || pressed.restart() {
+        pressed
+    } else {
+        released
+    }
 }
 
 fn tap(kernel: &mut Kernel, at: u64, x: i32, y: i32) -> crate::Effects {
