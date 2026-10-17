@@ -22,8 +22,8 @@ use quireink_platform::{Storage, StorageError};
 const EOCD_SIZE: u64 = 22;
 /// Largest ZIP comment, which may follow the EOCD record.
 const MAX_COMMENT: u64 = 0xffff;
-/// Chunk size for reading compressed data.
-const CHUNK: usize = 1024;
+/// Chunk size for reading compressed data (several blocks of a card).
+const CHUNK: usize = 4096;
 /// The deflate history: back-references reach at most this far.
 const WINDOW: usize = 32 * 1024;
 
@@ -332,70 +332,52 @@ impl ZipArchive {
         entry: &Entry,
         sink: &mut dyn FnMut(&[u8]) -> bool,
     ) -> Result<(), ZipError> {
-        let mut offset = self.data_offset(storage, entry)?;
-        let mut remaining = u64::from(entry.compressed_size);
-        let mut input = zeroed(CHUNK.min(remaining as usize).max(1))?;
-        let fill = |offset: &mut u64, remaining: &mut u64, input: &mut [u8]| {
-            let n = (*remaining as usize).min(input.len());
-            let read = storage.read_at(&self.path, *offset, &mut input[..n])?;
-            if read == 0 {
-                return Err(ZipError::Invalid("unexpected end of file"));
+        let mut reader = self.reader(storage, entry)?;
+        loop {
+            let chunk = reader.chunk(storage)?;
+            if chunk.is_empty() || !sink(chunk) {
+                return Ok(());
             }
-            *offset += read as u64;
-            *remaining -= read as u64;
-            Ok(read)
-        };
-        match entry.method {
-            Method::Stored => {
-                while remaining > 0 {
-                    let read = fill(&mut offset, &mut remaining, &mut input)?;
-                    if !sink(&input[..read]) {
-                        return Ok(());
-                    }
-                }
-                Ok(())
-            }
+        }
+    }
+
+    /// The uncompressed content of `entry`, to be read a piece at a time
+    /// (needing what [`ZipArchive::stream`] needs while it lives).
+    pub fn reader(
+        &self,
+        storage: &dyn Storage,
+        entry: &Entry,
+    ) -> Result<EntryReader<'_>, ZipError> {
+        let offset = self.data_offset(storage, entry)?;
+        let remaining = u64::from(entry.compressed_size);
+        let input = zeroed(CHUNK.min(remaining as usize).max(1))?;
+        let inflate = match entry.method {
+            Method::Stored => None,
             Method::Deflate => {
                 let mut decoder: Vec<DecompressorOxide> = Vec::new();
                 decoder
                     .try_reserve_exact(1)
                     .map_err(|_| ZipError::OutOfMemory)?;
                 decoder.push(DecompressorOxide::new());
-                let decoder = &mut decoder[0];
                 // A power of two (required for a wrapping window) that holds
                 // the whole entry, or the full deflate history.
                 let window_len = (entry.size as usize).next_power_of_two().clamp(64, WINDOW);
-                let mut window = zeroed(window_len)?;
-                let (mut start, mut end, mut position) = (0usize, 0usize, 0usize);
-                loop {
-                    if start == end && remaining > 0 {
-                        end = fill(&mut offset, &mut remaining, &mut input)?;
-                        start = 0;
-                    }
-                    let flags = if remaining > 0 {
-                        inflate_flags::TINFL_FLAG_HAS_MORE_INPUT
-                    } else {
-                        0
-                    };
-                    let (status, consumed, written) =
-                        decompress(decoder, &input[start..end], &mut window, position, flags);
-                    start += consumed;
-                    if written > 0 && !sink(&window[position..position + written]) {
-                        return Ok(());
-                    }
-                    position = (position + written) & (window_len - 1);
-                    match status {
-                        TINFLStatus::Done => return Ok(()),
-                        TINFLStatus::HasMoreOutput => {}
-                        TINFLStatus::NeedsMoreInput if remaining > 0 || start < end => {}
-                        TINFLStatus::NeedsMoreInput => {
-                            return Err(ZipError::Invalid("truncated deflate data"));
-                        }
-                        _ => return Err(ZipError::Invalid("corrupt deflate data")),
-                    }
-                }
+                Some((decoder, zeroed(window_len)?))
             }
-        }
+        };
+        Ok(EntryReader {
+            path: &self.path,
+            offset,
+            remaining,
+            input,
+            start: 0,
+            end: 0,
+            inflate,
+            position: 0,
+            ready: 0,
+            left: 0,
+            done: false,
+        })
     }
 
     /// Reads a whole entry, refusing entries larger than `limit` bytes.
@@ -424,6 +406,126 @@ impl ZipArchive {
             return Err(ZipError::TooLarge);
         }
         Ok(data)
+    }
+}
+
+/// The content of an entry read a piece at a time, inflated where it is
+/// compressed (see [`ZipArchive::reader`]).
+pub struct EntryReader<'a> {
+    path: &'a str,
+    /// Where the compressed data goes on, and how much of it is left.
+    offset: u64,
+    remaining: u64,
+    /// Compressed data read, of it `start..end` not yet inflated.
+    input: Vec<u8>,
+    start: usize,
+    end: usize,
+    /// Inflating: the decoder and its window (the deflate history).
+    inflate: Option<(Vec<DecompressorOxide>, Vec<u8>)>,
+    /// Where the window is written next.
+    position: usize,
+    /// Bytes at hand, not yet taken: `left` from `ready` on, in the window
+    /// when inflating, else in `input`.
+    ready: usize,
+    left: usize,
+    done: bool,
+}
+
+impl fmt::Debug for EntryReader<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("EntryReader")
+            .field("path", &self.path)
+            .field("remaining", &self.remaining)
+            .finish_non_exhaustive()
+    }
+}
+
+impl EntryReader<'_> {
+    /// Reads more compressed data.
+    fn fill(&mut self, storage: &dyn Storage) -> Result<(), ZipError> {
+        let n = (self.remaining as usize).min(self.input.len());
+        let read = storage.read_at(self.path, self.offset, &mut self.input[..n])?;
+        if read == 0 {
+            return Err(ZipError::Invalid("unexpected end of file"));
+        }
+        self.offset += read as u64;
+        self.remaining -= read as u64;
+        self.start = 0;
+        self.end = read;
+        Ok(())
+    }
+
+    /// Makes bytes ready unless some are, or the entry is at its end.
+    fn more(&mut self, storage: &dyn Storage) -> Result<(), ZipError> {
+        while self.left == 0 && !self.done {
+            if self.inflate.is_none() {
+                if self.remaining == 0 {
+                    self.done = true;
+                } else {
+                    self.fill(storage)?;
+                    (self.ready, self.left) = (0, self.end);
+                }
+                continue;
+            }
+            if self.start == self.end && self.remaining > 0 {
+                self.fill(storage)?;
+            }
+            let Some((decoder, window)) = &mut self.inflate else {
+                break;
+            };
+            let flags = if self.remaining > 0 {
+                inflate_flags::TINFL_FLAG_HAS_MORE_INPUT
+            } else {
+                0
+            };
+            let (status, consumed, written) = decompress(
+                &mut decoder[0],
+                &self.input[self.start..self.end],
+                window,
+                self.position,
+                flags,
+            );
+            self.start += consumed;
+            (self.ready, self.left) = (self.position, written);
+            self.position = (self.position + written) & (window.len() - 1);
+            match status {
+                TINFLStatus::Done => self.done = true,
+                TINFLStatus::HasMoreOutput => {}
+                TINFLStatus::NeedsMoreInput if self.remaining > 0 || self.start < self.end => {}
+                TINFLStatus::NeedsMoreInput => {
+                    return Err(ZipError::Invalid("truncated deflate data"));
+                }
+                _ => return Err(ZipError::Invalid("corrupt deflate data")),
+            }
+        }
+        Ok(())
+    }
+
+    /// The bytes at hand.
+    fn at_hand(&self, n: usize) -> &[u8] {
+        let range = self.ready..self.ready + n;
+        match &self.inflate {
+            Some((_, window)) => &window[range],
+            None => &self.input[range],
+        }
+    }
+
+    /// The next bytes of the entry, as many as are at hand; empty at its
+    /// end.
+    pub fn chunk(&mut self, storage: &dyn Storage) -> Result<&[u8], ZipError> {
+        self.more(storage)?;
+        let n = core::mem::take(&mut self.left);
+        Ok(self.at_hand(n))
+    }
+
+    /// Reads the next bytes into `out`; how many, 0 at the end.
+    pub fn read(&mut self, storage: &dyn Storage, out: &mut [u8]) -> Result<usize, ZipError> {
+        self.more(storage)?;
+        let n = self.left.min(out.len());
+        out[..n].copy_from_slice(self.at_hand(n));
+        self.ready += n;
+        self.left -= n;
+        Ok(n)
     }
 }
 
@@ -579,6 +681,36 @@ mod tests {
             })
             .unwrap();
         assert!(seen > 0 && seen <= WINDOW);
+    }
+
+    #[test]
+    fn entries_read_a_piece_at_a_time() {
+        // Longer than the window: it wraps while read.
+        let big: Vec<u8> = (0..100_000u32)
+            .map(|i| ((i * 7 % 251) ^ (i / 1000)) as u8)
+            .collect();
+        let zip = ZipBuilder::new()
+            .stored("a.bin", big.clone())
+            .deflated("b.bin", big.clone())
+            .build();
+        let storage = OneFile(zip);
+        let archive = ZipArchive::open(&storage, "x.zip").unwrap();
+        for name in ["a.bin", "b.bin"] {
+            let entry = archive.entry(&storage, name).unwrap().unwrap();
+            let mut reader = archive.reader(&storage, &entry).unwrap();
+            let mut out = Vec::new();
+            // Pieces of odd sizes, as a decoder asks for them.
+            for size in [1usize, 7, 4096, 333].iter().cycle() {
+                let mut piece = alloc::vec![0u8; *size];
+                let n = reader.read(&storage, &mut piece).unwrap();
+                if n == 0 {
+                    break;
+                }
+                out.extend_from_slice(&piece[..n]);
+            }
+            assert_eq!(out, big, "{name}");
+            assert_eq!(reader.read(&storage, &mut [0; 8]).unwrap(), 0);
+        }
     }
 
     #[test]

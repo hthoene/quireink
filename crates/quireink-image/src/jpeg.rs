@@ -22,16 +22,36 @@ pub(crate) struct Huffman {
     /// Index into `values` of the first code of each length, minus that code.
     offset: [i32; 17],
     values: Vec<u8>,
+    /// The codes of up to [`FAST_BITS`] bits by the next bits: their
+    /// length times 256 plus their value, 0 where a longer code begins.
+    fast: [u16; 1 << FAST_BITS],
 }
+
+/// Bits of the codes looked up at once.
+const FAST_BITS: u32 = 8;
 
 impl Huffman {
     fn new(counts: &[u8; 16], values: Vec<u8>) -> Self {
         let mut max_code = [-1i32; 18];
         let mut offset = [0i32; 17];
+        let mut fast = [0u16; 1 << FAST_BITS];
         let (mut code, mut k) = (0i32, 0i32);
         for len in 1..=16 {
             let count = i32::from(counts[len - 1]);
             offset[len] = k - code;
+            if len <= FAST_BITS as usize {
+                let spread = FAST_BITS as usize - len;
+                for c in 0..count {
+                    let Some(&value) = values.get((k + c) as usize) else {
+                        break;
+                    };
+                    let first = ((code + c) as usize) << spread;
+                    let entry = (len as u16) << 8 | u16::from(value);
+                    for slot in fast.iter_mut().skip(first).take(1 << spread) {
+                        *slot = entry;
+                    }
+                }
+            }
             code += count;
             k += count;
             max_code[len] = if count > 0 { code - 1 } else { -1 };
@@ -43,6 +63,7 @@ impl Huffman {
             max_code,
             offset,
             values,
+            fast,
         }
     }
 }
@@ -68,8 +89,10 @@ pub(crate) struct Bits<'r, 'a> {
 }
 
 impl<'r, 'a> Bits<'r, 'a> {
-    pub(crate) fn bit(&mut self) -> Result<u32, ImageError> {
-        if self.count == 0 {
+    /// Takes bytes until more than 24 bits are at hand (zeros after a
+    /// marker).
+    fn fill(&mut self) -> Result<(), ImageError> {
+        while self.count <= 24 {
             let byte = match self.marker {
                 Some(_) => 0,
                 None => {
@@ -90,19 +113,37 @@ impl<'r, 'a> Bits<'r, 'a> {
                     }
                 }
             };
-            self.bits = u32::from(byte);
-            self.count = 8;
+            self.bits = self.bits << 8 | u32::from(byte);
+            self.count += 8;
         }
+        Ok(())
+    }
+
+    /// The next `n` bits (at most 24), not taken.
+    fn peek(&mut self, n: u32) -> Result<u32, ImageError> {
+        if self.count < n {
+            self.fill()?;
+        }
+        Ok((self.bits >> (self.count - n)) & ((1 << n) - 1))
+    }
+
+    pub(crate) fn bit(&mut self) -> Result<u32, ImageError> {
+        let bit = self.peek(1)?;
         self.count -= 1;
-        Ok((self.bits >> self.count) & 1)
+        Ok(bit)
     }
 
     pub(crate) fn receive(&mut self, n: u32) -> Result<i32, ImageError> {
-        let mut v = 0i32;
-        for _ in 0..n {
-            v = (v << 1) | self.bit()? as i32;
+        if n > 16 {
+            let high = self.receive(n - 16)?;
+            return Ok(high << 16 | self.receive(16)?);
         }
-        Ok(v)
+        if n == 0 {
+            return Ok(0);
+        }
+        let v = self.peek(n)?;
+        self.count -= n;
+        Ok(v as i32)
     }
 
     pub(crate) fn extend(v: i32, n: u32) -> i32 {
@@ -116,8 +157,16 @@ impl<'r, 'a> Bits<'r, 'a> {
     }
 
     pub(crate) fn decode(&mut self, table: &Huffman) -> Result<u8, ImageError> {
-        let mut code = 0i32;
-        for len in 1..=16 {
+        let next = self.peek(FAST_BITS)?;
+        let entry = table.fast[next as usize];
+        if entry != 0 {
+            self.count -= u32::from(entry >> 8);
+            return Ok(entry as u8);
+        }
+        // A longer code: bit by bit from there.
+        self.count -= FAST_BITS;
+        let mut code = next as i32;
+        for len in FAST_BITS as usize + 1..=16 {
             code = (code << 1) | self.bit()? as i32;
             if code <= table.max_code[len] {
                 let index = (table.offset[len] + code) as usize;
@@ -201,6 +250,11 @@ const C1: [[i32; 8]; 8] = [
     [0; 8],
 ];
 
+/// Coefficients are kept within this (a valid one is within 2048), so
+/// sums stay within 32 bits: the processor of the X4 multiplies 64-bit
+/// numbers slowly.
+const COEFFICIENT: i32 = 4095;
+
 /// Inverse DCT of the `n`×`n` lowest frequencies of a block, which gives
 /// the block at `n`/8 of its size (`n` = 8, 4, 2 or 1).
 pub(crate) fn idct_scaled(coef: &[i32; 64], n: usize, out: &mut [u8], stride: usize) {
@@ -219,25 +273,32 @@ pub(crate) fn idct_scaled(coef: &[i32; 64], n: usize, out: &mut [u8], stride: us
             continue;
         }
         for x in 0..n {
-            let mut sum = 0i64;
+            let mut sum = 0i32;
             for (u, &value) in row.iter().enumerate() {
-                sum += i64::from(value) * i64::from(c[u][x]);
+                sum += value.clamp(-COEFFICIENT, COEFFICIENT) * c[u][x];
             }
-            tmp[v * 8 + x] = (sum >> 8) as i32;
+            tmp[v * 8 + x] = sum >> 10;
         }
     }
     // Columns.
     for x in 0..n {
         for y in 0..n {
-            let mut sum = 0i64;
+            let mut sum = 0i32;
             for v in 0..n {
-                sum += i64::from(tmp[v * 8 + x]) * i64::from(c[v][y]);
+                sum += tmp[v * 8 + x] * c[v][y];
             }
-            // Scales: 2^12 · 2^12 / 2^8 = 2^16, plus the level shift.
-            let value = (sum >> 16) as i32 + 128;
+            // Scales: 2^12 · 2^12 / 2^10 = 2^14, plus the level shift.
+            let value = ((sum + (1 << 13)) >> 14) + 128;
             out[y * stride + x] = value.clamp(0, 255) as u8;
         }
     }
+}
+
+/// The level of a block with only its DC coefficient, as
+/// [`idct_scaled`] gives it.
+pub(crate) fn dc_level(dc: i32) -> u8 {
+    let tmp = (dc.clamp(-COEFFICIENT, COEFFICIENT) * 1448) >> 10;
+    (((tmp * 1448 + (1 << 13)) >> 14) + 128).clamp(0, 255) as u8
 }
 
 pub(crate) fn decode(
@@ -519,6 +580,8 @@ fn scan(
                         // Damaged data must not overflow.
                         component.prediction = component.prediction.wrapping_add(diff);
                         coef[0] = component.prediction.saturating_mul(i32::from(q[0]));
+                        // Whether a coefficient decoded counts at this size.
+                        let mut shaded = false;
                         let mut k = 1;
                         while k < 64 {
                             let rs = bits.decode(ac)?;
@@ -536,8 +599,9 @@ fn scan(
                             }
                             if index == 0 || color {
                                 let value = Bits::extend(bits.receive(s)?, s);
-                                coef[usize::from(ZIGZAG[k])] =
-                                    value.saturating_mul(i32::from(q[k]));
+                                let at = usize::from(ZIGZAG[k]);
+                                coef[at] = value.saturating_mul(i32::from(q[k]));
+                                shaded |= at % 8 < n && at / 8 < n;
                             } else {
                                 bits.receive(s)?;
                             }
@@ -546,7 +610,13 @@ fn scan(
                         if index != 0 && !color {
                             continue;
                         }
-                        idct_scaled(&coef, n, &mut block, n);
+                        if shaded {
+                            idct_scaled(&coef, n, &mut block, n);
+                        } else {
+                            // One level: most blocks of a picture made
+                            // smaller.
+                            block[..n * n].fill(dc_level(coef[0]));
+                        }
                         // Place the block, stretched where the component
                         // has less resolution than the largest.
                         let (sx, sy) = if index == 0 {
@@ -561,10 +631,17 @@ fn scan(
                         };
                         let x0 = (mx * h_max + bx * sx) * n;
                         let y0 = by * sy * n;
-                        for y in 0..n * sy {
-                            for x in 0..n * sx {
-                                let at = (y0 + y) * row_width + x0 + x;
-                                plane[at] = block[(y / sy) * n + x / sx];
+                        if (sx, sy) == (1, 1) {
+                            for (y, from) in block.chunks_exact(n).take(n).enumerate() {
+                                let at = (y0 + y) * row_width + x0;
+                                plane[at..at + n].copy_from_slice(from);
+                            }
+                        } else {
+                            for y in 0..n * sy {
+                                for x in 0..n * sx {
+                                    let at = (y0 + y) * row_width + x0 + x;
+                                    plane[at] = block[(y / sy) * n + x / sx];
+                                }
                             }
                         }
                     }

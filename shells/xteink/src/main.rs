@@ -69,6 +69,12 @@ const STATUS_MS: u64 = 60_000;
 /// SPI speeds: an SD card starts slowly.
 const CARD_START_KHZ: u32 = 400;
 const SPI_MHZ: u32 = 20;
+/// Transfers this long and longer go by DMA; shorter ones (commands,
+/// the card's answers) are quicker without.
+const DMA_FROM: usize = 32;
+/// Bytes of each buffer DMA copies through where it cannot reach the
+/// data where it is (e.g. in flash).
+const DMA_COPY: usize = 1024;
 
 const DEVICE: DeviceInfo = DeviceInfo {
     id: "xteink-x4",
@@ -111,12 +117,27 @@ fn main() -> ! {
     let delay = Delay::new();
     info!("QuireInk starting");
 
-    // One SPI bus for the display and the card.
+    // One SPI bus for the display and the card, with DMA for all but
+    // short transfers: the processor fed the bus a word at a time and
+    // waited, a third of the time a book took to open.
     let spi_config = SpiConfig::default()
         .with_frequency(Rate::from_khz(CARD_START_KHZ))
-        .with_mode(Mode::_0);
+        .with_mode(Mode::_0)
+        .with_min_async_transfer_size(DMA_FROM);
+    let (rx, tx) = match (
+        esp_hal::dma_rx_buffer!(DMA_COPY),
+        esp_hal::dma_tx_buffer!(DMA_COPY),
+    ) {
+        (Ok(rx), Ok(tx)) => (rx, tx),
+        _ => panic!("SPI: DMA buffers"),
+    };
     let spi = match Spi::new(p.SPI2, spi_config) {
-        Ok(spi) => spi.with_sck(p.GPIO8).with_mosi(p.GPIO10).with_miso(p.GPIO7),
+        Ok(spi) => spi
+            .with_sck(p.GPIO8)
+            .with_mosi(p.GPIO10)
+            .with_miso(p.GPIO7)
+            .with_dma(p.DMA_CH0)
+            .with_buffers(rx, tx),
         Err(e) => panic!("SPI: {e:?}"),
     };
     let bus: &'static RefCell<_> = Box::leak(Box::new(RefCell::new(spi)));

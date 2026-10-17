@@ -16,6 +16,9 @@ const MAX: usize = 400;
 
 static TRACE: Mutex<RefCell<Option<Vec<String>>>> = Mutex::new(RefCell::new(None));
 
+/// Calls and bytes by what was done and the kind of file, while noting.
+static TALLY: Mutex<RefCell<Vec<(String, u32, u64)>>> = Mutex::new(RefCell::new(Vec::new()));
+
 /// The card's blocks read and written while noting.
 static BLOCKS: Mutex<Cell<(u32, u32)>> = Mutex::new(Cell::new((0, 0)));
 /// Every block read and written while noting (its index, the top bit
@@ -37,9 +40,13 @@ pub fn trace(start: bool) -> Option<Vec<String>> {
             seen.clear();
             *SEEN.borrow_ref_mut(cs) = seen;
             *trace = Some(Vec::new());
+            TALLY.borrow_ref_mut(cs).clear();
             None
         } else {
             let mut lines = trace.take()?;
+            for (what, calls, bytes) in core::mem::take(&mut *TALLY.borrow_ref_mut(cs)) {
+                lines.push(format!("{what}: {calls} calls, {bytes} bytes"));
+            }
             lines.push(format!("blocks read {} written {}", blocks.0, blocks.1));
             // Counted in the list sorted by block (stably: in the order
             // they came within a block), without more memory.
@@ -88,6 +95,26 @@ pub fn blocks(index: u32, read: u32, written: u32) {
     });
 }
 
+/// Counts a call on a kind of file (its extension, or its name).
+fn tally(op: &str, path: &str, bytes: usize) {
+    critical_section::with(|cs| {
+        if TRACE.borrow_ref(cs).is_none() {
+            return;
+        }
+        let name = path.rsplit('/').next().unwrap_or(path);
+        let kind = name.rsplit_once('.').map_or(name, |(_, ext)| ext);
+        let key = format!("{op} {kind}");
+        let mut tally = TALLY.borrow_ref_mut(cs);
+        match tally.iter_mut().find(|(k, _, _)| *k == key) {
+            Some((_, calls, total)) => {
+                *calls += 1;
+                *total += bytes as u64;
+            }
+            None => tally.push((key, 1, bytes as u64)),
+        }
+    });
+}
+
 fn note(what: impl FnOnce() -> String) {
     critical_section::with(|cs| {
         if let Some(trace) = TRACE.borrow_ref_mut(cs).as_mut()
@@ -103,6 +130,7 @@ pub struct Traced(pub Box<dyn Storage>);
 impl Storage for Traced {
     fn read_at(&self, path: &str, offset: u64, buf: &mut [u8]) -> Result<usize, StorageError> {
         note(|| format!("read {path} {offset} {}", buf.len()));
+        tally("read", path, buf.len());
         self.0.read_at(path, offset, buf)
     }
 
@@ -113,11 +141,13 @@ impl Storage for Traced {
 
     fn write(&self, path: &str, data: &[u8]) -> Result<(), StorageError> {
         note(|| format!("write {path} {}", data.len()));
+        tally("write", path, data.len());
         self.0.write(path, data)
     }
 
     fn append(&self, path: &str, data: &[u8]) -> Result<(), StorageError> {
         note(|| format!("append {path} {}", data.len()));
+        tally("append", path, data.len());
         self.0.append(path, data)
     }
 

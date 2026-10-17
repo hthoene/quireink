@@ -234,7 +234,8 @@ pub fn decode(
 /// Buffered byte reader over a [`Source`].
 pub(crate) struct Reader<'a> {
     source: &'a mut dyn Source,
-    buf: [u8; 512],
+    /// Read several blocks of a card at a time.
+    buf: [u8; 4096],
     pos: usize,
     len: usize,
 }
@@ -243,7 +244,7 @@ impl<'a> Reader<'a> {
     fn new(source: &'a mut dyn Source) -> Self {
         Self {
             source,
-            buf: [0; 512],
+            buf: [0; 4096],
             pos: 0,
             len: 0,
         }

@@ -1521,15 +1521,15 @@ pub fn draw_image(canvas: &mut Canvas<'_>, storage: &dyn Storage, image: &ImageR
     if first >= last {
         return;
     }
-    let mut source = alloc::vec![0u8; file.width as usize];
+    let mut rows = RowChunk::new(file.width as usize);
     let mut row = alloc::vec![0u8; w as usize];
     let mut loaded = None;
     for y in first..last {
         let sy = ((y - top) as u64 * u64::from(file.height) / h as u64) as u32;
         if loaded != Some(sy) {
-            if !file.read_row(storage, sy, &mut source) {
+            let Some(source) = rows.get(sy, |y, out| file.read_rows(storage, y, out)) else {
                 return;
-            }
+            };
             loaded = Some(sy);
             let sw = file.width as usize;
             for (x, out) in row.iter_mut().enumerate() {
@@ -1540,6 +1540,45 @@ pub fn draw_image(canvas: &mut Canvas<'_>, storage: &dyn Storage, image: &ImageR
             }
         }
         canvas.draw_gray_row(left, y, &row);
+    }
+}
+
+/// Bytes of a picture's rows read at a time.
+const ROWS_BYTES: usize = 8192;
+
+/// Rows of a picture read several at a time: a card serves whole blocks
+/// in one command faster than a row at a time.
+struct RowChunk {
+    data: Vec<u8>,
+    row: usize,
+    first: u32,
+    count: u32,
+}
+
+impl RowChunk {
+    /// For rows of `row` bytes.
+    fn new(row: usize) -> Self {
+        let rows = (ROWS_BYTES / row.max(1)).max(1);
+        Self {
+            data: alloc::vec![0; rows * row],
+            row,
+            first: 0,
+            count: 0,
+        }
+    }
+
+    /// Row `y`, read with those after it unless at hand; `read` reads rows
+    /// from a row on and says how many.
+    fn get(&mut self, y: u32, read: impl FnOnce(u32, &mut [u8]) -> u32) -> Option<&[u8]> {
+        if !(self.first..self.first + self.count).contains(&y) {
+            self.first = y;
+            self.count = read(y, &mut self.data);
+            if self.count == 0 {
+                return None;
+            }
+        }
+        let at = (y - self.first) as usize * self.row;
+        Some(&self.data[at..at + self.row])
     }
 }
 
@@ -1562,15 +1601,15 @@ fn draw_color_image(
         return;
     }
     let sw = file.width as usize;
-    let mut source = alloc::vec![0u8; sw * 3];
+    let mut rows = RowChunk::new(sw * 3);
     let mut row = alloc::vec![0u8; w as usize * 3];
     let mut loaded = None;
     for y in first..last {
         let sy = ((y - top) as u64 * u64::from(file.height) / h as u64) as u32;
         if loaded != Some(sy) {
-            if !file.read_row(storage, sy, &mut source) {
+            let Some(source) = rows.get(sy, |y, out| file.read_rows(storage, y, out)) else {
                 return;
-            }
+            };
             loaded = Some(sy);
             for x in 0..w as usize {
                 let from = x * sw / w as usize;
