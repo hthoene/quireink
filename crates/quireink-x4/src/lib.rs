@@ -1,5 +1,5 @@
 //! The Xteink X4's hardware, for QuireInk's firmware: its display, its
-//! buttons and its battery. Written against `embedded-hal`, so all of it
+//! microSD card, its buttons and its battery. Written against `embedded-hal`, so all of it
 //! is tested on a computer, against simulated hardware; the firmware only
 //! connects the ESP32-C3's pins to it.
 //!
@@ -25,4 +25,5 @@ extern crate alloc;
 
 pub mod battery;
 pub mod buttons;
+pub mod card;
 pub mod display;

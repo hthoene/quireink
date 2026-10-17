@@ -56,6 +56,9 @@ esp_bootloader_esp_idf::esp_app_desc!();
 
 /// Heap for QuireInk: what the emulator's X4 profile allows.
 const HEAP_SIZE: usize = 192 * 1024;
+/// More heap in the memory the bootloader used (65 KB are free after it):
+/// room for the frame kept for the panel (see [`sent`]).
+const RECLAIMED_SIZE: usize = 64 * 1024;
 /// Rows the kernel draws at once: 11.3 KiB of black and white. Fewer
 /// bands draw faster: each costs the screens a pass over what they show.
 const FRAME_ROWS: u16 = 192;
@@ -104,6 +107,7 @@ fn main() -> ! {
     let mut power_latch = Output::new(p.GPIO13, Level::High, OutputConfig::default());
     esp_println::logger::init_logger_from_env();
     esp_alloc::heap_allocator!(size: HEAP_SIZE);
+    esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: RECLAIMED_SIZE);
     let delay = Delay::new();
     info!("QuireInk starting");
 
@@ -123,40 +127,31 @@ fn main() -> ! {
 
     // The card, then the bus at full speed.
     let storage: Box<dyn quireink_platform::Storage> =
-        match RefCellDevice::new(bus, card_select, delay) {
-            Ok(device) => {
-                let sd = embedded_sdmmc::SdCard::new(device, delay);
-                let size = sd.num_bytes();
+        match quireink_x4::card::Card::new(bus, card_select, delay) {
+            Ok(sd) => {
                 let _ = bus
                     .borrow_mut()
                     .apply_config(&spi_config.with_frequency(Rate::from_mhz(SPI_MHZ)));
-                match size {
-                    Ok(bytes) => {
-                        info!("SD card: {} MB", bytes >> 20);
-                        let fs = BlockDisk::volume(card::Card(sd)).and_then(|disk| {
-                            FileSystem::new(disk, FsOptions::new()).map_err(|_| VolumeError::NoFat)
-                        });
-                        match fs {
-                            Ok(fs) => Box::new(FatStorage::new(Box::leak(Box::new(fs)))),
-                            Err(e) => {
-                                match e {
-                                    VolumeError::ExFat => {
-                                        warn!("SD card: exFAT; QuireInk reads FAT32")
-                                    }
-                                    VolumeError::NoFat => warn!("SD card: no FAT file system"),
-                                    VolumeError::Disk => warn!("SD card: not readable"),
-                                }
-                                Box::new(quireink_platform::NoStorage)
-                            }
-                        }
-                    }
+                info!("SD card: {} MB", sd.blocks() >> 11);
+                let fs = BlockDisk::volume(card::Card(sd)).and_then(|disk| {
+                    FileSystem::new(disk, FsOptions::new()).map_err(|_| VolumeError::NoFat)
+                });
+                match fs {
+                    Ok(fs) => Box::new(FatStorage::new(Box::leak(Box::new(fs)))),
                     Err(e) => {
-                        warn!("SD card: {e:?}");
+                        match e {
+                            VolumeError::ExFat => warn!("SD card: exFAT; QuireInk reads FAT32"),
+                            VolumeError::NoFat => warn!("SD card: no FAT file system"),
+                            VolumeError::Disk => warn!("SD card: not readable"),
+                        }
                         Box::new(quireink_platform::NoStorage)
                     }
                 }
             }
-            Err(_) => Box::new(quireink_platform::NoStorage),
+            Err(e) => {
+                warn!("SD card: {e:?}");
+                Box::new(quireink_platform::NoStorage)
+            }
         };
 
     // The display.

@@ -29,7 +29,6 @@ embedded-hal-bus = "0.3"
 log = "0.4"
 nb = "1"
 critical-section = "1.2"
-embedded-sdmmc = { version = "0.9", default-features = false }
 
 [profile.release]
 opt-level = "s"
