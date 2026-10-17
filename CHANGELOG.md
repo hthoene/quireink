@@ -66,6 +66,10 @@ change the plugin SDK.
   are dithered in whole numbers.
 - X4 remote: `--profile` shows where the time goes (the functions the
   processor was in, every 5 ms), `--trace` what is read and written.
+- X4: a button counts once its reading held 15 ms, and a ladder goes from
+  one button to another only through nothing pressed: let go, the lower
+  page button passed the level of the upper one and turned a page back
+  by itself.
 - X4: the buttons are read with the ADC calibrated for its offset.
   Uncalibrated, every reading came out some 1600 too high: the lower page
   button turned back, and the two left front buttons did nothing.

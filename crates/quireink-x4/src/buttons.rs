@@ -38,8 +38,12 @@ pub const ALL: [&str; 7] = [
     buttons::POWER,
 ];
 
-/// A reading must hold this long to count.
-pub const DEBOUNCE_MS: u64 = 5;
+/// A reading must hold this long to count: three readings 5 ms apart.
+pub const DEBOUNCE_MS: u64 = 15;
+
+/// The buttons of each ladder, as bits of [`State`]: one ladder reads one
+/// button at a time.
+const LADDERS: [u8; 2] = [0b0000_1111, 0b0011_0000];
 
 /// Which buttons are down: a bit each, as in [`ALL`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -78,6 +82,11 @@ fn ladder(reading: u16, limits: &[u16]) -> Option<usize> {
 
 /// Turns readings into presses and releases, once a reading has held for
 /// [`DEBOUNCE_MS`].
+///
+/// A ladder goes from one button to another only through nothing pressed:
+/// let go, its voltage passes the levels of the buttons between, and the
+/// lower page button let go read as the upper one pressed (a page turned
+/// back by itself).
 #[derive(Debug, Default)]
 pub struct Debouncer {
     /// What counts as down.
@@ -105,11 +114,22 @@ impl Debouncer {
             self.since = now;
             return;
         }
-        if now.saturating_sub(self.since) < DEBOUNCE_MS || reading == self.state {
+        if now.saturating_sub(self.since) < DEBOUNCE_MS {
             return;
         }
-        let (before, after) = (self.state.0, reading.0);
-        self.state = reading;
+        let before = self.state.0;
+        let mut after = reading.0;
+        for ladder in LADDERS {
+            let (was, is) = (before & ladder, after & ladder);
+            if was != 0 && is != 0 && was != is {
+                // Another button of the same ladder: the one down stays.
+                after = (after & !ladder) | was;
+            }
+        }
+        if after == before {
+            return;
+        }
+        self.state = State(after);
         for (i, name) in ALL.iter().enumerate() {
             let bit = 1 << i;
             if before & bit != after & bit {
@@ -149,6 +169,45 @@ mod tests {
     }
 
     #[test]
+    fn letting_go_passes_no_other_button() {
+        let mut debouncer = Debouncer::new();
+        let mut events = Vec::new();
+        let forward = State::read(4095, 3, false);
+        let back = State::read(4095, 2242, false);
+        let nothing = State(0);
+        // Every 5 ms, as the X4 reads: forward held, let go through the
+        // level of back (two readings), then nothing.
+        let readings = [
+            forward, forward, forward, forward, back, back, back, back, nothing, nothing, nothing,
+            nothing,
+        ];
+        for (i, reading) in readings.into_iter().enumerate() {
+            debouncer.update(reading, i as u64 * 5, &mut |name, down| {
+                events.push((name, down))
+            });
+        }
+        assert_eq!(
+            events,
+            [
+                (buttons::PAGE_FORWARD, true),
+                (buttons::PAGE_FORWARD, false)
+            ]
+        );
+        // The other ladder at the same time is another button.
+        let both = State::read(2694, 3, false);
+        let mut events = Vec::new();
+        for i in 0..5 {
+            debouncer.update(both, 100 + i * 5, &mut |name, down| {
+                events.push((name, down))
+            });
+        }
+        assert_eq!(
+            events,
+            [(buttons::CONFIRM, true), (buttons::PAGE_FORWARD, true)]
+        );
+    }
+
+    #[test]
     fn presses_count_once_they_hold() {
         let mut debouncer = Debouncer::new();
         let mut events = Vec::new();
@@ -161,10 +220,12 @@ mod tests {
         at(confirm, 3, &mut events);
         assert!(events.is_empty(), "a bounce");
         at(confirm, 10, &mut events);
+        assert!(events.is_empty(), "held 7 ms");
+        at(confirm, 18, &mut events);
         assert_eq!(events, [(buttons::CONFIRM, true)]);
         at(confirm, 20, &mut events);
         at(State(0), 30, &mut events);
-        at(State(0), 40, &mut events);
+        at(State(0), 45, &mut events);
         assert_eq!(
             events,
             [(buttons::CONFIRM, true), (buttons::CONFIRM, false)]
