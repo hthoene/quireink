@@ -309,6 +309,10 @@ pub mod settings {
     /// Partial refreshes between two full refreshes; `0` disables full
     /// refreshes for ghosting removal.
     pub const FULL_REFRESH_INTERVAL: Id = Id::new_static("core.full-refresh-interval");
+    /// Whether another screen opening flashes the panel (a full refresh,
+    /// no traces of the last one, but slow on some panels); else it counts
+    /// as a page turn towards [`FULL_REFRESH_INTERVAL`].
+    pub const FLASH_SCREENS: Id = Id::new_static("core.flash-screens");
     /// Minutes without use after which the device goes to sleep by itself
     /// (`0`: never), where QuireInk puts it to sleep
     /// ([`Env::sleep`](crate::Env)). Turning pages, also by themselves,

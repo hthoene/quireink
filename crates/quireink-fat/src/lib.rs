@@ -3,8 +3,9 @@
 //! reads, writes and seeks in bytes (see [`fatfs::ReadWriteSeek`]), such
 //! as a [`BlockDisk`] over an SD card's blocks.
 //!
-//! The file read last stays open, so reading a book a piece at a time
-//! does not look it up again for every piece. Files are replaced through
+//! The [`OPEN_FILES`] files read last stay open, so reading a book a piece
+//! at a time, often from two files by turns (an index and its text), does
+//! not look them up again for every piece. Files are replaced through
 //! a temporary file beside them, so a write cut short by an empty battery
 //! leaves the old content.
 
@@ -30,14 +31,17 @@ use quireink_platform::{DirEntry, Storage, StorageError};
 pub use fatfs;
 
 type FatFile<IO> = File<'static, IO, DefaultTimeProvider, LossyOemCpConverter>;
+
+/// Files kept open.
+pub const OPEN_FILES: usize = 4;
 type FatDir<IO> = Dir<'static, IO, DefaultTimeProvider, LossyOemCpConverter>;
 
 /// QuireInk's storage on a FAT file system that lives as long as the
 /// device runs (`Box::leak` it).
 pub struct FatStorage<IO: ReadWriteSeek + 'static> {
     fs: &'static FileSystem<IO>,
-    /// The file read last, by its path.
-    open: RefCell<Option<(String, FatFile<IO>)>>,
+    /// The files read last, by their paths, the latest last.
+    open: RefCell<alloc::vec::Vec<(String, FatFile<IO>)>>,
 }
 
 impl<IO: ReadWriteSeek + 'static> core::fmt::Debug for FatStorage<IO> {
@@ -74,7 +78,7 @@ impl<IO: ReadWriteSeek + 'static> FatStorage<IO> {
     pub fn new(fs: &'static FileSystem<IO>) -> Self {
         Self {
             fs,
-            open: RefCell::new(None),
+            open: RefCell::new(alloc::vec::Vec::new()),
         }
     }
 
@@ -99,26 +103,32 @@ impl<IO: ReadWriteSeek + 'static> FatStorage<IO> {
     ) -> Result<T, StorageError> {
         check(path)?;
         let mut open = self.open.borrow_mut();
-        if open.as_ref().is_none_or(|(p, _)| p != path) {
-            *open = None;
-            let file = self.root().open_file(path).map_err(error)?;
-            *open = Some((path.to_string(), file));
+        match open.iter().position(|(p, _)| p == path) {
+            // The latest last.
+            Some(i) => {
+                let file = open.remove(i);
+                open.push(file);
+            }
+            None => {
+                let file = self.root().open_file(path).map_err(error)?;
+                if open.len() == OPEN_FILES {
+                    open.remove(0);
+                }
+                open.push((path.to_string(), file));
+            }
         }
-        match open.as_mut() {
+        match open.last_mut() {
             Some((_, file)) => f(file),
             None => Err(StorageError::Io),
         }
     }
 
-    /// Forgets the open file if it is `path` (or below it).
+    /// Forgets the open files at `path` (or below it).
     fn close(&self, path: &str) {
-        let mut open = self.open.borrow_mut();
-        if open
-            .as_ref()
-            .is_some_and(|(p, _)| p == path || p.starts_with(&format!("{path}/")))
-        {
-            *open = None;
-        }
+        let below = format!("{path}/");
+        self.open
+            .borrow_mut()
+            .retain(|(p, _)| p != path && !p.starts_with(&below));
     }
 
     fn write_all(file: &mut FatFile<IO>, data: &[u8]) -> Result<(), StorageError> {
@@ -439,6 +449,43 @@ mod tests {
             data: vec![0; blocks * BLOCK],
         };
         assert_eq!(opens(card).unwrap_err(), VolumeError::NoFat);
+    }
+
+    #[test]
+    fn many_blocks_and_files_by_turns() {
+        // More blocks than are kept, written and read by turns from more
+        // files than stay open, on a card of blocks.
+        let mut card = BlockDisk::new(Card {
+            data: vec![0; 4 << 20],
+        })
+        .unwrap();
+        fatfs::format_volume(&mut card, FormatVolumeOptions::new()).unwrap();
+        card.flush().unwrap();
+        card.seek(SeekFrom::Start(0)).unwrap();
+        let fs = FileSystem::new(card, FsOptions::new()).unwrap();
+        let s = FatStorage::new(Box::leak(Box::new(fs)));
+        let content =
+            |n: u32| -> Vec<u8> { (0..20_000u32).map(|i| ((i * 7 + n) % 251) as u8).collect() };
+        let names: Vec<String> = (0..6).map(|n| alloc::format!("book/{n}.txt")).collect();
+        for (n, name) in names.iter().enumerate() {
+            s.write(name, &content(n as u32)).unwrap();
+        }
+        let mut buf = [0u8; 300];
+        for round in 0..40u32 {
+            let n = (round * 5 % 6) as usize;
+            let at = u64::from(round * 487 % 19_000);
+            assert_eq!(s.read_at(&names[n], at, &mut buf), Ok(300));
+            let at = at as usize;
+            assert_eq!(
+                &buf[..],
+                &content(n as u32)[at..at + 300],
+                "{} at {at}",
+                names[n]
+            );
+        }
+        // Written again while open: read as written.
+        s.write(&names[0], b"short").unwrap();
+        assert_eq!(s.read_at(&names[0], 0, &mut buf), Ok(5));
     }
 
     #[test]

@@ -95,7 +95,11 @@ pub const PROFILES: &[Profile] = &[
         frame_rows: Some(192),
         row_align: 8,
         // A 4.3" screen: smaller text, so menus and pages hold enough.
-        settings: &[("core.ui-size", "9"), ("reader.font-size", "9")],
+        settings: &[
+            ("core.ui-size", "9"),
+            ("reader.font-size", "9"),
+            ("core.flash-screens", "false"),
+        ],
         speech: false,
         sleep: true,
         button_row: &X4_ROW,
@@ -137,7 +141,11 @@ pub const PROFILES: &[Profile] = &[
         frame_rows: Some(96),
         row_align: 8,
         // A 4.3" screen: smaller text, so menus and pages hold enough.
-        settings: &[("core.ui-size", "9"), ("reader.font-size", "9")],
+        settings: &[
+            ("core.ui-size", "9"),
+            ("reader.font-size", "9"),
+            ("core.flash-screens", "false"),
+        ],
         speech: false,
         sleep: true,
         button_row: &[],

@@ -41,6 +41,12 @@ change the plugin SDK.
   again after a fast refresh instead of drawn anew; gray formats blend
   glyph edges in gray, not through red, green and blue; the panel gets
   its bytes straight from the frame, in bigger pieces.
+- Storage on SD cards (the X4): the 8 blocks used last stay in memory,
+  and the 4 files read last stay open. The library opens in under 2 s
+  instead of 24, a page is laid out in a quarter of a second.
+- *Flash when screens change* (Display, advanced): off, another screen
+  opens with a fast refresh and counts towards the full refresh after so
+  many pages. Off on the X4, where a full refresh takes 3.5 s.
 - X4: on USB power, sleep shows the sleep screen and keeps the USB
   connection, so a computer can still read the log and wake it.
 

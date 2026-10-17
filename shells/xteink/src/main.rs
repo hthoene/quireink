@@ -206,6 +206,8 @@ fn main() -> ! {
         .row_align(8)
         .sleep(true)
         .button_row(&buttons::ROW)
+        // A full refresh takes 3.5 s on its panel: screens change fast.
+        .setting_default("core.flash-screens", "false")
         .setting_default("core.ui-size", "9")
         .setting_default("reader.font-size", "9");
     let mut kernel = match quireink_app::install(builder, quireink_app::Fonts::Packs).build() {

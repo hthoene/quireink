@@ -500,6 +500,17 @@ impl Plugin for CorePlugin {
         )?;
         r.add_setting(
             SettingSpec::new(
+                settings::FLASH_SCREENS,
+                "core.setting.flash-screens",
+                SettingKind::Bool,
+                SettingValue::Bool(true),
+            )
+            .group(groups::DISPLAY)
+            .advanced()
+            .description("core.setting.flash-screens.help"),
+        )?;
+        r.add_setting(
+            SettingSpec::new(
                 settings::SLEEP_AFTER,
                 "core.setting.sleep-after",
                 SettingKind::Int { min: 0, max: 120 },

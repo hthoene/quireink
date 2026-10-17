@@ -3303,7 +3303,11 @@ impl Kernel {
         self.screen_timer = None;
         self.output.wake_at = None;
         self.invalidate(region);
-        self.output.request_refresh(if overlays_only {
+        let flash = self
+            .shared
+            .settings
+            .bool(core_settings::FLASH_SCREENS.as_str());
+        self.output.request_refresh(if overlays_only || !flash {
             RefreshMode::Partial
         } else {
             RefreshMode::Full
