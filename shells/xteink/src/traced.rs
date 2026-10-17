@@ -75,7 +75,10 @@ pub fn trace(start: bool) -> Option<Vec<String>> {
                 "of {total}: distinct read {distinct_read}, distinct written {distinct_written}, read after written {after_written}"
             ));
             for (index, written, n) in top {
-                lines.push(format!("block {index} {} {n} times", if written { "written" } else { "read" }));
+                lines.push(format!(
+                    "block {index} {} {n} times",
+                    if written { "written" } else { "read" }
+                ));
             }
             Some(lines)
         }

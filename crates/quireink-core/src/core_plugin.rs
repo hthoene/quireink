@@ -326,6 +326,7 @@ impl Plugin for CorePlugin {
             (groups::SYSTEM, "core.group.system", 90, "device-tablet"),
             (groups::LOOK, "core.group.look", 210, "palette"),
             (groups::OTHER, "core.group.other", 100, "dots"),
+            (groups::DEVELOPER, "core.group.developer", 95, "bug"),
         ] {
             r.add_setting_group(SettingGroupSpec {
                 id: id.clone(),
@@ -335,6 +336,17 @@ impl Plugin for CorePlugin {
             r.add_icon(id, Cow::Borrowed(icon))?;
         }
 
+        r.add_setting(
+            SettingSpec::new(
+                settings::DEVELOPER,
+                "core.setting.developer",
+                SettingKind::Bool,
+                SettingValue::Bool(false),
+            )
+            .group(groups::SYSTEM)
+            .advanced()
+            .description("core.setting.developer.help"),
+        )?;
         r.add_setting(
             SettingSpec::new(
                 settings::LANGUAGE,

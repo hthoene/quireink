@@ -31,6 +31,8 @@ use log::{Kind, Reading};
 pub const PLUGIN: Id = Id::new_static("battery");
 /// Records the battery's use.
 pub const ENABLED: Id = Id::new_static("battery.enabled");
+/// Shows what each plugin took (for developers).
+pub const BY_PLUGIN: Id = Id::new_static("battery.by-plugin");
 /// Opens the view.
 pub const OPEN: Id = Id::new_static("battery.open");
 const SCREEN: Id = Id::new_static("battery.screen");
@@ -145,6 +147,16 @@ impl Plugin for Battery {
             )
             .group(groups::SYSTEM)
             .description("battery.setting.enabled.help"),
+        )?;
+        r.add_setting(
+            SettingSpec::new(
+                BY_PLUGIN,
+                "battery.setting.by-plugin",
+                SettingKind::Bool,
+                SettingValue::Bool(true),
+            )
+            .group(groups::DEVELOPER)
+            .description("battery.setting.by-plugin.help"),
         )?;
 
         // Recording: a time awake from start-up or waking to sleep.

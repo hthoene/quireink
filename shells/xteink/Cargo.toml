@@ -16,6 +16,7 @@ bench = false
 [dependencies]
 quireink-app = { path = "../../crates/quireink-app", default-features = false, features = ["packs"] }
 quireink-core = { path = "../../crates/quireink-core" }
+quireink-sdk = { path = "../../crates/quireink-sdk" }
 quireink-platform = { path = "../../crates/quireink-platform" }
 quireink-x4 = { path = "../../crates/quireink-x4" }
 quireink-fat = { path = "../../crates/quireink-fat" }
