@@ -10,12 +10,20 @@ use quireink_sdk::document::Locator;
 const ENTRY: u64 = 8;
 const SENTINEL: Locator = Locator::new(u32::MAX, u32::MAX);
 
+/// A page looked for: the position, the index's pages then, and the page
+/// (and whether it starts there).
+type Found = (Locator, u32, Option<(u32, bool)>);
+
 #[derive(Debug, Clone)]
 pub(crate) struct PageIndex {
     path: String,
     /// Number of page entries (without the completion sentinel).
     pages: u32,
     complete: bool,
+    /// The page found last for a position, while the index has as many
+    /// pages: the status line, the chapter and going back ask for the same
+    /// page several times a turn.
+    found: core::cell::Cell<Option<Found>>,
 }
 
 impl PageIndex {
@@ -25,6 +33,7 @@ impl PageIndex {
             path,
             pages: entries,
             complete: false,
+            found: core::cell::Cell::new(None),
         };
         if entries > 0 && index.entry(storage, entries - 1) == Some(SENTINEL) {
             index.pages = entries - 1;
@@ -84,6 +93,18 @@ impl PageIndex {
     /// The page containing `at`: the 0-based index of the last page start
     /// at or before it, and whether `at` is exactly that start.
     pub(crate) fn locate(&self, storage: &dyn Storage, at: Locator) -> Option<(u32, bool)> {
+        if let Some((before, pages, found)) = self.found.get()
+            && before == at
+            && pages == self.pages
+        {
+            return found;
+        }
+        let found = self.search(storage, at);
+        self.found.set(Some((at, self.pages, found)));
+        found
+    }
+
+    fn search(&self, storage: &dyn Storage, at: Locator) -> Option<(u32, bool)> {
         let (mut low, mut high) = (0u32, self.pages);
         while low < high {
             let mid = low + (high - low) / 2;

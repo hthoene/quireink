@@ -14,6 +14,13 @@
 //! - `heap`: `QI:HEAP <used> <free>`, in bytes;
 //! - `input`: `QI:INPUT <readings> <front> <side> <power> <millivolts>`, how
 //!   the buttons and the battery are read;
+//! - `profile start`, `profile stop`: notes where the processor is every
+//!   5 ms in between, sent as `QI:PC <hex> …` lines and `QI:END`;
+//! - `trace start`, `trace stop`: what is done on the storage in between,
+//!   as `QI:IO <what> <path> …` lines and `QI:END`;
+//! - `peek <address> <words>`: memory, as `QI:MEM <address> <hex words>`
+//!   lines of 16 words and `QI:END` (hexadecimal address, at most 4096
+//!   words; only the ROM, e.g. to find where its functions lie);
 //! - `put <size> <path>`: a file for the storage (the SD card), answered
 //!   with `QI:READY`; then lines `data <hex>` until all its bytes came, and
 //!   `QI:OK <size>` once it is written.
@@ -46,6 +53,12 @@ pub enum Command {
     Describe,
     Heap,
     Input,
+    /// Profiling starts (`true`) or stops.
+    Profile(bool),
+    /// Tracing the storage starts (`true`) or stops.
+    Trace(bool),
+    /// Words of the ROM from an address.
+    Peek(u32, u32),
     /// A file of so many bytes for that path.
     Put(usize, String),
 }
@@ -128,6 +141,46 @@ impl Remote {
                 );
             }
             Command::Put(size, path) => self.receive(kernel, size, &path),
+            Command::Profile(true) => {
+                crate::input::profile(true);
+                println!("QI:OK");
+            }
+            Command::Profile(false) => {
+                let places = crate::input::profile(false).unwrap_or_default();
+                let mut line = String::new();
+                for chunk in places.chunks(24) {
+                    line.clear();
+                    for pc in chunk {
+                        let _ = write!(line, " {pc:x}");
+                    }
+                    println!("QI:PC{line}");
+                }
+                println!("QI:END");
+            }
+            Command::Trace(true) => {
+                crate::traced::trace(true);
+                println!("QI:OK");
+            }
+            Command::Trace(false) => {
+                for line in crate::traced::trace(false).unwrap_or_default() {
+                    println!("QI:IO {line}");
+                }
+                println!("QI:END");
+            }
+            Command::Peek(at, count) => {
+                let mut line = String::new();
+                for start in (0..count).step_by(16) {
+                    line.clear();
+                    for i in start..(start + 16).min(count) {
+                        let address = (at + i * 4) as *const u32;
+                        // SAFETY: an aligned word of the ROM, always mapped.
+                        let word = unsafe { core::ptr::read_volatile(address) };
+                        let _ = write!(line, " {word:x}");
+                    }
+                    println!("QI:MEM {:x}{line}", at + start * 4);
+                }
+                println!("QI:END");
+            }
             Command::Input => {
                 let (samples, front, side) = crate::input::stats();
                 let power = crate::input::power_down();
@@ -190,6 +243,27 @@ fn parse(line: &str) -> Option<Command> {
         "describe" => Command::Describe,
         "heap" => Command::Heap,
         "input" => Command::Input,
+        "trace" => match words.next()? {
+            "start" => Command::Trace(true),
+            "stop" => Command::Trace(false),
+            _ => return None,
+        },
+        "peek" => {
+            let at = u32::from_str_radix(words.next()?, 16).ok()?;
+            let count: u32 = words.next()?.parse().ok()?;
+            // The ROM only: reading elsewhere may fault.
+            let rom = 0x4000_0000..0x4006_0000;
+            (count <= 4096
+                && rom.contains(&at)
+                && rom.contains(&(at + count * 4 - 1))
+                && at % 4 == 0)
+                .then_some(Command::Peek(at, count))?
+        }
+        "profile" => match words.next()? {
+            "start" => Command::Profile(true),
+            "stop" => Command::Profile(false),
+            _ => return None,
+        },
         "put" => {
             let size = words.next()?.parse().ok()?;
             // The path is the rest of the line, spaces and all.

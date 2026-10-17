@@ -200,13 +200,43 @@ impl Framebuffer {
             return;
         }
         let value = self.encode(color);
+        let bpp = self.format.bits_per_pixel();
+        // Formats of several pixels a byte: whole bytes at once, the
+        // pixels of the bytes at either end one by one (every band is
+        // cleared before it is drawn).
+        let pattern = match bpp {
+            1 => Some(if value & 1 != 0 { 0xFF } else { 0x00 }),
+            2 => Some((value as u8 & 0b11) * 0x55),
+            4 => Some((value as u8 & 0x0F) * 0x11),
+            _ => None,
+        };
+        let (left, right) = (rect.x, rect.right() as u16);
         for y in rect.y..rect.bottom() as u16 {
+            let row = usize::from(y - self.top) * self.stride;
             if self.format == PixelFormat::Gray8 {
-                let row = usize::from(y - self.top) * self.stride;
-                self.data[row + usize::from(rect.x)..row + rect.right() as usize].fill(value as u8);
+                self.data[row + usize::from(left)..row + usize::from(right)].fill(value as u8);
                 continue;
             }
-            for x in rect.x..rect.right() as u16 {
+            let Some(pattern) = pattern else {
+                for x in left..right {
+                    self.store(x, y, value);
+                }
+                continue;
+            };
+            let per = 8 / u16::from(bpp);
+            let first = left.div_ceil(per) * per;
+            let last = right / per * per;
+            if first >= last {
+                for x in left..right {
+                    self.store(x, y, value);
+                }
+                continue;
+            }
+            for x in left..first {
+                self.store(x, y, value);
+            }
+            self.data[row + usize::from(first / per)..row + usize::from(last / per)].fill(pattern);
+            for x in last..right {
                 self.store(x, y, value);
             }
         }
@@ -360,6 +390,28 @@ fn saturate(rgb: [u8; 3], percent: u16) -> [u8; 3] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fills_whole_bytes_and_the_pixels_at_either_end() {
+        for format in [PixelFormat::Mono1, PixelFormat::Gray2, PixelFormat::Gray4] {
+            for (x, width) in [(0, 37), (3, 1), (5, 2), (7, 25), (9, 30), (16, 16)] {
+                let mut fb = Framebuffer::new(40, 3, format).unwrap();
+                fb.fill_clipped(Rect::new(x, 1, width, 1), Color::BLACK);
+                let view = fb.view();
+                for py in 0..3 {
+                    for px in 0..40 {
+                        let inside = py == 1 && px >= x && px < x + width;
+                        let expected = if inside { Color::BLACK } else { Color::WHITE };
+                        assert_eq!(
+                            view.pixel(px, py),
+                            expected,
+                            "{format:?} {x}+{width} at ({px}, {py})"
+                        );
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn saturation_strengthens_colours_not_grays() {

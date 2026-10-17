@@ -47,6 +47,18 @@ change the plugin SDK.
 - *Flash when screens change* (Display, advanced): off, another screen
   opens with a fast refresh and counts towards the full refresh after so
   many pages. Off on the X4, where a full refresh takes 3.5 s.
+- Faster on small devices, measured on the X4 (a page now turns in about
+  0.7 s): font packs find a glyph's size in whole numbers (the X4 has no
+  floating point unit, and every character asked); the EPUB reader keeps
+  the chapter it reads and finds the next block right after the last;
+  the reader writes its position at most every 5 s (always when the book
+  closes or the device sleeps) and remembers the page it looked up last;
+  bands are cleared a byte at a time; glyphs of the usual weight skip
+  the loop of bold ones; the X4 turns black and white bands eight by
+  eight pixels at once for its panel. A long chapter of notes no longer
+  runs out of memory while converted.
+- X4 remote: `--profile` shows where the time goes (the functions the
+  processor was in, every 5 ms), `--trace` what is read and written.
 - X4: on USB power, sleep shows the sleep screen and keeps the USB
   connection, so a computer can still read the log and wake it.
 

@@ -31,6 +31,10 @@ const PAGES_PER_STEP: usize = 8;
 const PAGES_PER_STEP_SMALL: usize = 1;
 /// Pause between background steps.
 const STEP_DELAY_MS: u64 = 2;
+/// The position is written at most this often while pages turn; always
+/// when the book is closed or the device sleeps. A card is slow to write
+/// to, and turning pages quickly should not wait for it.
+const SAVE_EVERY_MS: u64 = 5000;
 /// Pages remembered for going back before the index covers them.
 const HISTORY: usize = 64;
 /// Places jumps were made from (links, contents, search, page numbers),
@@ -453,6 +457,10 @@ struct Book {
     typography: Typography,
     page: Page,
     history: Vec<Locator>,
+    /// When the position was written last, and whether the page shown has
+    /// changed since.
+    saved_at: Option<quireink_sdk::Instant>,
+    unsaved: bool,
     index: Option<PageIndex>,
     /// Where background pagination continues.
     indexing: Option<Locator>,
@@ -1469,6 +1477,8 @@ impl Book {
             indexing: None,
             page: Page::default(),
             history: Vec::new(),
+            saved_at: None,
+            unsaved: false,
             dir,
             title,
             document,
@@ -1638,7 +1648,32 @@ impl Book {
         self.document.progress(self.page.start) * 100.0
     }
 
-    fn save_position(&self, env: &Env<'_>) {
+    /// Writes the position now, or soon if it was written a moment ago;
+    /// `true` while it waits ([`Book::save_due`]).
+    fn position_changed(&mut self, env: &Env<'_>) -> bool {
+        let recent = self
+            .saved_at
+            .is_some_and(|at| env.now.since(at) < SAVE_EVERY_MS);
+        self.unsaved = recent;
+        if !recent {
+            self.save_position(env);
+        }
+        recent
+    }
+
+    /// Writes the position if it waits; `force` also before its time.
+    fn save_due(&mut self, env: &Env<'_>, force: bool) {
+        let due = self
+            .saved_at
+            .is_none_or(|at| env.now.since(at) >= SAVE_EVERY_MS);
+        if self.unsaved && (force || due) {
+            self.unsaved = false;
+            self.save_position(env);
+        }
+    }
+
+    fn save_position(&mut self, env: &Env<'_>) {
+        self.saved_at = Some(env.now);
         let start = self.page.start;
         let text = format!(
             "[progress]\nsection = {}\noffset = {}\npercent = {:.1}\n",
@@ -1681,7 +1716,9 @@ impl Book {
         self.page = page;
         self.update_chapter(&env);
         self.update_links(&env);
-        self.save_position(&env);
+        if self.position_changed(&env) {
+            cx.wake_at(env.now.add_millis(SAVE_EVERY_MS));
+        }
         if !self.web() {
             cx.command(Command::Emit(events::PAGE_TURNED, self.event_params(&env)));
             // The last page: the book is read to the end.
@@ -2534,6 +2571,9 @@ impl Screen for ReaderScreen {
     /// The book is closed: said, where it was left.
     fn on_close(&mut self, cx: &mut Cx<'_, '_>) {
         let env = *cx.env();
+        if let Ok(book) = &mut self.book {
+            book.save_due(&env, true);
+        }
         if let Ok(book) = &self.book
             && !book.web()
         {
@@ -2666,6 +2706,7 @@ impl Screen for ReaderScreen {
         let Ok(book) = &mut self.book else {
             return;
         };
+        book.save_due(&env, false);
         if book.index_step(&env) {
             cx.wake_at(env.now.add_millis(STEP_DELAY_MS));
         }
@@ -2932,6 +2973,10 @@ impl Screen for ReaderScreen {
         let Ok(book) = &mut self.book else {
             return;
         };
+        // Asleep the device may lose its power: the position first.
+        if *event == events::SUSPEND {
+            book.save_due(cx.env(), true);
+        }
         let this_book = params.get(params::PATH) == Some(book.path.as_str());
         if *event == crate::SPOKEN && this_book {
             self.spoken(params, cx);

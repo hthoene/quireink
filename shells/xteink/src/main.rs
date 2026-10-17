@@ -21,6 +21,7 @@ mod card;
 mod input;
 mod remote;
 mod sent;
+mod traced;
 
 use alloc::boxed::Box;
 use core::cell::RefCell;
@@ -200,7 +201,7 @@ fn main() -> ! {
     let mut kernel_time = 0;
 
     let builder = Kernel::builder(DEVICE)
-        .storage_boxed(storage)
+        .storage_boxed(Box::new(traced::Traced(storage)))
         .glyph_cache(0)
         .frame_rows(FRAME_ROWS)
         .row_align(8)

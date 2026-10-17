@@ -365,6 +365,8 @@ fn fnv(data: &[u8]) -> u64 {
 pub struct Fb2Document {
     path: String,
     paths: CachePaths,
+    /// The block found last (see [`cached::block_at`]).
+    last: core::cell::Cell<Option<u32>>,
     encoding: Encoding,
     metadata: Metadata,
     toc: Vec<(u8, String)>,
@@ -458,6 +460,7 @@ impl Fb2Document {
         Ok(Self {
             path: file,
             paths,
+            last: core::cell::Cell::new(None),
             encoding,
             metadata,
             toc: found.toc,
@@ -602,7 +605,18 @@ impl Document for Fb2Document {
             return Ok(None);
         }
         let (length, blocks) = self.converted(storage)?;
-        cached::block_at(storage, &self.paths, length, blocks, at.offset, self.color)
+        let mut last = self.last.get();
+        let block = cached::block_at(
+            storage,
+            &self.paths,
+            length,
+            blocks,
+            at.offset,
+            self.color,
+            &mut last,
+        );
+        self.last.set(last);
+        block
     }
 
     fn toc_len(&self, _: &dyn Storage) -> u32 {

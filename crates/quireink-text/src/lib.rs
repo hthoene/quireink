@@ -82,7 +82,19 @@ pub fn draw_text_bolder(
     let mut pen = x;
     for ch in text.chars() {
         let glyph = cache.glyph(font_index, font, ch, size);
-        if !glyph.is_empty() {
+        if !glyph.is_empty() && extra == 0 {
+            // The usual weight: each pixel's own coverage.
+            let gx = raster::floor(pen + 0.5) + i32::from(glyph.left);
+            let gy = baseline + i32::from(glyph.top);
+            canvas.draw_mask(
+                gx,
+                gy,
+                u32::from(glyph.width),
+                u32::from(glyph.height),
+                color,
+                |px, py| glyph.coverage(px as u16, py as u16),
+            );
+        } else if !glyph.is_empty() {
             let gx = raster::floor(pen + 0.5) + i32::from(glyph.left);
             let gy = baseline + i32::from(glyph.top);
             let width = u32::from(glyph.width);

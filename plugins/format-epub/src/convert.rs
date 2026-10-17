@@ -780,6 +780,11 @@ impl Converter<'_> {
             margin = larger(margin, frame.after.0);
             padding = css::sum(padding, frame.after.1);
         }
+        // Written as they come: a chapter of notes has many links and few
+        // ids, and its links once filled tens of KB before an id came.
+        if self.links.len() >= FLUSH_SMALL {
+            self.write_links();
+        }
         if self.text.is_empty() {
             self.margin = larger(self.margin, margin);
             self.padding = css::sum(self.padding, padding);

@@ -28,7 +28,7 @@ use alloc::vec::Vec;
 use embedded_hal::delay::DelayNs;
 use embedded_hal::digital::{InputPin, OutputPin};
 use embedded_hal::spi::SpiDevice;
-use quireink_platform::FrameView;
+use quireink_platform::{FrameView, PixelFormat};
 
 /// The panel, as the controller addresses it.
 pub const PANEL_WIDTH: u16 = 800;
@@ -41,7 +41,20 @@ pub const HEIGHT: u16 = PANEL_WIDTH;
 const BUSY_TIMEOUT_MS: u32 = 30_000;
 /// Bytes sent at once: each sending has its cost, a column of a band takes
 /// 12 to 24 bytes.
-const CHUNK: usize = 2048;
+const CHUNK: usize = 1024;
+
+/// Turns eight bytes (rows, the leftmost pixel in the highest bit) into
+/// eight bytes of their columns (the top row in the highest bit).
+fn transpose8(rows: [u8; 8]) -> [u8; 8] {
+    let mut x = u64::from_be_bytes(rows);
+    let t = (x ^ (x >> 7)) & 0x00AA_00AA_00AA_00AA;
+    x ^= t ^ (t << 7);
+    let t = (x ^ (x >> 14)) & 0x0000_CCCC_0000_CCCC;
+    x ^= t ^ (t << 14);
+    let t = (x ^ (x >> 28)) & 0x0000_0000_F0F0_F0F0;
+    x ^= t ^ (t << 28);
+    x.to_be_bytes()
+}
 
 /// The controller's commands used here.
 mod cmd {
@@ -250,6 +263,10 @@ where
             self.window(top, bytes as u16 * 8)?;
             self.command(write, &[])?;
             self.buffer.clear();
+            if rows.format == PixelFormat::Mono1 {
+                self.write_mono(&rows, height, bytes)?;
+                continue;
+            }
             for x in 0..WIDTH {
                 for byte in 0..bytes {
                     let mut bits = 0u8;
@@ -269,6 +286,40 @@ where
             self.data_buffer()?;
         }
         Ok(())
+    }
+
+    /// [`Display::write_rows`] for black and white, as the X4 draws: eight
+    /// rows by eight columns at a time, turned with a few shifts where
+    /// pixel by pixel took a quarter of a page's time.
+    fn write_mono(&mut self, rows: &FrameView<'_>, height: u16, bytes: usize) -> Result<(), Error> {
+        // Each of eight columns' bytes, top to bottom.
+        let mut columns = [0u8; 8 * (HEIGHT as usize / 8)];
+        for column in 0..usize::from(WIDTH) / 8 {
+            for group in 0..bytes {
+                let mut block = [0xFFu8; 8];
+                for (i, row) in block.iter_mut().enumerate() {
+                    let y = group * 8 + i;
+                    if y < usize::from(height) {
+                        *row = rows
+                            .data
+                            .get(y * rows.stride + column)
+                            .copied()
+                            .unwrap_or(0xFF);
+                    }
+                }
+                for (c, byte) in transpose8(block).into_iter().enumerate() {
+                    columns[c * bytes + group] = byte;
+                }
+            }
+            for c in 0..8 {
+                self.buffer
+                    .extend_from_slice(&columns[c * bytes..(c + 1) * bytes]);
+            }
+            if self.buffer.len() >= CHUNK {
+                self.data_buffer()?;
+            }
+        }
+        self.data_buffer()
     }
 
     fn data_buffer(&mut self) -> Result<(), Error> {
@@ -531,6 +582,71 @@ mod tests {
             format: PixelFormat::Gray2,
             stride: usize::from(WIDTH) / 4,
             data,
+        }
+    }
+
+    #[test]
+    fn eight_by_eight_turned() {
+        let rows = [
+            0b1000_0000,
+            0b0100_0001,
+            0,
+            0xFF,
+            0b0000_0001,
+            0,
+            0,
+            0b1000_0000,
+        ];
+        let columns = transpose8(rows);
+        for (r, row) in rows.iter().enumerate() {
+            for (c, column) in columns.iter().enumerate() {
+                let row_bit = row >> (7 - c) & 1;
+                let column_bit = column >> (7 - r) & 1;
+                assert_eq!(row_bit, column_bit, "row {r}, column {c}");
+            }
+        }
+    }
+
+    #[test]
+    fn black_and_white_bands_as_gray_ones() {
+        // The same ink in black and white and in gray: the same planes,
+        // also for a band whose height is not a multiple of 8.
+        let ink = |x: u16, y: u16| (x * 7 + y * 3) % 5 == 0 || x == y;
+        for height in [16, 13] {
+            let gray = band(height, ink);
+            let stride = usize::from(WIDTH) / 8;
+            let mut mono = vec![0xFFu8; stride * usize::from(height)];
+            for y in 0..height {
+                for x in 0..WIDTH {
+                    if ink(x, y) {
+                        mono[usize::from(y) * stride + usize::from(x) / 8] &= !(0x80 >> (x % 8));
+                    }
+                }
+            }
+            let planes = |view: FrameView<'_>| {
+                let controller = Controller::new();
+                let mut display = Display::new(
+                    Spi(controller.clone()),
+                    Dc(controller.clone()),
+                    Pin,
+                    Busy,
+                    Delay,
+                );
+                display.init().unwrap();
+                display.write_rows(96, view, Planes::NEW).unwrap();
+                controller.borrow().new.clone()
+            };
+            let mono_view = FrameView {
+                width: WIDTH,
+                height,
+                format: PixelFormat::Mono1,
+                stride,
+                data: &mono,
+            };
+            assert!(
+                planes(view(&gray, height)) == planes(mono_view),
+                "height {height}"
+            );
         }
     }
 

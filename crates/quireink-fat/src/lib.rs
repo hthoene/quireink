@@ -32,8 +32,8 @@ pub use fatfs;
 
 type FatFile<IO> = File<'static, IO, DefaultTimeProvider, LossyOemCpConverter>;
 
-/// Files kept open.
-pub const OPEN_FILES: usize = 4;
+/// Files kept open (each takes about a hundred bytes).
+pub const OPEN_FILES: usize = 8;
 type FatDir<IO> = Dir<'static, IO, DefaultTimeProvider, LossyOemCpConverter>;
 
 /// QuireInk's storage on a FAT file system that lives as long as the
@@ -101,7 +101,6 @@ impl<IO: ReadWriteSeek + 'static> FatStorage<IO> {
         path: &str,
         f: impl FnOnce(&mut FatFile<IO>) -> Result<T, StorageError>,
     ) -> Result<T, StorageError> {
-        check(path)?;
         let mut open = self.open.borrow_mut();
         match open.iter().position(|(p, _)| p == path) {
             // The latest last.
@@ -110,6 +109,9 @@ impl<IO: ReadWriteSeek + 'static> FatStorage<IO> {
                 open.push(file);
             }
             None => {
+                // Checked once, when opened: a book is read 4 bytes at a
+                // time, many times a page.
+                check(path)?;
                 let file = self.root().open_file(path).map_err(error)?;
                 if open.len() == OPEN_FILES {
                     open.remove(0);

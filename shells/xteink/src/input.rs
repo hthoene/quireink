@@ -3,7 +3,11 @@
 //! more (laying out a page, counting a book's pages), and waits in a queue
 //! until the main loop takes it ([`next`]). Each keeps the time it came,
 //! so a long press stays long.
+//!
+//! The same interrupt can note where the processor is each time, for
+//! finding out where the time goes ([`profile`]).
 
+use alloc::vec::Vec;
 use core::cell::RefCell;
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
@@ -47,6 +51,12 @@ pub struct Sampler {
 }
 
 static SAMPLER: Mutex<RefCell<Option<Sampler>>> = Mutex::new(RefCell::new(None));
+/// Where the processor was at each reading, while profiling.
+static PROFILE: Mutex<RefCell<Option<Vec<u32>>>> = Mutex::new(RefCell::new(None));
+/// Places noted at most (4 bytes each): 15 s.
+const PROFILE_SAMPLES: usize = 3000;
+/// Memory left free for QuireInk while profiling.
+const PROFILE_SPARE: usize = 64 * 1024;
 /// The battery's voltage, in millivolts (0 until first read).
 static MILLIVOLTS: AtomicU32 = AtomicU32::new(0);
 /// The power button is down now (not debounced).
@@ -120,7 +130,16 @@ impl Sampler {
 
 #[handler]
 fn sample() {
+    // The place the interrupt came at.
+    let pc: u32;
+    // SAFETY: reads a register, changes nothing.
+    unsafe { core::arch::asm!("csrr {0}, mepc", out(reg) pc) };
     critical_section::with(|cs| {
+        if let Some(places) = PROFILE.borrow_ref_mut(cs).as_mut()
+            && places.len() < places.capacity()
+        {
+            places.push(pc);
+        }
         if let Some(sampler) = SAMPLER.borrow_ref_mut(cs).as_mut() {
             sampler.timer.clear_interrupt();
             sampler.read();
@@ -148,6 +167,24 @@ pub fn next() -> Option<Change> {
         s.head = (s.head + 1) % QUEUE;
         s.len -= 1;
         change
+    })
+}
+
+/// Starts noting where the processor is (`true`), or stops and gives what
+/// was noted.
+pub fn profile(start: bool) -> Option<Vec<u32>> {
+    critical_section::with(|cs| {
+        let mut profile = PROFILE.borrow_ref_mut(cs);
+        if start {
+            let mut places = Vec::new();
+            if esp_alloc::HEAP.free() > PROFILE_SAMPLES * 4 + PROFILE_SPARE {
+                let _ = places.try_reserve_exact(PROFILE_SAMPLES);
+            }
+            *profile = Some(places);
+            None
+        } else {
+            profile.take()
+        }
     })
 }
 

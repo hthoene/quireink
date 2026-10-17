@@ -48,6 +48,20 @@ pub struct EpubDocument {
     user_css: String,
     /// The printed pages of one section, resolved: offset and label.
     pages: core::cell::RefCell<Option<SectionPages>>,
+    /// The chapter read last, known: its paths, text length and number of
+    /// blocks, and the block found last in it. A page is laid out a block
+    /// at a time, the next one mostly right after the last.
+    known: core::cell::RefCell<Option<Known>>,
+}
+
+/// A converted chapter, as [`EpubDocument::known`] keeps it.
+#[derive(Debug)]
+struct Known {
+    section: u32,
+    paths: CachePaths,
+    length: u32,
+    blocks: u32,
+    last: Option<u32>,
 }
 
 /// A section and its printed pages: offset and label.
@@ -267,6 +281,7 @@ impl EpubDocument {
             color,
             user_css,
             pages: core::cell::RefCell::new(None),
+            known: core::cell::RefCell::new(None),
         })
     }
 
@@ -608,8 +623,29 @@ impl Document for EpubDocument {
         if at.section as usize >= self.spine.len() {
             return Ok(None);
         }
-        let (paths, length, blocks) = self.chapter(storage, at.section)?;
-        cached::block_at(storage, &paths, length, blocks, at.offset, self.color)
+        let mut known = self.known.borrow_mut();
+        if known.as_ref().is_none_or(|k| k.section != at.section) {
+            let (paths, length, blocks) = self.chapter(storage, at.section)?;
+            *known = Some(Known {
+                section: at.section,
+                paths,
+                length,
+                blocks,
+                last: None,
+            });
+        }
+        let Some(k) = known.as_mut() else {
+            return Ok(None);
+        };
+        cached::block_at(
+            storage,
+            &k.paths,
+            k.length,
+            k.blocks,
+            at.offset,
+            self.color,
+            &mut k.last,
+        )
     }
 
     fn links(&self, storage: &dyn Storage, section: u32, from: u32, to: u32) -> Vec<Link> {

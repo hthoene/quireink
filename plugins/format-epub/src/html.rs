@@ -30,6 +30,8 @@ const TITLE: usize = 300;
 pub struct HtmlDocument {
     path: String,
     paths: CachePaths,
+    /// The block found last (see [`cached::block_at`]).
+    last: core::cell::Cell<Option<u32>>,
     metadata: Metadata,
     /// The element holding the reading matter, if the page marks it.
     focus: Option<&'static str>,
@@ -159,6 +161,7 @@ impl HtmlDocument {
         Ok(Self {
             path: path.to_string(),
             paths,
+            last: core::cell::Cell::new(None),
             metadata,
             focus: found.focus,
             base: found.base,
@@ -217,7 +220,18 @@ impl Document for HtmlDocument {
             return Ok(None);
         }
         let (length, blocks) = self.converted(storage)?;
-        cached::block_at(storage, &self.paths, length, blocks, at.offset, false)
+        let mut last = self.last.get();
+        let block = cached::block_at(
+            storage,
+            &self.paths,
+            length,
+            blocks,
+            at.offset,
+            false,
+            &mut last,
+        );
+        self.last.set(last);
+        block
     }
 
     fn links(&self, storage: &dyn Storage, section: u32, from: u32, to: u32) -> Vec<Link> {

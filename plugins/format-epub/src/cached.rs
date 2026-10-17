@@ -104,7 +104,9 @@ pub(crate) fn read_block(
 }
 
 /// The block of a converted chapter containing `offset`, or the first
-/// after it; `None` past its end.
+/// after it; `None` past its end. `last` is the block found the time
+/// before, and becomes this one: read on, the next is mostly the one right
+/// after it, found with two reads where a search takes a dozen.
 pub(crate) fn block_at(
     storage: &dyn Storage,
     paths: &CachePaths,
@@ -112,21 +114,45 @@ pub(crate) fn block_at(
     blocks: u32,
     offset: u32,
     color: bool,
+    last: &mut Option<u32>,
 ) -> Result<Option<Block>, DocumentError> {
     if blocks == 0 || offset >= length {
         return Ok(None);
     }
-    // The last block whose text starts at or before the offset.
-    let (mut low, mut high) = (0u32, blocks);
-    while low < high {
-        let mid = low + (high - low) / 2;
-        if u32_at(storage, &paths.index, u64::from(mid * INDEX))? <= offset {
-            low = mid + 1;
-        } else {
-            high = mid;
+    let start = |block: u32| -> Result<u32, DocumentError> {
+        if block >= blocks {
+            return Ok(u32::MAX);
+        }
+        Ok(u32_at(storage, &paths.index, u64::from(block * INDEX))?)
+    };
+    // The block after the last one, or the last one again.
+    let mut found = None;
+    if let Some(before) = *last {
+        for block in [before + 1, before] {
+            if block < blocks && start(block)? <= offset && offset < start(block + 1)? {
+                found = Some(block);
+                break;
+            }
         }
     }
-    read_block(storage, paths, length, blocks, low.saturating_sub(1), color).map(Some)
+    let block = match found {
+        Some(block) => block,
+        None => {
+            // The last block whose text starts at or before the offset.
+            let (mut low, mut high) = (0u32, blocks);
+            while low < high {
+                let mid = low + (high - low) / 2;
+                if start(mid)? <= offset {
+                    low = mid + 1;
+                } else {
+                    high = mid;
+                }
+            }
+            low.saturating_sub(1)
+        }
+    };
+    *last = Some(block);
+    read_block(storage, paths, length, blocks, block, color).map(Some)
 }
 
 /// Calls `visit` with each line of a cache file until it returns

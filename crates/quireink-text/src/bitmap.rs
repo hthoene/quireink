@@ -105,15 +105,20 @@ impl BitmapFont {
         })
     }
 
+    /// The index of the strike closest to `size`, in whole numbers as the
+    /// pack keeps sizes (quarter pixels): asked for every character drawn
+    /// or measured, on chips that reckon in floats slowly.
+    fn nearest_index(&self, size: f32) -> Option<usize> {
+        let wanted = (size * 4.0) as i32;
+        (0..usize::from(self.strikes))
+            .filter_map(|i| Some((i, i32::from(u16_at(&self.data, HEADER + i * STRIKE)?))))
+            .min_by_key(|&(_, quarters)| (quarters - wanted).abs())
+            .map(|(i, _)| i)
+    }
+
     /// The strike closest to `size`.
     fn nearest(&self, size: f32) -> Option<Strike> {
-        (0..usize::from(self.strikes))
-            .filter_map(|i| self.strike(i))
-            .min_by(|a, b| {
-                let da = crate::raster::abs(a.size - size);
-                let db = crate::raster::abs(b.size - size);
-                da.total_cmp(&db)
-            })
+        self.strike(self.nearest_index(size)?)
     }
 
     pub fn line_metrics(&self, size: f32) -> LineMetrics {
@@ -121,7 +126,19 @@ impl BitmapFont {
             .map_or(LineMetrics::fallback(size), |s| s.metrics)
     }
 
-    fn record(&self, strike: &Strike, ch: char) -> Option<usize> {
+    /// Where a strike's glyphs are: their number, their table and their
+    /// bitmaps (what finding a glyph needs, without the metrics).
+    fn tables(&self, index: usize) -> Option<Tables> {
+        let base = HEADER + index * STRIKE;
+        let d = &self.data;
+        Some(Tables {
+            glyphs: u32_at(d, base + 16)? as usize,
+            glyph_table: u32_at(d, base + 20)? as usize,
+            bitmaps: u32_at(d, base + 24)? as usize,
+        })
+    }
+
+    fn record(&self, strike: &Tables, ch: char) -> Option<usize> {
         let (mut low, mut high) = (0usize, strike.glyphs);
         let target = ch as u32;
         while low < high {
@@ -138,7 +155,8 @@ impl BitmapFont {
     }
 
     pub fn has_char(&self, ch: char) -> bool {
-        self.nearest(0.0)
+        self.nearest_index(0.0)
+            .and_then(|i| self.tables(i))
             .is_some_and(|strike| self.record(&strike, ch).is_some())
     }
 
@@ -153,7 +171,7 @@ impl BitmapFont {
             advance: 0.0,
             data: &[],
         };
-        let Some(strike) = self.nearest(size) else {
+        let Some(strike) = self.nearest_index(size).and_then(|i| self.tables(i)) else {
             return empty;
         };
         let Some(offset) = [ch, '\u{fffd}', '?']
@@ -183,6 +201,13 @@ impl BitmapFont {
     pub fn advance(&self, ch: char, size: f32) -> f32 {
         self.glyph(ch, size).advance
     }
+}
+
+/// Where a strike's glyphs are (see [`BitmapFont::tables`]).
+struct Tables {
+    glyphs: usize,
+    glyph_table: usize,
+    bitmaps: usize,
 }
 
 /// Builds a pack from rasterized glyphs (used by `quireink-fontgen`).
