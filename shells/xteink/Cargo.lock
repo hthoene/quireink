@@ -1128,12 +1128,13 @@ dependencies = [
 
 [[package]]
 name = "quireink-app"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "quireink-core",
  "quireink-plugin-about",
  "quireink-plugin-aids",
  "quireink-plugin-browser",
+ "quireink-plugin-calibre",
  "quireink-plugin-diagnostics",
  "quireink-plugin-dictionary",
  "quireink-plugin-file-manager",
@@ -1146,7 +1147,9 @@ dependencies = [
  "quireink-plugin-hyphenation",
  "quireink-plugin-keyboard",
  "quireink-plugin-keys",
+ "quireink-plugin-koreader",
  "quireink-plugin-kosync",
+ "quireink-plugin-lock",
  "quireink-plugin-menu",
  "quireink-plugin-menu-editor",
  "quireink-plugin-news",
@@ -1168,11 +1171,11 @@ dependencies = [
 
 [[package]]
 name = "quireink-config"
-version = "0.1.0"
+version = "0.3.0"
 
 [[package]]
 name = "quireink-core"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "quireink-config",
  "quireink-graphics",
@@ -1183,14 +1186,14 @@ dependencies = [
 
 [[package]]
 name = "quireink-document"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "quireink-platform",
 ]
 
 [[package]]
 name = "quireink-fat"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "fatfs",
  "quireink-platform",
@@ -1198,25 +1201,25 @@ dependencies = [
 
 [[package]]
 name = "quireink-graphics"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "quireink-platform",
 ]
 
 [[package]]
 name = "quireink-hyphen"
-version = "0.1.0"
+version = "0.3.0"
 
 [[package]]
 name = "quireink-i18n"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "quireink-config",
 ]
 
 [[package]]
 name = "quireink-image"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "miniz_oxide",
  "quireink-platform",
@@ -1224,7 +1227,7 @@ dependencies = [
 
 [[package]]
 name = "quireink-layout"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "quireink-document",
  "quireink-text",
@@ -1232,39 +1235,46 @@ dependencies = [
 
 [[package]]
 name = "quireink-platform"
-version = "0.1.0"
+version = "0.3.0"
 
 [[package]]
 name = "quireink-plugin-about"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "quireink-sdk",
 ]
 
 [[package]]
 name = "quireink-plugin-aids"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "quireink-sdk",
 ]
 
 [[package]]
 name = "quireink-plugin-browser"
-version = "0.1.0"
+version = "0.3.0"
+dependencies = [
+ "quireink-sdk",
+]
+
+[[package]]
+name = "quireink-plugin-calibre"
+version = "0.3.0"
 dependencies = [
  "quireink-sdk",
 ]
 
 [[package]]
 name = "quireink-plugin-diagnostics"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "quireink-sdk",
 ]
 
 [[package]]
 name = "quireink-plugin-dictionary"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "quireink-sdk",
  "quireink-stardict",
@@ -1272,21 +1282,21 @@ dependencies = [
 
 [[package]]
 name = "quireink-plugin-file-manager"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "quireink-sdk",
 ]
 
 [[package]]
 name = "quireink-plugin-files"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "quireink-sdk",
 ]
 
 [[package]]
 name = "quireink-plugin-fonts-default"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "quireink-sdk",
  "quireink-text",
@@ -1294,35 +1304,36 @@ dependencies = [
 
 [[package]]
 name = "quireink-plugin-format-epub"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
+ "miniz_oxide",
  "quireink-sdk",
 ]
 
 [[package]]
 name = "quireink-plugin-format-txt"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "quireink-sdk",
 ]
 
 [[package]]
 name = "quireink-plugin-format-xtc"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "quireink-sdk",
 ]
 
 [[package]]
 name = "quireink-plugin-home"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "quireink-sdk",
 ]
 
 [[package]]
 name = "quireink-plugin-hyphenation"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "quireink-hyphen",
  "quireink-sdk",
@@ -1330,147 +1341,161 @@ dependencies = [
 
 [[package]]
 name = "quireink-plugin-keyboard"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "quireink-sdk",
 ]
 
 [[package]]
 name = "quireink-plugin-keys"
-version = "0.1.0"
+version = "0.3.0"
+dependencies = [
+ "quireink-sdk",
+]
+
+[[package]]
+name = "quireink-plugin-koreader"
+version = "0.3.0"
 dependencies = [
  "quireink-sdk",
 ]
 
 [[package]]
 name = "quireink-plugin-kosync"
-version = "0.1.0"
+version = "0.3.0"
+dependencies = [
+ "quireink-sdk",
+]
+
+[[package]]
+name = "quireink-plugin-lock"
+version = "0.3.0"
 dependencies = [
  "quireink-sdk",
 ]
 
 [[package]]
 name = "quireink-plugin-menu"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "quireink-sdk",
 ]
 
 [[package]]
 name = "quireink-plugin-menu-editor"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "quireink-sdk",
 ]
 
 [[package]]
 name = "quireink-plugin-news"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "quireink-sdk",
 ]
 
 [[package]]
 name = "quireink-plugin-opds"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "quireink-sdk",
 ]
 
 [[package]]
 name = "quireink-plugin-plugin-manager"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "quireink-sdk",
 ]
 
 [[package]]
 name = "quireink-plugin-profiles"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "quireink-sdk",
 ]
 
 [[package]]
 name = "quireink-plugin-reader"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "quireink-sdk",
 ]
 
 [[package]]
 name = "quireink-plugin-readwise"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "quireink-sdk",
 ]
 
 [[package]]
 name = "quireink-plugin-rules"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "quireink-sdk",
 ]
 
 [[package]]
 name = "quireink-plugin-settings"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "quireink-sdk",
 ]
 
 [[package]]
 name = "quireink-plugin-sleep"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "quireink-sdk",
 ]
 
 [[package]]
 name = "quireink-plugin-stats"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "quireink-sdk",
 ]
 
 [[package]]
 name = "quireink-plugin-transfer"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "quireink-sdk",
 ]
 
 [[package]]
 name = "quireink-plugin-translate"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "quireink-sdk",
 ]
 
 [[package]]
 name = "quireink-plugin-vocabulary"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "quireink-sdk",
 ]
 
 [[package]]
 name = "quireink-plugin-wallabag"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "quireink-sdk",
 ]
 
 [[package]]
 name = "quireink-plugin-wikipedia"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "quireink-sdk",
 ]
 
 [[package]]
 name = "quireink-sdk"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "quireink-config",
  "quireink-document",
@@ -1488,14 +1513,14 @@ dependencies = [
 
 [[package]]
 name = "quireink-sqlite"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "quireink-platform",
 ]
 
 [[package]]
 name = "quireink-stardict"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "miniz_oxide",
  "quireink-platform",
@@ -1503,7 +1528,7 @@ dependencies = [
 
 [[package]]
 name = "quireink-text"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "quireink-graphics",
  "quireink-platform",
@@ -1512,7 +1537,7 @@ dependencies = [
 
 [[package]]
 name = "quireink-x4"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "embedded-hal 1.0.0",
  "quireink-platform",
@@ -1520,7 +1545,7 @@ dependencies = [
 
 [[package]]
 name = "quireink-xml"
-version = "0.1.0"
+version = "0.3.0"
 
 [[package]]
 name = "quireink-xteink"
@@ -1545,7 +1570,7 @@ dependencies = [
 
 [[package]]
 name = "quireink-zip"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "miniz_oxide",
  "quireink-platform",
