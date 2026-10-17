@@ -28,6 +28,9 @@ change the plugin SDK.
   (`tools/x4-remote.py --put`); code may use all 8 MB of flash the chip
   maps, not 4 shared with the fonts; the reader counts pages one at a
   time in the background, so buttons answer within half a second.
+- Reader: the status lines sit close to the edge of the screen (1.5 mm,
+  under Status lines › *Distance from the edge*), and the text has the
+  room their margin took: two more lines a page on the X4.
 - X4: on USB power, sleep shows the sleep screen and keeps the USB
   connection, so a computer can still read the log and wake it.
 

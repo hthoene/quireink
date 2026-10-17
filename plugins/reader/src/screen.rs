@@ -342,17 +342,28 @@ impl Typography {
         } else {
             (status::shown(env, true), status::shown(env, false))
         };
-        let lines = f32::from(u8::from(top) + u8::from(bottom));
         let width = (f32::from(display.width) - 2.0 * margin).max(1.0);
-        // Text never runs up to a status line, also on pages it fills to
-        // the last pixel.
+        // Status lines sit close to the edge, in the text's margin; the
+        // text keeps its margin, and never runs up to a status line, also
+        // on pages it fills to the last pixel.
+        let edge = m.tenth_mm(settings.int(status::EDGE.as_str()).clamp(0, 150) as u32) as f32;
         let status_gap = m.mm(2) as f32;
         let status_room = status_height + status_gap;
-        let height = (f32::from(display.height) - 2.0 * margin - lines * status_room).max(1.0);
-        let y = margin + if top { status_room } else { 0.0 };
+        let screen = f32::from(display.height);
+        let y = if top {
+            margin.max(edge + status_room)
+        } else {
+            margin
+        };
+        let end = if bottom {
+            (screen - margin).min(screen - edge - status_room)
+        } else {
+            screen - margin
+        };
+        let height = (end - y).max(1.0);
         let line = |y: f32| Rect::new(margin as u16, y as u16, width as u16, status_height as u16);
-        let top_status = top.then(|| line(margin));
-        let status = bottom.then(|| line(y + height + status_gap));
+        let top_status = top.then(|| line(edge));
+        let status = bottom.then(|| line(screen - edge - status_height));
         let hyphenation = (settings.bool(HYPHENATE.as_str())
             && env.hyphenation.get(language).is_some())
         .then(|| language.to_string());
