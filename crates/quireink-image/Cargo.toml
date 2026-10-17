@@ -13,7 +13,7 @@ keywords = ["jpeg", "png", "e-ink", "no-std"]
 
 [dependencies]
 quireink-platform.workspace = true
-miniz_oxide = { version = "0.8", default-features = false, features = ["with-alloc"] }
+miniz_oxide = { version = "0.9", default-features = false, features = ["with-alloc"] }
 
 [lints]
 workspace = true

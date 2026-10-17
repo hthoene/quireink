@@ -13,7 +13,7 @@ categories = ["no-std", "text-processing"]
 [dependencies]
 quireink-sdk.workspace = true
 # WOFF fonts: their tables are zlib-compressed.
-miniz_oxide = { version = "0.8", default-features = false, features = ["with-alloc"] }
+miniz_oxide = { version = "0.9", default-features = false, features = ["with-alloc"] }
 
 [dev-dependencies]
 quireink-i18n.workspace = true

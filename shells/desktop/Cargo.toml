@@ -23,7 +23,7 @@ quireink-graphics = { workspace = true, features = ["color"] }
 quireink-platform.workspace = true
 # The computer's time zone for the emulated clock.
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
-png = "0.17"
+png = "0.18"
 softbuffer = "0.4"
 # Without client-side decorations on Wayland: they pull in the unmaintained
 # `ttf-parser` (RUSTSEC-2026-0192).

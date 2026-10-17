@@ -13,12 +13,12 @@ keywords = ["stardict", "dictionary", "e-reader", "no-std"]
 
 [dependencies]
 quireink-platform.workspace = true
-miniz_oxide = { version = "0.8", default-features = false, features = ["with-alloc"] }
+miniz_oxide = { version = "0.9", default-features = false, features = ["with-alloc"] }
 
 [dev-dependencies]
 quireink-fs.workspace = true
 quireink-sdk.workspace = true
-miniz_oxide = { version = "0.8", features = ["with-alloc"] }
+miniz_oxide = { version = "0.9", features = ["with-alloc"] }
 
 [lints]
 workspace = true
