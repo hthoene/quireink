@@ -2,7 +2,9 @@
 //! reads and writes: [`BlockDisk`] keeps the [`SLOTS`] blocks used last in
 //! memory (the FAT, folders and the files being read stay at hand: each
 //! block read from a card costs a command and its wait) and writes changed
-//! ones back when their place is needed or on flush.
+//! ones back when their place is needed or on flush. Whole blocks of a
+//! file read or written pass by them, several in one command: a picture
+//! streamed through would push the FAT and the folders out.
 //!
 //! [`BlockDisk::volume`] finds the FAT volume on a card: most cards hold a
 //! partition table (MBR, sometimes GPT) and the file system in a partition
@@ -15,7 +17,7 @@ use fatfs::{IoBase, Read, Seek, SeekFrom, Write};
 /// Size of a block.
 pub const BLOCK: usize = 512;
 /// Blocks kept in memory.
-pub const SLOTS: usize = 8;
+pub const SLOTS: usize = 24;
 
 /// The disk failed to read or write a block.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,6 +41,29 @@ pub trait Blocks {
     fn read_block(&mut self, index: u32, block: &mut [u8; BLOCK]) -> Result<(), DiskError>;
     /// Writes `block` as block `index`.
     fn write_block(&mut self, index: u32, block: &[u8; BLOCK]) -> Result<(), DiskError>;
+    /// Reads blocks from `index` on into `data` (whole blocks), in one
+    /// command where the disk can.
+    fn read_blocks(&mut self, index: u32, data: &mut [u8]) -> Result<(), DiskError> {
+        (index..)
+            .zip(data.chunks_exact_mut(BLOCK))
+            .try_for_each(|(i, block)| {
+                let mut one = [0u8; BLOCK];
+                self.read_block(i, &mut one)?;
+                block.copy_from_slice(&one);
+                Ok(())
+            })
+    }
+    /// Writes `data` (whole blocks) as blocks from `index` on, in one
+    /// command where the disk can.
+    fn write_blocks(&mut self, index: u32, data: &[u8]) -> Result<(), DiskError> {
+        (index..)
+            .zip(data.chunks_exact(BLOCK))
+            .try_for_each(|(i, block)| {
+                let mut one = [0u8; BLOCK];
+                one.copy_from_slice(block);
+                self.write_block(i, &one)
+            })
+    }
     /// Number of blocks.
     fn blocks(&mut self) -> Result<u32, DiskError>;
 }
@@ -247,6 +272,24 @@ impl<B: Blocks> BlockDisk<B> {
         Ok(i)
     }
 
+    /// The disk, for tests.
+    #[cfg(test)]
+    pub(crate) fn disk(&self) -> &B {
+        &self.disk
+    }
+
+    /// Whether block `index` is kept in a slot.
+    fn kept(&self, index: u32) -> bool {
+        self.slots.iter().any(|s| s.index == Some(index))
+    }
+
+    /// Whole blocks from `index` on, at most `whole`, that are not kept.
+    fn passing(&self, index: u32, whole: usize) -> usize {
+        (0..whole as u32)
+            .take_while(|&k| !self.kept(index + k))
+            .count()
+    }
+
     fn write_back(&mut self, i: usize) -> Result<(), DiskError> {
         let slot = &mut self.slots[i];
         if let (true, Some(index)) = (slot.dirty, slot.index) {
@@ -276,6 +319,15 @@ impl<B: Blocks> Read for BlockDisk<B> {
         let mut done = 0;
         while done < len {
             let (index, offset) = self.place();
+            let whole = if offset == 0 { (len - done) / BLOCK } else { 0 };
+            let passing = self.passing(index, whole);
+            if passing > 0 {
+                let bytes = &mut buf[done..done + passing * BLOCK];
+                self.disk.read_blocks(index, bytes)?;
+                done += passing * BLOCK;
+                self.position += (passing * BLOCK) as u64;
+                continue;
+            }
             let slot = self.load(index, true)?;
             let n = (BLOCK - offset).min(len - done);
             buf[done..done + n].copy_from_slice(&self.slots[slot].data[offset..offset + n]);
@@ -293,6 +345,15 @@ impl<B: Blocks> Write for BlockDisk<B> {
         let mut done = 0;
         while done < len {
             let (index, offset) = self.place();
+            let whole = if offset == 0 { (len - done) / BLOCK } else { 0 };
+            let passing = self.passing(index, whole);
+            if passing > 0 {
+                let bytes = &buf[done..done + passing * BLOCK];
+                self.disk.write_blocks(index, bytes)?;
+                done += passing * BLOCK;
+                self.position += (passing * BLOCK) as u64;
+                continue;
+            }
             let n = (BLOCK - offset).min(len - done);
             // A whole block need not be read first.
             let slot = &mut self.slots[self.load(index, n < BLOCK)?];

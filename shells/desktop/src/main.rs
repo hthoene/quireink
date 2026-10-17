@@ -104,6 +104,9 @@ fn run() -> Result<(), String> {
 
     if options.headless {
         device.start();
+        // What is due at once is done first, as on a device (e.g. a book
+        // opened after the screen says it is being prepared).
+        device.tick_if_due();
         if let Some(script) = &options.script {
             headless::run_script(&mut device, script)?;
         }

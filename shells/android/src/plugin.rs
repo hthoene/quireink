@@ -93,6 +93,7 @@ impl Plugin for AndroidPlugin {
                 crate::pdf::PdfDocument::open(&app, storage, path, screen)
                     .map(|d| Box::new(d) as Box<dyn Document>)
             }),
+            prepared: None,
         })?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/en.ini")))?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/de.ini")))?;

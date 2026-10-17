@@ -229,6 +229,7 @@ mod tests {
                 open: alloc::boxed::Box::new(|_, _, _| {
                     Err(crate::document::DocumentError::UnsupportedFormat)
                 }),
+                prepared: None,
             })
             .unwrap();
         formats

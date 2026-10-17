@@ -580,6 +580,9 @@ pub(crate) struct ReaderScreen {
     auto_turn: Option<quireink_sdk::Instant>,
     /// Where skimming began, while skimming.
     skim_from: Option<Locator>,
+    /// The book to open once the screen says it is being prepared (the
+    /// first opening takes a while).
+    preparing: Option<Params>,
 }
 
 /// A sentence read aloud, by words of the page that starts at `page`.
@@ -615,8 +618,18 @@ fn aloud_area(env: &Env<'_>, words: &[WordBox], range: core::ops::Range<usize>) 
 
 impl ReaderScreen {
     pub(crate) fn open(env: &Env<'_>, params: &Params) -> Self {
+        let prepared = params
+            .get(params::PATH)
+            .is_none_or(|path| env.formats.prepared(env.storage, path, &open_options(env)));
+        let (book, preparing) = if prepared {
+            (Book::open(env, params), None)
+        } else {
+            let message = env.i18n.tr("reader.preparing").to_string();
+            (Err(message), Some(params.clone()))
+        };
         Self {
-            book: Book::open(env, params),
+            book,
+            preparing,
             selection: None,
             linking: None,
             last_search: String::new(),
@@ -626,6 +639,28 @@ impl ReaderScreen {
             auto_turn: None,
             skim_from: None,
         }
+    }
+
+    /// Opens the book the screen says is being prepared, if it does;
+    /// whether it did.
+    fn prepare(&mut self, cx: &mut Cx<'_, '_>) -> bool {
+        let Some(params) = self.preparing.take() else {
+            return false;
+        };
+        let env = *cx.env();
+        self.book = Book::open(&env, &params);
+        // Shown as a screen opening is: the book replaces the notice.
+        cx.request_redraw();
+        let flash = env
+            .settings
+            .bool(quireink_sdk::builtin::settings::FLASH_SCREENS.as_str());
+        cx.request_refresh(if flash {
+            RefreshMode::Full
+        } else {
+            RefreshMode::Partial
+        });
+        self.on_show(cx);
+        true
     }
 
     /// Opens the skimming overlay where the book is.
@@ -1435,14 +1470,7 @@ impl Book {
             .get(params::PATH)
             .ok_or_else(|| env.i18n.tr("reader.no-book").to_string())?;
         let error = |e: DocumentError| format!("{}\n{e}", env.i18n.tr("reader.error"));
-        let styles = env
-            .settings
-            .bool(crate::settings::PUBLISHER_STYLES.as_str());
-        let options = env
-            .formats
-            .options()
-            .publisher_styles(styles)
-            .css(env.stylesheets.join("\n"));
+        let options = open_options(env);
         let document = env
             .formats
             .open_with(env.storage, path, &options)
@@ -2668,6 +2696,12 @@ impl Screen for ReaderScreen {
     }
 
     fn on_show(&mut self, cx: &mut Cx<'_, '_>) {
+        if self.preparing.is_some() {
+            // Shown saying so first, then prepared.
+            let now = cx.env().now;
+            cx.wake_at(now);
+            return;
+        }
         // Done skimming: *Back* returns to where it began.
         if let (Some(from), Ok(book)) = (self.skim_from.take(), &mut self.book)
             && book.page.start != from
@@ -2703,6 +2737,9 @@ impl Screen for ReaderScreen {
 
     fn on_timer(&mut self, cx: &mut Cx<'_, '_>) {
         let env = *cx.env();
+        if self.prepare(cx) {
+            return;
+        }
         let Ok(book) = &mut self.book else {
             return;
         };
@@ -2716,6 +2753,8 @@ impl Screen for ReaderScreen {
     }
 
     fn on_action(&mut self, action: &Id, cx: &mut Cx<'_, '_>) -> Handled {
+        // A button pressed while the book is being prepared waits for it.
+        self.prepare(cx);
         // Any button pauses reading aloud (also "Read aloud"), and does
         // nothing else.
         if self.aloud.is_some() {
@@ -3113,6 +3152,18 @@ impl Screen for ReaderScreen {
             cx.wake_at(now);
         }
     }
+}
+
+/// How the reader opens books: with the publisher's styles as set, and
+/// the plugins' stylesheets.
+fn open_options(env: &Env<'_>) -> quireink_sdk::OpenOptions {
+    let styles = env
+        .settings
+        .bool(crate::settings::PUBLISHER_STYLES.as_str());
+    env.formats
+        .options()
+        .publisher_styles(styles)
+        .css(env.stylesheets.join("\n"))
 }
 
 /// Draws an image at its place on the page.

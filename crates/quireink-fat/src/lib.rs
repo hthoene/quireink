@@ -37,7 +37,7 @@ pub use fatfs;
 type FatFile<IO> = File<'static, IO, DefaultTimeProvider, LossyOemCpConverter>;
 
 /// Files kept open (each takes about a hundred bytes).
-pub const OPEN_FILES: usize = 8;
+pub const OPEN_FILES: usize = 16;
 type FatDir<IO> = Dir<'static, IO, DefaultTimeProvider, LossyOemCpConverter>;
 
 /// A file kept open.
@@ -411,6 +411,27 @@ mod tests {
         fn blocks(&mut self) -> Result<u32, DiskError> {
             Ok((self.data.len() / BLOCK) as u32)
         }
+    }
+
+    #[test]
+    fn whole_blocks_pass_by_the_kept_ones() {
+        let mut disk = BlockDisk::new(Card {
+            data: vec![0; 64 * BLOCK],
+        })
+        .unwrap();
+        // Block 1 kept, changed, not yet written back.
+        disk.seek(SeekFrom::Start(BLOCK as u64 + 10)).unwrap();
+        disk.write_all(&[7; 100]).unwrap();
+        // Four whole blocks over it: three pass by, one goes to its slot.
+        let data: Vec<u8> = (0..4 * BLOCK).map(|i| (i % 251) as u8).collect();
+        disk.seek(SeekFrom::Start(0)).unwrap();
+        disk.write_all(&data).unwrap();
+        let mut back = vec![0u8; 4 * BLOCK];
+        disk.seek(SeekFrom::Start(0)).unwrap();
+        disk.read_exact(&mut back).unwrap();
+        assert_eq!(back, data);
+        disk.flush().unwrap();
+        assert_eq!(&disk.disk().data[..4 * BLOCK], &data[..]);
     }
 
     #[test]

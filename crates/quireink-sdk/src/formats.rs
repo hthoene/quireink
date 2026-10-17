@@ -15,6 +15,10 @@ use crate::plugin::RegisterError;
 pub type FormatOpener =
     Box<dyn Fn(&dyn Storage, &str, &OpenOptions) -> Result<Box<dyn Document>, DocumentError>>;
 
+/// Whether a document opens at once as `options` say (see
+/// [`FormatSpec::prepared`]).
+pub type FormatPrepared = Box<dyn Fn(&dyn Storage, &str, &OpenOptions) -> bool>;
+
 /// How a document is opened.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -82,6 +86,10 @@ pub struct FormatSpec {
     /// also double ones such as `fb2.zip`.
     pub extensions: Vec<Cow<'static, str>>,
     pub open: FormatOpener,
+    /// Whether a document opens at once, or is prepared first (e.g.
+    /// converted into a cache), which takes a while the first time: a
+    /// reader says so meanwhile. `None`: always at once.
+    pub prepared: Option<FormatPrepared>,
 }
 
 impl fmt::Debug for FormatSpec {
@@ -182,6 +190,14 @@ impl Formats {
         self.open_with(storage, path, &self.options())
     }
 
+    /// Whether `path` opens at once with `options`, or is prepared first,
+    /// which takes a while (see [`FormatSpec::prepared`]).
+    pub fn prepared(&self, storage: &dyn Storage, path: &str, options: &OpenOptions) -> bool {
+        self.for_path(path)
+            .and_then(|spec| spec.prepared.as_ref())
+            .is_none_or(|prepared| prepared(storage, path, options))
+    }
+
     /// Opens `path` with the matching format and `options`.
     pub fn open_with(
         &self,
@@ -211,6 +227,7 @@ mod tests {
             title: Cow::Borrowed(""),
             extensions: vec![Cow::Borrowed(ext)],
             open: Box::new(|_, _, _| Err(DocumentError::UnsupportedFormat)),
+            prepared: None,
         }
     }
 

@@ -78,7 +78,7 @@ pub use command::{
 pub use env::{Env, Metrics};
 pub use event::EventHandler;
 pub use fonts::{FontHandle, FontSet, FontSpec, Fonts};
-pub use formats::{FormatOpener, FormatSpec, Formats, IMAGE_FIT, OpenOptions};
+pub use formats::{FormatOpener, FormatPrepared, FormatSpec, Formats, IMAGE_FIT, OpenOptions};
 pub use gesture::{Direction, Gesture, GestureKind};
 pub use hyphenation::{Hyphenation, HyphenationSpec};
 pub use id::{Id, InvalidId};

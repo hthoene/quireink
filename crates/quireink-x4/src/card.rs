@@ -23,6 +23,10 @@ const IDLE: u8 = 0x01;
 const ILLEGAL: u8 = 0x04;
 /// What comes before a block of data.
 const DATA_TOKEN: u8 = 0xFE;
+/// What comes before each block written in one command with others.
+const MANY_TOKEN: u8 = 0xFC;
+/// What ends writing blocks in one command.
+const STOP_TOKEN: u8 = 0xFD;
 /// The card's answer to a written block: taken.
 const ACCEPTED: u8 = 0x05;
 
@@ -149,6 +153,18 @@ impl<BUS: SpiBus, D: DelayNs> Session<'_, BUS, D> {
         }
     }
 
+    /// A block of data to the card after `token`, until it has it.
+    fn send(&mut self, token: u8, block: &[u8; BLOCK]) -> Result<(), Error> {
+        self.write(&[0xFF, token])?;
+        self.write(block)?;
+        // A checksum, unchecked.
+        self.write(&[0xFF, 0xFF])?;
+        if self.byte()? & 0x1F != ACCEPTED {
+            return Err(Error::Data);
+        }
+        self.ready(BUSY_US)
+    }
+
     /// A block of data from the card into `buf` (8 bytes at least): polled
     /// for 8 bytes at a time, the first of the data among them kept.
     fn data(&mut self, buf: &mut [u8]) -> Result<(), Error> {
@@ -270,21 +286,28 @@ impl<'a, BUS: SpiBus, CS: OutputPin, D: DelayNs> Card<'a, BUS, CS, D> {
         }
     }
 
-    /// Writes a block, waiting until the card has it.
-    pub fn write(&mut self, index: u32, block: &[u8; BLOCK]) -> Result<(), Error> {
+    /// Writes blocks from `index` on, several in one command (a card
+    /// writes those much faster than one at a time), waiting until the
+    /// card has them: power may go next.
+    pub fn write(&mut self, index: u32, blocks: &[[u8; BLOCK]]) -> Result<(), Error> {
         let address = self.address(index);
-        self.with(|s| {
-            s.expect(24, address)?;
-            s.write(&[0xFF, DATA_TOKEN])?;
-            s.write(block)?;
-            // A checksum, unchecked.
-            s.write(&[0xFF, 0xFF])?;
-            if s.byte()? & 0x1F != ACCEPTED {
-                return Err(Error::Data);
-            }
-            // Written before the card is let go: power may go next.
-            s.ready(BUSY_US)
-        })
+        match blocks {
+            [] => Ok(()),
+            [block] => self.with(|s| {
+                s.expect(24, address)?;
+                s.send(DATA_TOKEN, block)
+            }),
+            blocks => self.with(|s| {
+                s.expect(25, address)?;
+                let written = blocks
+                    .iter()
+                    .try_for_each(|block| s.send(MANY_TOKEN, block));
+                // Stopped even after an error.
+                s.write(&[STOP_TOKEN, 0xFF])?;
+                s.ready(BUSY_US)?;
+                written
+            }),
+        }
     }
 
     fn address(&self, index: u32) -> u32 {
@@ -372,7 +395,9 @@ mod tests {
         /// Blocks sent from this one on until stopped.
         Reading(u32),
         /// A block being received for this one, its bytes so far.
-        Writing(u32, Option<Vec<u8>>),
+        /// A block being received for this one, its bytes so far; one
+        /// of many, or one alone.
+        Writing(u32, Option<Vec<u8>>, bool),
     }
 
     /// A card, simulated byte by byte.
@@ -388,6 +413,8 @@ mod tests {
         clocked: usize,
         /// Bus operations (transfers and writes).
         operations: usize,
+        /// Blocks written.
+        writes: usize,
         idle: bool,
         app: bool,
     }
@@ -408,6 +435,7 @@ mod tests {
                 commands: Vec::new(),
                 clocked: 0,
                 operations: 0,
+                writes: 0,
                 idle: false,
                 app: false,
             };
@@ -483,7 +511,11 @@ mod tests {
                 }
                 24 => {
                     self.answer(0);
-                    self.mode = Mode::Writing(self.index(arg), None);
+                    self.mode = Mode::Writing(self.index(arg), None, false);
+                }
+                25 => {
+                    self.answer(0);
+                    self.mode = Mode::Writing(self.index(arg), None, true);
                 }
                 _ => self.answer(ILLEGAL),
             }
@@ -503,24 +535,35 @@ mod tests {
                 self.mode = Mode::Reading(next + 1);
             }
             let out = self.out.pop_front().unwrap_or(0xFF);
-            if let Mode::Writing(index, data) = &mut self.mode {
-                {
-                    match data {
-                        None if byte == DATA_TOKEN => *data = Some(Vec::new()),
-                        None => {}
-                        Some(bytes) => {
-                            bytes.push(byte);
-                            if bytes.len() == BLOCK + 2 {
-                                let index = *index as usize;
-                                self.blocks[index].copy_from_slice(&bytes[..BLOCK]);
+            if let Mode::Writing(index, data, many) = &mut self.mode {
+                match data {
+                    None if byte == if *many { MANY_TOKEN } else { DATA_TOKEN } => {
+                        *data = Some(Vec::new());
+                    }
+                    None if *many && byte == STOP_TOKEN => {
+                        self.mode = Mode::Commands;
+                        // A byte, then busy a while.
+                        self.out.extend([0xFF, 0, 0, 0]);
+                    }
+                    None => {}
+                    Some(bytes) => {
+                        bytes.push(byte);
+                        if bytes.len() == BLOCK + 2 {
+                            let at = *index as usize;
+                            self.blocks[at].copy_from_slice(&bytes[..BLOCK]);
+                            self.writes += 1;
+                            if *many {
+                                *index += 1;
+                                *data = None;
+                            } else {
                                 self.mode = Mode::Commands;
-                                // Taken, then busy writing.
-                                self.out.extend([0xE5, 0, 0, 0]);
                             }
+                            // Taken, then busy writing.
+                            self.out.extend([0xE5, 0, 0, 0]);
                         }
                     }
-                    return out;
                 }
+                return out;
             }
             if !self.frame.is_empty() || byte & 0xC0 == 0x40 {
                 self.frame.push(byte);
@@ -656,11 +699,23 @@ mod tests {
             let bus = RefCell::new(fake);
             let mut card = Card::new(&bus, Select(selected), NoDelay).unwrap();
             let block: [u8; BLOCK] = core::array::from_fn(|i| (i * 3) as u8);
-            card.write(20, &block).unwrap();
+            card.write(20, &[block]).unwrap();
             assert_eq!(bus.borrow().blocks[20], block);
             let mut back = [[0u8; BLOCK]];
             card.read(20, &mut back).unwrap();
             assert_eq!(back[0], block);
+            // Several in one command, and on after it.
+            let three: [[u8; BLOCK]; 3] =
+                core::array::from_fn(|n| core::array::from_fn(|i| (i + n * 5) as u8));
+            card.write(30, &three).unwrap();
+            assert_eq!(&bus.borrow().blocks[30..33], &three[..]);
+            assert_eq!(
+                bus.borrow().commands.iter().filter(|&&c| c == 25).count(),
+                1
+            );
+            card.write(40, &[block]).unwrap();
+            assert_eq!(bus.borrow().blocks[40], block);
+            assert_eq!(bus.borrow().writes, 5);
         }
     }
 

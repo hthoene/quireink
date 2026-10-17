@@ -79,8 +79,17 @@ change the plugin SDK.
   the room, or on `Storage::sync` (new; the kernel calls it before the
   device sleeps). A cover decoded in hundreds of pieces is no longer
   looked up and written back for each.
-- X4: the first opening of a book with a large cover takes 8.5 s instead
+- X4: the first opening of a book with a large cover takes 6 s instead
   of 22, through the changes above and below.
+- Storage on SD cards: whole blocks of a file pass by the blocks kept,
+  several read or written in one command (`Blocks::read_blocks`,
+  `write_blocks`), so a picture streamed through no longer pushes the FAT
+  and the folders out; 24 blocks are kept instead of 8, and 16 files
+  open instead of 8.
+- The reader says when a book is opened for the first time and takes a
+  moment ("This takes a moment"), then opens it: formats say whether a
+  document opens at once (`FormatSpec::prepared`, `Formats::prepared`);
+  EPUB does once its first chapter is converted.
 - X4: the SD card is read and written by QuireInk's own driver
   (`quireink_x4::card`), a command at a time with the bus held, not a
   bus transaction for every byte as `embedded-sdmmc` did.

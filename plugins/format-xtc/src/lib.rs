@@ -416,6 +416,7 @@ impl Plugin for XtcFormat {
             open: Box::new(|storage, path, _| {
                 XtcDocument::open(storage, path).map(|d| Box::new(d) as Box<dyn Document>)
             }),
+            prepared: None,
         })?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/en.ini")))?;
         r.add_translations(Cow::Borrowed(include_str!("../i18n/de.ini")))?;

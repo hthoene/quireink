@@ -195,6 +195,36 @@ fn origin(line: &str) -> Option<(u32, &str, u32)> {
 }
 
 /// Where chapters converted without the book's styles are kept.
+/// The cache of a book.
+fn book_cache(path: &str) -> String {
+    alloc::format!("{}/{:016x}", Env::plugin_dir(PLUGIN.as_str()), fnv(path))
+}
+
+/// The cache of a book's chapters converted with its styles or not, and
+/// one's own stylesheets: chapters converted with them go into a cache of
+/// their own, so a changed stylesheet applies at once.
+fn chapters_cache(
+    storage: &dyn Storage,
+    path: &str,
+    cache: &str,
+    styles: bool,
+    plugin_css: &str,
+) -> (String, String) {
+    let user_css = if styles {
+        user_css(storage, path, plugin_css)
+    } else {
+        String::new()
+    };
+    let chapters = if !styles {
+        plain_cache(cache)
+    } else if user_css.is_empty() {
+        String::from(cache)
+    } else {
+        alloc::format!("{cache}/css-{:016x}", fnv(&user_css))
+    };
+    (chapters, user_css)
+}
+
 fn plain_cache(cache: &str) -> String {
     alloc::format!("{cache}/plain")
 }
@@ -231,6 +261,25 @@ impl EpubDocument {
         )
     }
 
+    /// Whether the book opens at once as `options` say: its first chapter
+    /// is converted. Converting it (and decoding its pictures, often a
+    /// large cover) takes a while the first time.
+    pub fn prepared(
+        storage: &dyn Storage,
+        path: &str,
+        options: &quireink_sdk::OpenOptions,
+    ) -> bool {
+        let cache = book_cache(path);
+        let (chapters, _) = chapters_cache(
+            storage,
+            path,
+            &cache,
+            options.publisher_styles,
+            &options.css,
+        );
+        storage.exists(&paths(&chapters, 0).end)
+    }
+
     fn open_styled(
         storage: &dyn Storage,
         path: &str,
@@ -240,7 +289,7 @@ impl EpubDocument {
         image_fit: Fit,
     ) -> Result<Self, DocumentError> {
         let archive = ZipArchive::open(storage, path).map_err(package::error)?;
-        let cache = alloc::format!("{}/{:016x}", Env::plugin_dir(PLUGIN.as_str()), fnv(path));
+        let cache = book_cache(path);
         let size = storage.size(path)?;
         let package = match package::load(storage, &cache, size) {
             Some(package) => package,
@@ -254,20 +303,7 @@ impl EpubDocument {
                 package::build(storage, &archive, &cache, size)?
             }
         };
-        // One's own stylesheets: chapters converted with them go into a
-        // cache of their own, so a changed stylesheet applies at once.
-        let user_css = if styles {
-            user_css(storage, path, plugin_css)
-        } else {
-            String::new()
-        };
-        let chapters = if !styles {
-            plain_cache(&cache)
-        } else if user_css.is_empty() {
-            cache.clone()
-        } else {
-            alloc::format!("{cache}/css-{:016x}", fnv(&user_css))
-        };
+        let (chapters, user_css) = chapters_cache(storage, path, &cache, styles, plugin_css);
         let mut metadata = package.metadata;
         if metadata.title.is_none() {
             let name = path.rsplit('/').next().unwrap_or(path);

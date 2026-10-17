@@ -6,7 +6,7 @@ use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
-use core::cell::RefCell;
+use core::cell::{Cell, RefCell};
 
 use critical_section::Mutex;
 use quireink_platform::{DirEntry, Storage, StorageError};
@@ -16,17 +16,76 @@ const MAX: usize = 400;
 
 static TRACE: Mutex<RefCell<Option<Vec<String>>>> = Mutex::new(RefCell::new(None));
 
-/// Starts noting (`true`), or stops and gives what was noted.
+/// The card's blocks read and written while noting.
+static BLOCKS: Mutex<Cell<(u32, u32)>> = Mutex::new(Cell::new((0, 0)));
+/// Every block read and written while noting (its index, the top bit
+/// set for written), as many as [`MAX_SEEN`].
+static SEEN: Mutex<RefCell<Vec<u32>>> = Mutex::new(RefCell::new(Vec::new()));
+const MAX_SEEN: usize = 8000;
+const WRITTEN: u32 = 1 << 31;
+
+/// Starts noting (`true`), or stops and gives what was noted, the blocks
+/// of the card read and written last.
 pub fn trace(start: bool) -> Option<Vec<String>> {
     critical_section::with(|cs| {
         let mut trace = TRACE.borrow_ref_mut(cs);
+        let blocks = BLOCKS.borrow(cs).replace((0, 0));
+        let mut seen = core::mem::take(&mut *SEEN.borrow_ref_mut(cs));
         if start {
+            // Room for all at once: growing needs twice the memory.
+            let _ = seen.try_reserve_exact(MAX_SEEN);
+            seen.clear();
+            *SEEN.borrow_ref_mut(cs) = seen;
             *trace = Some(Vec::new());
             None
         } else {
-            trace.take()
+            let mut lines = trace.take()?;
+            lines.push(format!("blocks read {} written {}", blocks.0, blocks.1));
+            // Counted in the list sorted by block (stably: in the order
+            // they came within a block), without more memory.
+            let total = seen.len();
+            seen.sort_by_key(|block| block & !WRITTEN);
+            let (mut distinct_read, mut distinct_written, mut after_written) = (0, 0, 0);
+            let mut top: Vec<(u32, bool, u32)> = Vec::new();
+            for group in seen.chunk_by(|a, b| a & !WRITTEN == b & !WRITTEN) {
+                let index = group[0] & !WRITTEN;
+                let writes = group.iter().filter(|b| *b & WRITTEN != 0).count() as u32;
+                let reads = group.len() as u32 - writes;
+                distinct_read += u32::from(reads > 0);
+                distinct_written += u32::from(writes > 0);
+                if let Some(first) = group.iter().position(|b| b & WRITTEN != 0) {
+                    after_written += group[first..].iter().filter(|b| *b & WRITTEN == 0).count();
+                }
+                for (n, written) in [(reads, false), (writes, true)] {
+                    if n > 1 {
+                        top.push((index, written, n));
+                        top.sort_unstable_by_key(|t| core::cmp::Reverse(t.2));
+                        top.truncate(12);
+                    }
+                }
+            }
+            lines.push(format!(
+                "of {total}: distinct read {distinct_read}, distinct written {distinct_written}, read after written {after_written}"
+            ));
+            for (index, written, n) in top {
+                lines.push(format!("block {index} {} {n} times", if written { "written" } else { "read" }));
+            }
+            Some(lines)
         }
     })
+}
+
+/// Counts blocks of the card read (or written).
+pub fn blocks(index: u32, read: u32, written: u32) {
+    critical_section::with(|cs| {
+        let mut seen = SEEN.borrow_ref_mut(cs);
+        if seen.len() < seen.capacity() {
+            seen.push(if written > 0 { index | WRITTEN } else { index });
+        }
+        let blocks = BLOCKS.borrow(cs);
+        let (r, w) = blocks.get();
+        blocks.set((r + read, w + written));
+    });
 }
 
 fn note(what: impl FnOnce() -> String) {
