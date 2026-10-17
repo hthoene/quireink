@@ -83,12 +83,12 @@ change the plugin SDK.
   of 22 (and says so after 1 s), through the changes above and below.
 - Pictures compressed in a book are decoded as they are inflated
   (`ZipArchive::reader`, an `EntryReader`), not inflated to a temporary
-  file first; with memory short for both, as before. JPEGs decode a third
-  faster: Huffman codes looked up by their first 8 bits, bits taken a few
-  bytes at a time, the inverse DCT in 32-bit numbers (at half size with 6 multiplications
-  a line instead of 16), and blocks of one
-  level filled at once. Pictures are read and written several blocks of a
-  card at a time (rows drawn in chunks of 8 KB).
+  file first; with memory short for both, as before. JPEGs decode a
+  third faster: Huffman codes looked up by their first 8 bits, bits
+  taken a few bytes at a time, the inverse DCT in 32-bit numbers (at
+  half size with 6 multiplications a line instead of 16), and blocks of
+  one level filled at once. Pictures are read and written several blocks
+  of a card at a time (rows drawn in chunks of 8 KB).
 - X4: the SPI bus uses DMA for transfers of 32 bytes and more.
 - Storage on SD cards: whole blocks of a file pass by the blocks kept,
   several read or written in one command (`Blocks::read_blocks`,
