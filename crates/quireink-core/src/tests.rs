@@ -2225,7 +2225,10 @@ fn a_row_of_hints_names_the_buttons_below_the_screen() {
     );
 
     // The reader keeps all of the screen, made once for it.
-    kernel.apply(Command::OpenSlot(slots::READER, quireink_sdk::Params::new()));
+    kernel.apply(Command::OpenSlot(
+        slots::READER,
+        quireink_sdk::Params::new(),
+    ));
     kernel.finish();
     assert_eq!(made.borrow().last(), Some(&("reader", 90)));
     assert_eq!(made.borrow().len(), 2);
