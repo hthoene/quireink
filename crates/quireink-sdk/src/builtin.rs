@@ -300,6 +300,10 @@ pub mod settings {
 
     /// UI language tag, e.g. `en` or `de`.
     pub const LANGUAGE: Id = Id::new_static("core.language");
+    /// Developer options: the settings of
+    /// [`groups::DEVELOPER`](super::groups::DEVELOPER) show, and plugins may
+    /// show what only developers need (e.g. what each plugin took).
+    pub const DEVELOPER: Id = Id::new_static("core.developer");
     /// Draw everything inverted.
     pub const NIGHT_MODE: Id = Id::new_static("core.night-mode");
     /// How far in from the top and the bottom edge a swipe begins to count
@@ -512,6 +516,9 @@ pub mod groups {
     pub const LOOK: Id = Id::new_static("core.group.look");
     /// Settings whose plugin names no registered group.
     pub const OTHER: Id = Id::new_static("core.group.other");
+    /// For developers: measuring, trying, finding faults. Its settings show
+    /// only with [`settings::DEVELOPER`](super::settings::DEVELOPER) on.
+    pub const DEVELOPER: Id = Id::new_static("core.group.developer");
 }
 
 /// Sections of the settings' main page, with the setting groups and the

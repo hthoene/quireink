@@ -141,6 +141,15 @@ const CASES: &[Case] = &[
         colour: 0,
     },
     Case {
+        name: "boox-developer-settings",
+        profile: "boox-go-7",
+        book: None,
+        // Developer options on: their group of settings.
+        sets: &["settings.advanced=true", "core.developer=true"],
+        script: "swipe:600:1100:600:500,wait:300,tap-on:Settings,wait:500,tap-on:Developer,wait:300",
+        colour: 0,
+    },
+    Case {
         name: "boox-all-tools",
         profile: "boox-go-7",
         book: None,

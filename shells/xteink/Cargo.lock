@@ -1561,6 +1561,7 @@ dependencies = [
  "quireink-core",
  "quireink-fat",
  "quireink-platform",
+ "quireink-sdk",
  "quireink-x4",
 ]
 

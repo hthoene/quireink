@@ -6,6 +6,12 @@ change the plugin SDK.
 
 ## [Unreleased]
 
+- Developer options: an advanced setting under System
+  (`core.developer`) shows a group of settings for developers
+  (`groups::DEVELOPER`), in which any plugin and shell may put its own;
+  the battery's page lists what each plugin took only there
+  (`battery.by-plugin`), and the X4's light sleep on battery can be
+  switched off to measure the difference (`x4.light-sleep`).
 - X4: on battery the processor sleeps (light sleep, about 0.1 mA) while
   there is nothing to do, waking every 30 ms to read the buttons and for
   what is due; before, it spun at full speed (about 20 mA) all the time

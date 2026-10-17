@@ -176,13 +176,17 @@ impl BatteryView {
             None => lines.push(Line::Message(tr("battery.too-little"))),
         }
 
-        // What each plugin took this time awake: its screens shown, its
-        // code running.
+        // What each plugin took this time awake (its screens shown, its
+        // code running): for developers.
+        let developer = env
+            .settings
+            .bool(quireink_sdk::builtin::settings::DEVELOPER.as_str())
+            && env.settings.bool(crate::BY_PLUGIN.as_str());
         let mut shown: Vec<_> = env
             .usage
             .plugins
             .iter()
-            .filter(|p| p.shown_ms >= 60_000)
+            .filter(|p| developer && p.shown_ms >= 60_000)
             .collect();
         shown.sort_by_key(|p| core::cmp::Reverse(p.shown_ms));
         if !shown.is_empty() {
@@ -205,7 +209,7 @@ impl BatteryView {
             .usage
             .plugins
             .iter()
-            .filter(|p| p.busy_us >= 100_000)
+            .filter(|p| developer && p.busy_us >= 100_000)
             .collect();
         busy.sort_by_key(|p| core::cmp::Reverse(p.busy_us));
         if !busy.is_empty() {

@@ -41,7 +41,11 @@ fn pack(bytes: &[u8], out: &mut Vec<u8>) {
     let mut at = 0;
     while at < bytes.len() {
         let byte = bytes[at];
-        let run = bytes[at..].iter().take(130).take_while(|&&b| b == byte).count();
+        let run = bytes[at..]
+            .iter()
+            .take(130)
+            .take_while(|&&b| b == byte)
+            .count();
         // Runs of three on (shorter ones cost more as runs than as bytes
         // between them).
         if run >= 3 {

@@ -181,6 +181,13 @@ fn visible(env: &Env<'_>, spec: &SettingSpec) -> bool {
     if !env.menus.available(spec.id.as_str()) {
         return false;
     }
+    // For developers, once they asked for it; then without the advanced
+    // switch.
+    if env.settings.group_of(spec) == groups::DEVELOPER {
+        return env
+            .settings
+            .bool(quireink_sdk::builtin::settings::DEVELOPER.as_str());
+    }
     spec.level == Level::Basic || env.settings.bool(ADVANCED.as_str())
 }
 

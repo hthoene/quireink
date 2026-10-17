@@ -18,6 +18,7 @@
 extern crate alloc;
 
 mod card;
+mod device;
 mod input;
 mod power;
 mod remote;
@@ -253,7 +254,8 @@ fn main() -> ! {
         .setting_default("core.flash-screens", "false")
         .setting_default("core.ui-size", "9")
         .setting_default("reader.font-size", "9");
-    let mut kernel = match quireink_app::install(builder, quireink_app::Fonts::Packs).build() {
+    let builder = quireink_app::install(builder, quireink_app::Fonts::Packs).plugin(device::X4);
+    let mut kernel = match builder.build() {
         Ok(kernel) => kernel,
         Err(e) => panic!("kernel: {e}"),
     };
@@ -329,7 +331,8 @@ fn main() -> ! {
 
         power::feed();
         power::mark(power::at::LOOP);
-        let battery = usb.is_low() || sleep_on_usb_until.is_some();
+        let battery = (usb.is_low() && kernel.settings().bool(device::LIGHT_SLEEP.as_str()))
+            || sleep_on_usb_until.is_some();
         power::allow(battery);
         let at = now();
         if status_read.is_none_or(|read| at.since(read) >= STATUS_MS) {
