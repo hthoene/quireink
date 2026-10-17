@@ -4,8 +4,8 @@
 //! - **Screen**: the kernel draws in bands of [`FRAME_ROWS`] rows; each
 //!   goes straight into the display controller's memory, which keeps the
 //!   frame (see `quireink_x4::display`).
-//! - **Buttons**: read every [`POLL_MS`] and debounced
-//!   (`quireink_x4::buttons`).
+//! - **Buttons**: read in a timer's interrupt and debounced, so presses
+//!   count while QuireInk is busy (`input`, `quireink_x4::buttons`).
 //! - **Storage**: the SD card's FAT file system, with long file names
 //!   (`quireink_fat`). Without a card, QuireInk starts with nothing to
 //!   read.
@@ -18,6 +18,7 @@
 extern crate alloc;
 
 mod card;
+mod input;
 mod remote;
 
 use alloc::boxed::Box;
@@ -35,6 +36,8 @@ use esp_hal::rtc_cntl::sleep::{LowPower, RtcSleepConfig};
 use esp_hal::spi::Mode;
 use esp_hal::spi::master::{Config as SpiConfig, Spi};
 use esp_hal::time::Rate;
+use esp_hal::timer::PeriodicTimer;
+use esp_hal::timer::timg::TimerGroup;
 use log::{info, warn};
 use quireink_core::{Effects, Kernel};
 use quireink_fat::fatfs::{FileSystem, FsOptions};
@@ -44,7 +47,7 @@ use quireink_platform::{
     PixelFormat, RefreshMode, Rotation, SystemStatus,
 };
 use quireink_x4::battery;
-use quireink_x4::buttons::{self, Debouncer, State};
+use quireink_x4::buttons;
 use quireink_x4::display::{self, Display, Planes, Refresh};
 
 esp_bootloader_esp_idf::esp_app_desc!();
@@ -53,7 +56,7 @@ esp_bootloader_esp_idf::esp_app_desc!();
 const HEAP_SIZE: usize = 192 * 1024;
 /// Rows the kernel draws at once: 11.3 KiB of 2-bit gray.
 const FRAME_ROWS: u16 = 96;
-/// How often the buttons are read.
+/// How long the main loop rests when there is nothing to do.
 const POLL_MS: u64 = 10;
 /// How often the battery is read.
 const STATUS_MS: u64 = 60_000;
@@ -169,20 +172,28 @@ fn main() -> ! {
 
     // Buttons and battery.
     let mut adc_config = AdcConfig::new();
-    let mut front = adc_config.enable_pin(p.GPIO1, Attenuation::_11dB);
-    let mut side = adc_config.enable_pin(p.GPIO2, Attenuation::_11dB);
-    let mut cell =
-        adc_config.enable_pin_with_cal::<_, AdcCalCurve<ADC1>>(p.GPIO0, Attenuation::_11dB);
-    let mut adc = Adc::new(p.ADC1, adc_config);
-    let mut power = Input::new(p.GPIO3, InputConfig::default().with_pull(Pull::Up));
+    let front = adc_config.enable_pin(p.GPIO1, Attenuation::_11dB);
+    let side = adc_config.enable_pin(p.GPIO2, Attenuation::_11dB);
+    let cell = adc_config.enable_pin_with_cal::<_, AdcCalCurve<ADC1>>(p.GPIO0, Attenuation::_11dB);
+    let adc = Adc::new(p.ADC1, adc_config);
+    let power = Input::new(p.GPIO3, InputConfig::default().with_pull(Pull::Up));
     let usb = Input::new(p.GPIO20, InputConfig::default());
-    let mut debouncer = Debouncer::new();
+    let timers = TimerGroup::new(p.TIMG0);
+    input::start(input::Sampler::new(
+        PeriodicTimer::new(timers.timer0),
+        adc,
+        front,
+        side,
+        cell,
+        power,
+    ));
     // Commands from a computer on USB; the log goes out the same way.
     let mut remote = remote::Remote::new(p.USB_DEVICE);
     // A button pressed over USB, and when to let it go.
     let mut remote_release: Option<(&'static str, Instant)> = None;
-    // Woken by the power button, it is still down: it counts once released.
-    let mut power_armed = false;
+    // The latest time the kernel was given: presses that waited in the
+    // queue keep their own time, but never one before it.
+    let mut kernel_time = 0;
 
     let builder = Kernel::builder(DEVICE)
         .storage_boxed(storage)
@@ -214,7 +225,7 @@ fn main() -> ! {
             let _ = display.sleep();
             info!("sleeping");
             // Released first: held, the button would wake it at once.
-            while power.is_low() {
+            while input::power_down() {
                 delay.delay_millis(10);
             }
             // On USB power it stays in reach of a computer (its log, remote
@@ -223,7 +234,7 @@ fn main() -> ! {
             if usb.is_high() {
                 loop {
                     delay.delay_millis(POLL_MS as u32);
-                    if power.is_low() {
+                    if input::power_down() {
                         break;
                     }
                     if let Some(command) = remote.poll()
@@ -236,10 +247,10 @@ fn main() -> ! {
                         }
                     }
                 }
-                while power.is_low() {
+                while input::power_down() {
                     delay.delay_millis(10);
                 }
-                power_armed = false;
+                input::rearm();
                 if let Err(e) = display.init() {
                     warn!("display: {e:?}");
                 }
@@ -250,6 +261,9 @@ fn main() -> ! {
             }
             // On battery, this ends it all: the power button starts the X4
             // again.
+            let Some(mut power) = input::stop() else {
+                panic!("the power button is gone");
+            };
             power_latch.set_low();
             power.listen(Event::LowLevel);
             let _ = power.apply_wakeup_config(&WakeupConfig::default().with_low_power_path(true));
@@ -260,8 +274,7 @@ fn main() -> ! {
         let at = now();
         if status_read.is_none_or(|read| at.since(read) >= STATUS_MS) {
             status_read = Some(at);
-            let measured = nb::block!(adc.read_oneshot(&mut cell)).unwrap_or(0);
-            let percent = battery::percent(battery::millivolts(measured));
+            let percent = battery::percent(input::millivolts());
             let status = SystemStatus {
                 clock: None,
                 battery: Some(Battery {
@@ -273,26 +286,16 @@ fn main() -> ! {
             sleep |= apply(&mut kernel, &mut display, effects, &mut wake_at);
         }
 
-        let front_level = nb::block!(adc.read_oneshot(&mut front)).unwrap_or(4095);
-        let side_level = nb::block!(adc.read_oneshot(&mut side)).unwrap_or(4095);
-        power_armed |= power.is_high();
-        let reading = State::read(front_level, side_level, power_armed && power.is_low());
-        let mut changes: [Option<(&'static str, bool)>; 7] = [None; 7];
-        let mut n = 0;
-        debouncer.update(reading, at.0, &mut |name, down| {
-            if n < changes.len() {
-                changes[n] = Some((name, down));
-                n += 1;
-            }
-        });
-        for (name, down) in changes.into_iter().flatten() {
+        // Presses first, before any work in the background.
+        while let Some((name, down, at)) = input::next() {
             let state = if down {
                 ButtonState::Pressed
             } else {
                 ButtonState::Released
             };
+            kernel_time = at.max(kernel_time);
             let started = now();
-            let effects = kernel.handle(now(), InputEvent::Button { name, state });
+            let effects = kernel.handle(Instant(kernel_time), InputEvent::Button { name, state });
             info!("{name}: {} ms", now().since(started));
             sleep |= apply(&mut kernel, &mut display, effects, &mut wake_at);
         }
@@ -333,7 +336,8 @@ fn main() -> ! {
 
         if wake_at.is_some_and(|due| due <= now()) {
             let started = now();
-            let effects = kernel.tick(now());
+            kernel_time = started.0;
+            let effects = kernel.tick(started);
             let took = now().since(started);
             if took > 50 {
                 info!("tick: {took} ms");

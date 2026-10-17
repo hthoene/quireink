@@ -12,6 +12,8 @@
 //!   <state> <label>` for each row, button or heading (state: `-`, or
 //!   `focused`, `on`, `off` joined by `+`), then `QI:END`;
 //! - `heap`: `QI:HEAP <used> <free>`, in bytes;
+//! - `input`: `QI:INPUT <readings> <front> <side> <power> <millivolts>`, how
+//!   the buttons and the battery are read;
 //! - `put <size> <path>`: a file for the storage (the SD card), answered
 //!   with `QI:READY`; then lines `data <hex>` until all its bytes came, and
 //!   `QI:OK <size>` once it is written.
@@ -43,6 +45,7 @@ pub enum Command {
     Screen,
     Describe,
     Heap,
+    Input,
     /// A file of so many bytes for that path.
     Put(usize, String),
 }
@@ -125,6 +128,12 @@ impl Remote {
                 );
             }
             Command::Put(size, path) => self.receive(kernel, size, &path),
+            Command::Input => {
+                let (samples, front, side) = crate::input::stats();
+                let power = crate::input::power_down();
+                let millivolts = crate::input::millivolts();
+                println!("QI:INPUT {samples} {front} {side} {power} {millivolts}");
+            }
         }
         None
     }
@@ -180,6 +189,7 @@ fn parse(line: &str) -> Option<Command> {
         "screen" => Command::Screen,
         "describe" => Command::Describe,
         "heap" => Command::Heap,
+        "input" => Command::Input,
         "put" => {
             let size = words.next()?.parse().ok()?;
             // The path is the rest of the line, spaces and all.

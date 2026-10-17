@@ -31,6 +31,10 @@ change the plugin SDK.
 - Reader: the status lines sit close to the edge of the screen (1.5 mm,
   under Status lines › *Distance from the edge*), and the text has the
   room their margin took: two more lines a page on the X4.
+- X4: the buttons are read in a timer's interrupt every 5 ms, so a press
+  counts while QuireInk is busy (before, the buttons did nothing while
+  the reader counted a book's pages); presses wait in a queue with the
+  time they came.
 - X4: on USB power, sleep shows the sleep screen and keeps the USB
   connection, so a computer can still read the log and wake it.
 

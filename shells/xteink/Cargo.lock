@@ -1551,6 +1551,7 @@ version = "0.3.0"
 name = "quireink-xteink"
 version = "0.1.0"
 dependencies = [
+ "critical-section",
  "embedded-hal 1.0.0",
  "embedded-hal-bus",
  "embedded-sdmmc",
