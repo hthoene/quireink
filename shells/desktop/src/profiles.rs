@@ -9,6 +9,14 @@ use quireink_platform::{
     ColorPanel, DeviceInfo, DisplayInfo, InputCaps, MemoryClass, PixelFormat, Rotation, buttons,
 };
 
+/// The X4's front buttons, left to right, as `quireink-x4` names them.
+const X4_ROW: [&str; 4] = [
+    buttons::BACK,
+    buttons::CONFIRM,
+    buttons::LEFT,
+    buttons::RIGHT,
+];
+
 /// An emulated device.
 #[derive(Debug, Clone, Copy)]
 pub struct Profile {
@@ -37,6 +45,9 @@ pub struct Profile {
     /// QuireInk shows its sleep screen and the device sleeps (the power
     /// button); Android shows its own.
     pub sleep: bool,
+    /// The buttons in a row below the screen, left to right (see
+    /// `KernelBuilder::button_row`).
+    pub button_row: &'static [&'static str],
     /// One-line description for `--list-profiles`.
     pub summary: &'static str,
 }
@@ -86,6 +97,7 @@ pub const PROFILES: &[Profile] = &[
         settings: &[("core.ui-size", "9"), ("reader.font-size", "9")],
         speech: false,
         sleep: true,
+        button_row: &X4_ROW,
         summary: "ESP32-C3, 4.3\" 800x480, buttons only, 192 KiB heap budget",
     },
     Profile {
@@ -127,6 +139,7 @@ pub const PROFILES: &[Profile] = &[
         settings: &[("core.ui-size", "9"), ("reader.font-size", "9")],
         speech: false,
         sleep: true,
+        button_row: &[],
         summary: "ESP32-S3 (unverified), 4.3\" 800x480, touch + buttons, 256 KiB heap budget",
     },
     Profile {
@@ -158,6 +171,7 @@ pub const PROFILES: &[Profile] = &[
         settings: &[],
         speech: true,
         sleep: false,
+        button_row: &[],
         summary: "Android, 7\" Carta 1300 1264x1680, touch + page buttons",
     },
     Profile {
@@ -192,6 +206,7 @@ pub const PROFILES: &[Profile] = &[
         settings: &[],
         speech: false,
         sleep: true,
+        button_row: &[],
         summary: "Linux, 7\" Kaleido 3 colour 1264x1680, touch + page buttons",
     },
     Profile {
@@ -223,6 +238,7 @@ pub const PROFILES: &[Profile] = &[
         settings: &[],
         speech: false,
         sleep: true,
+        button_row: &[],
         summary: "Linux, 6.8\" 1236x1648, touch only",
     },
     Profile {
@@ -254,6 +270,7 @@ pub const PROFILES: &[Profile] = &[
         settings: &[],
         speech: false,
         sleep: true,
+        button_row: &[],
         summary: "Linux, 6\" 1072x1448, touch only",
     },
     Profile {
@@ -286,6 +303,7 @@ pub const PROFILES: &[Profile] = &[
         settings: &[("core.keymap-preset", "core.two-buttons")],
         speech: false,
         sleep: true,
+        button_row: &[],
         summary: "Generic 6\" 600x800, only page buttons (also: Bluetooth page turners)",
     },
 ];

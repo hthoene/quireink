@@ -2146,3 +2146,101 @@ fn filters_see_inputs_and_refreshes_first() {
     press(&mut kernel, 300, "confirm");
     assert_eq!(log.borrow().len(), 1, "confirm was taken");
 }
+
+/// Screens for the home and the reader slot that note the height they
+/// were made for; the home one names its confirm button.
+struct SizedPlugin(Rc<RefCell<Vec<(&'static str, u16)>>>);
+
+struct SizedScreen;
+
+impl Screen for SizedScreen {
+    fn draw(&mut self, _: &mut Canvas<'_>, _: &Env<'_>) {}
+
+    fn on_action(&mut self, _: &Id, _: &mut Cx<'_, '_>) -> Handled {
+        Handled::No
+    }
+
+    fn hint(&self, action: &Id, _: &Env<'_>) -> quireink_sdk::Hint {
+        if *action == actions::CONFIRM {
+            quireink_sdk::Hint::Text("Go".into())
+        } else {
+            quireink_sdk::Hint::Default
+        }
+    }
+}
+
+impl Plugin for SizedPlugin {
+    fn manifest(&self) -> Manifest {
+        Manifest {
+            id: Id::new_static("sized"),
+            name: Cow::Borrowed("Sized"),
+            description: Cow::Borrowed(""),
+            version: Version::new(1, 0, 0),
+            sdk: SDK_VERSION,
+        }
+    }
+
+    fn register(&self, r: &mut dyn Registrar) -> Result<(), RegisterError> {
+        for (name, slot) in [("home", slots::HOME), ("reader", slots::READER)] {
+            let made = self.0.clone();
+            let id = Id::parse(&alloc::format!("sized.{name}")).unwrap();
+            r.add_screen(ScreenSpec {
+                id: id.clone(),
+                title: Cow::Borrowed("sized"),
+                factory: Box::new(move |env, _| {
+                    made.borrow_mut().push((name, env.device.display.height));
+                    Box::new(SizedScreen)
+                }),
+            })?;
+            r.bind_slot(slot, id, Priority::DEFAULT)?;
+        }
+        Ok(())
+    }
+}
+
+#[test]
+fn a_row_of_hints_names_the_buttons_below_the_screen() {
+    use quireink_sdk::Hint;
+    let made = Rc::new(RefCell::new(Vec::new()));
+    let mut kernel = Kernel::builder(DEVICE)
+        .plugin(SizedPlugin(made.clone()))
+        .button_row(&["back", "confirm", "left", "right"])
+        .build()
+        .unwrap();
+    kernel.start(Instant(0));
+    render(&mut kernel);
+    // The home screen is made for the part above the row.
+    let (_, above) = made.borrow()[0];
+    assert!(above < 90 && above > 45, "{above}");
+    assert_eq!(kernel.hint_row(), Some(Rect::new(0, above, 90, 90 - above)));
+    // Nothing to go back to; the screen's own word; arrows.
+    assert_eq!(
+        kernel.hints,
+        [
+            Hint::Hidden,
+            Hint::Text("Go".into()),
+            Hint::Icon("chevron-left"),
+            Hint::Icon("chevron-right"),
+        ]
+    );
+
+    // The reader keeps all of the screen, made once for it.
+    kernel.apply(Command::OpenSlot(slots::READER, quireink_sdk::Params::new()));
+    kernel.finish();
+    assert_eq!(made.borrow().last(), Some(&("reader", 90)));
+    assert_eq!(made.borrow().len(), 2);
+    assert_eq!(kernel.hint_row(), None);
+    // Back from it, the home screen has the part above the row again.
+    press(&mut kernel, 100, "back");
+    assert_eq!(kernel.content().height, above);
+    assert_eq!(kernel.hints[0], Hint::Hidden);
+
+    // Switched off: the screens are made anew for all of it.
+    kernel.apply(Command::SetSetting(
+        quireink_sdk::builtin::settings::BUTTON_HINTS,
+        quireink_sdk::SettingValue::Bool(false),
+    ));
+    kernel.finish();
+    assert_eq!(made.borrow().last(), Some(&("home", 90)));
+    assert_eq!(kernel.hint_row(), None);
+}

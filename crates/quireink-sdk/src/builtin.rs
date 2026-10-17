@@ -317,6 +317,10 @@ pub mod settings {
     /// How the screen is turned: one of [`ROTATIONS`], where the shell
     /// can turn it (see [`MenuNeed::Rotation`](crate::MenuNeed)).
     pub const ROTATION: Id = Id::new_static("core.rotation");
+    /// Whether a row below the screen shows what the buttons under it do,
+    /// where a device has buttons in a row there (see
+    /// [`MenuNeed::ButtonRow`](crate::MenuNeed)).
+    pub const BUTTON_HINTS: Id = Id::new_static("core.button-hints");
     /// The values of [`ROTATION`]: upright, on its side (landscape),
     /// upside down, on its other side.
     pub const ROTATIONS: [&str; 4] = [

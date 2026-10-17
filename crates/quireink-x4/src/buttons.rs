@@ -24,6 +24,9 @@ const FRONT_LIMITS: [u16; 5] = [3900, 3100, 2090, 750, 0];
 const SIDE: [&str; 2] = [buttons::PAGE_BACK, buttons::PAGE_FORWARD];
 const SIDE_LIMITS: [u16; 3] = [3900, 1120, 0];
 
+/// The front buttons, left to right as they lie below the screen.
+pub const ROW: [&str; 4] = FRONT;
+
 /// Every button, in the order of [`State`]'s bits.
 pub const ALL: [&str; 7] = [
     buttons::BACK,

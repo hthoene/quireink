@@ -190,6 +190,7 @@ fn main() -> ! {
         .frame_rows(FRAME_ROWS)
         .row_align(8)
         .sleep(true)
+        .button_row(&buttons::ROW)
         .setting_default("core.ui-size", "9")
         .setting_default("reader.font-size", "9");
     let mut kernel = match quireink_app::install(builder, quireink_app::Fonts::Packs).build() {
@@ -216,8 +217,38 @@ fn main() -> ! {
             while power.is_low() {
                 delay.delay_millis(10);
             }
+            // On USB power it stays in reach of a computer (its log, remote
+            // control): the sleep screen shows until the power button, or
+            // `press power` over USB, wakes it.
+            if usb.is_high() {
+                loop {
+                    delay.delay_millis(POLL_MS as u32);
+                    if power.is_low() {
+                        break;
+                    }
+                    if let Some(command) = remote.poll()
+                        && let Some((name, _)) = remote::answer(&mut kernel, command)
+                    {
+                        esp_println::println!("QI:OK");
+                        if name == quireink_platform::buttons::POWER {
+                            break;
+                        }
+                    }
+                }
+                while power.is_low() {
+                    delay.delay_millis(10);
+                }
+                power_armed = false;
+                if let Err(e) = display.init() {
+                    warn!("display: {e:?}");
+                }
+                info!("awake");
+                let effects = kernel.resume(now());
+                sleep = apply(&mut kernel, &mut display, effects, &mut wake_at);
+                continue;
+            }
             // On battery, this ends it all: the power button starts the X4
-            // again. On USB power, it sleeps until the button.
+            // again.
             power_latch.set_low();
             power.listen(Event::LowLevel);
             let _ = power.apply_wakeup_config(&WakeupConfig::default().with_low_power_path(true));
@@ -263,36 +294,22 @@ fn main() -> ! {
             sleep |= apply(&mut kernel, &mut display, effects, &mut wake_at);
         }
 
-        if let Some(command) = remote.poll() {
-            match command {
-                remote::Command::Press(name, ms) if remote_release.is_none() => {
-                    let pressed = ButtonState::Pressed;
-                    let effects = kernel.handle(
-                        now(),
-                        InputEvent::Button {
-                            name,
-                            state: pressed,
-                        },
-                    );
-                    sleep |= apply(&mut kernel, &mut display, effects, &mut wake_at);
-                    remote_release = Some((name, Instant(now().0 + ms)));
-                }
-                remote::Command::Press(..) => esp_println::println!("QI:BUSY"),
-                remote::Command::Shot => {
-                    remote::shot(&mut kernel);
-                }
-                remote::Command::Describe => remote::describe(&mut kernel),
-                remote::Command::Screen => {
-                    let id = kernel.active_screen().map_or("", |id| id.as_str());
-                    esp_println::println!("QI:SCREEN {id}");
-                }
-                remote::Command::Heap => {
-                    esp_println::println!(
-                        "QI:HEAP {} {}",
-                        esp_alloc::HEAP.used(),
-                        esp_alloc::HEAP.free()
-                    );
-                }
+        if let Some(command) = remote.poll()
+            && let Some((name, ms)) = remote::answer(&mut kernel, command)
+        {
+            if remote_release.is_some() {
+                esp_println::println!("QI:BUSY");
+            } else {
+                let pressed = ButtonState::Pressed;
+                let effects = kernel.handle(
+                    now(),
+                    InputEvent::Button {
+                        name,
+                        state: pressed,
+                    },
+                );
+                sleep |= apply(&mut kernel, &mut display, effects, &mut wake_at);
+                remote_release = Some((name, Instant(now().0 + ms)));
             }
         }
         if let Some((name, _)) = remote_release.filter(|(_, at)| *at <= now()) {

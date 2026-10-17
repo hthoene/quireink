@@ -527,6 +527,17 @@ impl Plugin for CorePlugin {
             .description("core.setting.rotation.help"),
         )?;
         r.set_menu_need(settings::ROTATION, quireink_sdk::MenuNeed::Rotation)?;
+        r.add_setting(
+            SettingSpec::new(
+                settings::BUTTON_HINTS,
+                "core.setting.button-hints",
+                SettingKind::Bool,
+                SettingValue::Bool(true),
+            )
+            .group(groups::CONTROLS)
+            .description("core.setting.button-hints.help"),
+        )?;
+        r.set_menu_need(settings::BUTTON_HINTS, quireink_sdk::MenuNeed::ButtonRow)?;
         register_spaces(r)?;
         // Each colour, then its own colour code.
         for (id, title, values, own, own_title, own_default) in [

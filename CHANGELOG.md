@@ -15,6 +15,14 @@ change the plugin SDK.
   `tools/x4-remote.py` presses its buttons, takes screenshots and tells
   what the screen shows, with the steps of the emulator's scripts.
   `Kernel::capture` draws the whole screen for a shell to send elsewhere.
+- What the buttons do, at the bottom of the screen: where buttons lie in
+  a row below it (the X4's four), a row above them names what each does
+  on the screen shown: *Back*, *Select*, arrows, or a screen's own word.
+  Not in the reader, which keeps the whole page; switched off under
+  Controls › *Show what the buttons do*. Screens name their buttons with
+  `Screen::hint`, shells give the row with `KernelBuilder::button_row`.
+- X4: on USB power, sleep shows the sleep screen and keeps the USB
+  connection, so a computer can still read the log and wake it.
 
 ## [0.3.0] - 2026-10-16
 

@@ -386,6 +386,7 @@ fn build_kernel(
             .network(true)
             .speech(profile.speech)
             .sleep(profile.sleep)
+            .button_row(profile.button_row)
             .rotation(true);
         // Scalable fonts only where the emulated device renders them.
         if !profile.font_packs {

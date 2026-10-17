@@ -105,6 +105,30 @@ fn button(name: &str) -> Option<&'static str> {
     buttons::ALL.iter().find(|b| **b == name).copied()
 }
 
+/// Answers a command that only asks (the screen, a screenshot, what it
+/// shows, the heap); a button press it gives back for the caller to make.
+pub fn answer(kernel: &mut Kernel, command: Command) -> Option<(&'static str, u64)> {
+    match command {
+        Command::Press(name, ms) => return Some((name, ms)),
+        Command::Shot => {
+            shot(kernel);
+        }
+        Command::Describe => describe(kernel),
+        Command::Screen => {
+            let id = kernel.active_screen().map_or("", |id| id.as_str());
+            println!("QI:SCREEN {id}");
+        }
+        Command::Heap => {
+            println!(
+                "QI:HEAP {} {}",
+                esp_alloc::HEAP.used(),
+                esp_alloc::HEAP.free()
+            );
+        }
+    }
+    None
+}
+
 /// Sends the screen; `false` while changes wait to be shown (ask again).
 pub fn shot(kernel: &mut Kernel) -> bool {
     let display = &kernel.device().display;

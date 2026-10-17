@@ -68,7 +68,7 @@ use quireink_sdk::builtin::{
 };
 use quireink_sdk::{
     Actions, Command, Cx, Direction, Env, EventHandler, Fonts, Formats, Gesture, GestureKind,
-    Handled, Hyphenation, Id, Manifest, Menus, Metrics, Output, Params, Plugin, PluginInfo,
+    Handled, Hint, Hyphenation, Id, Manifest, Menus, Metrics, Output, Params, Plugin, PluginInfo,
     PluginState, Plugins, RegisterError, RequiredFor, SDK_VERSION, Screen, Settings, StatusItems,
 };
 
@@ -217,6 +217,7 @@ pub struct KernelBuilder {
     sleep: bool,
     rotation: bool,
     colors: bool,
+    button_row: &'static [&'static str],
     frame_rows: Option<u16>,
     row_align: u16,
     storage: Option<Box<dyn Storage>>,
@@ -340,6 +341,15 @@ impl KernelBuilder {
     /// [`settings::TEXT_COLOR`](quireink_sdk::builtin::settings::TEXT_COLOR)
     /// and [`settings::PAPER_COLOR`](quireink_sdk::builtin::settings::PAPER_COLOR)
     /// (see [`Kernel::colors`]); without, they are not offered.
+    /// The buttons that lie in a row below the screen, left to right, each
+    /// under an equal share of its width (e.g. the X4's four): a row of
+    /// hints above them shows what they do
+    /// ([`settings::BUTTON_HINTS`](core_settings::BUTTON_HINTS)).
+    pub fn button_row(mut self, buttons: &'static [&'static str]) -> Self {
+        self.button_row = buttons;
+        self
+    }
+
     pub fn colors(mut self, available: bool) -> Self {
         self.colors = available;
         self
@@ -429,6 +439,9 @@ impl KernelBuilder {
             restart: false,
             sleep: false,
             screenshot: None,
+            button_row: self.button_row,
+            hint_height: 0,
+            hints: Vec::new(),
             last_activity: Instant(0),
             scope: None,
             requests: Vec::new(),
@@ -455,6 +468,10 @@ impl KernelBuilder {
         kernel.shared.menus.set_sleep(kernel.shared.sleep);
         kernel.shared.menus.set_rotation(self.rotation);
         kernel.shared.menus.set_colors(self.colors);
+        kernel
+            .shared
+            .menus
+            .set_button_row(!kernel.button_row.is_empty());
         // Colour screens open documents with colour pictures (ADR 0015).
         let color = kernel.shared.device.display.format.is_color();
         kernel.shared.formats.set_color(color);
@@ -606,6 +623,8 @@ impl KernelBuilder {
             .iter()
             .map(|(id, spec)| (id.clone(), spec.title.clone()))
             .collect();
+        // Screens are made for the row of hints from the first one on.
+        kernel.hint_height = kernel.wanted_hint_height();
         Ok(kernel)
     }
 }
@@ -625,6 +644,9 @@ struct ActiveScreen {
     id: Id,
     /// The slot it was opened for, if any.
     slot: Option<Id>,
+    /// Made for the screen above the row of hints (when the row shows);
+    /// overlays are made as the full screen below them.
+    hinted: bool,
     /// What it was opened with, e.g. the book.
     params: Params,
     screen: Box<dyn Screen>,
@@ -681,6 +703,13 @@ pub struct Kernel {
     sleep: bool,
     /// A screenshot to save with the next frame drawn: its path.
     screenshot: Option<String>,
+    /// The buttons in a row below the screen (see
+    /// [`KernelBuilder::button_row`]).
+    button_row: &'static [&'static str],
+    /// The height of the row of hints above them, 0 while it is off.
+    hint_height: u16,
+    /// What the row shows, as it was last drawn.
+    hints: Vec<Hint>,
     /// When the device was last used (input, a page turned), for sleeping
     /// by itself ([`settings::SLEEP_AFTER`](core_settings::SLEEP_AFTER)).
     last_activity: Instant,
@@ -756,6 +785,7 @@ impl Kernel {
             sleep: false,
             rotation: false,
             colors: false,
+            button_row: &[],
             frame_rows: None,
             row_align: 1,
             storage: None,
@@ -881,9 +911,24 @@ impl Kernel {
         let mut described = Vec::new();
         {
             let mut canvas = aside.canvas().describing(&mut described);
+            let content = Rect::new(0, 0, env.device.display.width, env.device.display.height);
             for (active, own) in self.stack[base..].iter_mut().zip(&regions[base..]) {
-                let area = own.unwrap_or(bounds);
+                let area = own.unwrap_or(content);
                 active.screen.draw(&mut canvas.clipped(area), &env);
+            }
+            if content.height < bounds.height {
+                let row = Rect::new(
+                    0,
+                    content.height,
+                    bounds.width,
+                    bounds.height - content.height,
+                );
+                quireink_sdk::ui::draw_button_hints(
+                    &mut canvas.clipped(row),
+                    &env,
+                    row,
+                    &self.hints,
+                );
             }
         }
         quireink_sdk::semantics::parts(described)
@@ -1637,17 +1682,8 @@ impl Kernel {
                 self.framebuffer = framebuffer;
                 self.shared.device.display.width = width;
                 self.shared.device.display.height = height;
-                self.end_notice();
-                self.unrendered = None;
-                self.rendered = None;
-                let env = self.shared.env(now);
-                for active in &mut self.stack {
-                    if let Some(spec) = self.registry.screens.get(&active.id) {
-                        active.screen = (spec.factory)(&env, &active.params);
-                    }
-                }
-                let bounds = self.framebuffer.bounds();
-                self.screen_changed(bounds, false);
+                self.hint_height = self.wanted_hint_height();
+                self.remake_screens();
             }
         }
         self.finish()
@@ -2200,6 +2236,18 @@ impl Kernel {
                 });
             }
             Recognized::Gesture(gesture) => {
+                if gesture.kind == GestureKind::Tap
+                    && let Some(row) = self.hint_row()
+                    && row.contains(gesture.start)
+                {
+                    let count = self.button_row.len() as u32;
+                    let x = u32::try_from(gesture.start.x).unwrap_or(0);
+                    let cell = (x * count / u32::from(row.width).max(1)) as usize;
+                    if let Some(button) = self.button_row.get(cell) {
+                        self.route_key(InputKey::Button(Cow::Borrowed(button)));
+                    }
+                    return;
+                }
                 let overlay = self
                     .stack
                     .len()
@@ -2290,6 +2338,13 @@ impl Kernel {
         // A screen that set a scope may have closed.
         self.check_scope_owner();
         self.run_commands();
+        if let Some(row) = self.hint_row() {
+            let hints = self.current_hints();
+            if hints != self.hints {
+                self.hints = hints;
+                self.invalidate(row);
+            }
+        }
         if mem::take(&mut self.output.redraw)
             && let Some(top) = self.stack.len().checked_sub(1)
         {
@@ -2534,11 +2589,28 @@ impl Kernel {
                 format!("unknown screen `{id}`"),
             );
         };
-        let env = self.shared.env(self.now);
-        let screen = (spec.factory)(&env, params);
+        // Made as the full screen it opens over, which an overlay shares;
+        // a full screen that wants the other size is made again for it.
+        // The reader is a full screen and keeps all of it.
+        let wanted = slot.as_ref() != Some(&slots::READER);
+        let mut hinted = if wanted {
+            self.base_hinted().unwrap_or(true)
+        } else {
+            false
+        };
+        self.shared.device.display.height = self.content_height(hinted);
+        let mut screen = (spec.factory)(&self.shared.env(self.now), params);
+        if hinted != wanted && screen.region(&self.shared.env(self.now)).is_none() {
+            // The first one goes before the second is made.
+            drop(screen);
+            hinted = wanted;
+            self.shared.device.display.height = self.content_height(hinted);
+            screen = (spec.factory)(&self.shared.env(self.now), params);
+        }
         self.stack.push(ActiveScreen {
             id,
             slot,
+            hinted,
             params: params.clone(),
             screen,
         });
@@ -2564,7 +2636,7 @@ impl Kernel {
             .settings
             .int(core_settings::NOTICE_SECONDS.as_str())
             .clamp(1, 60) as u32;
-        let region = screen.region(&env).unwrap_or(self.framebuffer.bounds());
+        let region = screen.region(&env).unwrap_or(self.content());
         self.end_notice();
         self.notice = Some((screen, self.now.add_millis(u64::from(seconds) * 1000)));
         self.invalidate(region);
@@ -2605,7 +2677,7 @@ impl Kernel {
             return;
         };
         let env = self.shared.env(self.now);
-        let region = screen.region(&env).unwrap_or(self.framebuffer.bounds());
+        let region = screen.region(&env).unwrap_or(self.content());
         self.invalidate(region);
         self.output.request_refresh(RefreshMode::Fast);
     }
@@ -2620,6 +2692,7 @@ impl Kernel {
             });
             self.stack.truncate(i);
         }
+        self.sync_content();
     }
 
     /// Closes all screens above `index`.
@@ -2646,8 +2719,157 @@ impl Kernel {
 
     /// The area a screen occupies.
     fn region_of(&self, index: usize) -> Rect {
-        self.overlay(index)
-            .unwrap_or_else(|| self.framebuffer.bounds())
+        self.overlay(index).unwrap_or_else(|| self.content())
+    }
+
+    /// The part of the screen that screens have: all of it, or the part
+    /// above the row of hints.
+    fn content(&self) -> Rect {
+        let display = self.shared.device.display;
+        Rect::new(0, 0, display.width, display.height)
+    }
+
+    /// The row of hints, while it shows.
+    fn hint_row(&self) -> Option<Rect> {
+        let panel = self.framebuffer.bounds();
+        let top = self.shared.device.display.height;
+        (top < panel.height).then(|| Rect::new(0, top, panel.width, panel.height - top))
+    }
+
+    /// Whether the full screen shown (below any overlays) has the row of
+    /// hints below it; `None` without screens.
+    fn base_hinted(&self) -> Option<bool> {
+        let env = self.shared.env(self.now);
+        self.stack
+            .iter()
+            .rev()
+            .find(|s| s.screen.region(&env).is_none())
+            .or(self.stack.first())
+            .map(|s| s.hinted)
+    }
+
+    /// The height screens have: all of the screen's, or the part above
+    /// the row of hints.
+    fn content_height(&self, hinted: bool) -> u16 {
+        let panel = self.framebuffer.bounds().height;
+        let row = if hinted { self.hint_height } else { 0 };
+        panel - row.min(panel / 2)
+    }
+
+    /// Sizes the content for the full screen shown, after screens closed;
+    /// all of the screen is drawn again if that changed it.
+    fn sync_content(&mut self) {
+        let before = self.shared.device.display.height;
+        if let Some(hinted) = self.base_hinted() {
+            self.shared.device.display.height = self.content_height(hinted);
+        }
+        if self.shared.device.display.height != before {
+            self.hints.clear();
+            let panel = self.framebuffer.bounds();
+            self.invalidate(panel);
+        }
+    }
+
+    /// The height the row of hints takes: 0 where there is no row of
+    /// buttons below the screen, it is switched off or the screen is
+    /// turned (the buttons are no longer below it).
+    fn wanted_hint_height(&self) -> u16 {
+        let shown = !self.button_row.is_empty()
+            && self
+                .shared
+                .settings
+                .bool(core_settings::BUTTON_HINTS.as_str())
+            && self.rotation() == quireink_platform::Rotation::Deg0;
+        if shown {
+            quireink_sdk::ui::button_hints_height(&self.shared.env(self.now))
+        } else {
+            0
+        }
+    }
+
+    /// Makes every open screen anew when the row of hints came, went or
+    /// changed its height.
+    fn apply_hint_height(&mut self) {
+        let height = self.wanted_hint_height();
+        if height == self.hint_height {
+            return;
+        }
+        self.hint_height = height;
+        self.remake_screens();
+    }
+
+    /// Makes every open screen anew for the size it has now, e.g. after
+    /// the screen was resized or the row of hints changed.
+    fn remake_screens(&mut self) {
+        let now = self.now;
+        for i in 0..self.stack.len() {
+            let Some(spec) = self.registry.screens.get(&self.stack[i].id) else {
+                continue;
+            };
+            // As it was made first: an overlay as the full screen below it.
+            self.shared.device.display.height = self.content_height(self.stack[i].hinted);
+            let env = self.shared.env(now);
+            let active = &mut self.stack[i];
+            active.screen = (spec.factory)(&env, &active.params);
+        }
+        self.hints.clear();
+        self.end_notice();
+        self.sync_content();
+        self.unrendered = None;
+        self.rendered = None;
+        let bounds = self.framebuffer.bounds();
+        self.screen_changed(bounds, false);
+    }
+
+    /// What the row of hints shows for each button in it: what the button
+    /// runs here, as the screen on top names it.
+    fn current_hints(&self) -> Vec<Hint> {
+        use quireink_sdk::builtin::actions;
+        let env = self.shared.env(self.now);
+        let top = self.stack.last();
+        self.button_row
+            .iter()
+            .map(|button| {
+                let Some(action) = self.resolve(&InputKey::Button(Cow::Borrowed(button))) else {
+                    return Hint::Hidden;
+                };
+                match top.map_or(Hint::Default, |t| t.screen.hint(&action, &env)) {
+                    // Nowhere to go back to from the first screen.
+                    Hint::Default if action == actions::BACK && self.stack.len() < 2 => {
+                        Hint::Hidden
+                    }
+                    Hint::Default => self.default_hint(&action),
+                    hint => hint,
+                }
+            })
+            .collect()
+    }
+
+    /// What an action is called in the row of hints: arrows for moving,
+    /// short words for the rest.
+    fn default_hint(&self, action: &Id) -> Hint {
+        use quireink_sdk::builtin::actions;
+        let icon = match action {
+            a if *a == actions::LEFT => Some("chevron-left"),
+            a if *a == actions::RIGHT => Some("chevron-right"),
+            a if *a == actions::UP || *a == actions::PREV_PAGE => Some("chevron-up"),
+            a if *a == actions::DOWN || *a == actions::NEXT_PAGE => Some("chevron-down"),
+            a if *a == actions::NOTHING => return Hint::Hidden,
+            _ => None,
+        };
+        if let Some(icon) = icon {
+            return Hint::Icon(icon);
+        }
+        let translator = &self.shared.translator;
+        let own = format!("core.hint.{}", action.as_str());
+        let text = match translator.get(&own) {
+            Some(text) => text.to_string(),
+            None => match self.shared.actions.get(action.as_str()) {
+                Some(spec) => translator.tr(&spec.title).to_string(),
+                None => return Hint::Hidden,
+            },
+        };
+        Hint::Text(text)
     }
 
     /// Actions bound by any key map preset, for validation.
@@ -2691,7 +2913,8 @@ impl Kernel {
         let env = self.shared.env(self.now);
         let regions: Vec<Option<Rect>> = self.stack.iter().map(|s| s.screen.region(&env)).collect();
         let base = regions.iter().rposition(Option::is_none).unwrap_or(0);
-        let bounds = self.framebuffer.bounds();
+        let bounds = self.content();
+        let row = self.hint_row();
         let mut canvas = self.framebuffer.canvas();
         let mut canvas = canvas.clipped(region);
         canvas.clear(Color::WHITE);
@@ -2700,6 +2923,11 @@ impl Kernel {
                 continue;
             };
             active.screen.draw(&mut canvas.clipped(area), &env);
+        }
+        if let Some(row) = row
+            && let Some(area) = row.intersection(&region)
+        {
+            quireink_sdk::ui::draw_button_hints(&mut canvas.clipped(area), &env, row, &self.hints);
         }
         // A message over everything.
         if let Some((notice, _)) = &mut self.notice
@@ -3064,6 +3292,13 @@ impl Kernel {
         }
         if *id == core_settings::READING_FONT {
             self.apply_reading_font();
+        }
+        // Its size follows the interface's.
+        if *id == core_settings::BUTTON_HINTS
+            || *id == core_settings::UI_SIZE
+            || *id == core_settings::ROTATION
+        {
+            self.apply_hint_height();
         }
         if *id == core_settings::LANGUAGE
             || *id == core_settings::NIGHT_MODE

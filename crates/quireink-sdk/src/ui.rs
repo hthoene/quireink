@@ -31,6 +31,7 @@ use quireink_platform::{Color, Point, Rect, Storage};
 use crate::builtin::{actions, fonts, settings};
 use crate::env::Env;
 use crate::fonts::FontHandle;
+use crate::screen::Hint;
 use crate::settings::{SettingKind, SettingSpec, SettingValue};
 
 /// Sizes of the standard UI elements, in pixels.
@@ -802,6 +803,62 @@ pub fn fit(font: &FontHandle<'_>, size: f32, text: &str, width: f32) -> String {
     }
     result.push('…');
     result
+}
+
+/// The height of the row of hints below the screen (see
+/// [`draw_button_hints`]).
+pub fn button_hints_height(env: &Env<'_>) -> u16 {
+    let style = UiStyle::new(env);
+    let line = style.font(env).map_or(style.small * 1.3, |f| {
+        f.line_metrics(style.small).line_height
+    });
+    ((line * 1.5) as u32 + style.line).max(env.metrics.mm(4)) as u16
+}
+
+/// The row of hints below the screen: a line above it, then what each
+/// button under it does, centred in an equal share of the width, as the
+/// buttons lie.
+pub fn draw_button_hints(canvas: &mut Canvas<'_>, env: &Env<'_>, area: Rect, hints: &[Hint]) {
+    let style = UiStyle::new(env);
+    fill(canvas, area, Color::WHITE);
+    let line = style.line.min(u32::from(area.height));
+    canvas.fill_rect(
+        i32::from(area.x),
+        i32::from(area.y),
+        u32::from(area.width),
+        line,
+        Color::BLACK,
+    );
+    let Some(font) = style.font(env) else {
+        return;
+    };
+    let count = hints.len() as u32;
+    let row = Rect::new(
+        area.x,
+        area.y + line as u16,
+        area.width,
+        area.height - line as u16,
+    );
+    for (i, hint) in hints.iter().enumerate() {
+        let (i, width) = (i as u32, u32::from(area.width));
+        let left = u32::from(area.x) + width * i / count;
+        let right = u32::from(area.x) + width * (i + 1) / count;
+        let cell = Rect::new(left as u16, row.y, (right - left) as u16, row.height);
+        let room = (right - left).saturating_sub(2 * style.gap) as f32;
+        let middle = left as f32 + (right - left) as f32 / 2.0;
+        match hint {
+            Hint::Text(text) => {
+                let text = fit(&font, style.small, text, room);
+                let x = middle - font.measure(style.small, &text) / 2.0;
+                draw_label(canvas, &font, style.small, x, cell, &text, Color::BLACK);
+            }
+            Hint::Icon(name) => {
+                let x = middle - icon_width(env, name, style.text) / 2.0;
+                draw_icon(canvas, env, name, style.text, x, cell, Color::BLACK);
+            }
+            Hint::Default | Hint::Hidden => {}
+        }
+    }
 }
 
 /// Fills a rectangle with the style's corners.
