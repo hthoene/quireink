@@ -63,8 +63,9 @@ pub const PROFILES: &[Profile] = &[
                 width: 480,
                 height: 800,
                 dpi: 220,
-                // Unverified: 4 gray levels via the controller's LUTs.
-                format: PixelFormat::Gray2,
+                // As the firmware draws: black and white, what the panel
+                // shows until its four grays (the controller's LUTs) come.
+                format: PixelFormat::Mono1,
                 rotation: Rotation::Deg90,
                 color: None,
             },
@@ -91,7 +92,7 @@ pub const PROFILES: &[Profile] = &[
         font_packs: true,
         // 96 of 800 rows: 11.3 KiB instead of 94 KiB, nine bands a frame.
         // The controller takes 8 rows (turned) in a byte.
-        frame_rows: Some(96),
+        frame_rows: Some(192),
         row_align: 8,
         // A 4.3" screen: smaller text, so menus and pages hold enough.
         settings: &[("core.ui-size", "9"), ("reader.font-size", "9")],

@@ -217,6 +217,22 @@ impl Framebuffer {
     /// `(x, y)`, which must lie inside the framebuffer. Does not mark the
     /// pixel dirty; callers mark whole areas.
     pub(crate) fn blend_pixel(&mut self, x: u16, y: u16, color: Color, alpha: u8) {
+        // Gray formats mix in gray: every glyph's edge comes here, and on
+        // small devices the round through red, green and blue is felt.
+        if alpha != 255
+            && let Some(levels) = self.format.gray_levels()
+            && self.format.bits_per_pixel() <= 8
+        {
+            let max = u32::from(levels - 1);
+            let mut under = self.load(x, y) * 255 / max;
+            if self.inverted {
+                under = 255 - under;
+            }
+            let (a, over) = (u32::from(alpha), u32::from(color.luma()));
+            let mixed = (over * a + under * (255 - a) + 127) / 255;
+            let encoded = self.encode(Color::gray(mixed as u8));
+            return self.store(x, y, encoded);
+        }
         let value = if alpha == 255 {
             color
         } else {
@@ -269,6 +285,15 @@ impl Framebuffer {
         } else {
             self.put_gray(x, y, Color::rgb(rgb[0], rgb[1], rgb[2]).luma());
         }
+    }
+
+    /// The stored value of a pixel of a format of 8 bits or fewer.
+    fn load(&self, x: u16, y: u16) -> u32 {
+        let row = usize::from(y - self.top) * self.stride;
+        let bpp = usize::from(self.format.bits_per_pixel());
+        let bit = usize::from(x) * bpp;
+        let byte = self.data[row + bit / 8];
+        u32::from(byte >> (8 - bpp - bit % 8)) & ((1 << bpp) - 1)
     }
 
     /// Writes an encoded pixel value.

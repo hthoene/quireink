@@ -20,6 +20,7 @@ extern crate alloc;
 mod card;
 mod input;
 mod remote;
+mod sent;
 
 use alloc::boxed::Box;
 use core::cell::RefCell;
@@ -54,8 +55,9 @@ esp_bootloader_esp_idf::esp_app_desc!();
 
 /// Heap for QuireInk: what the emulator's X4 profile allows.
 const HEAP_SIZE: usize = 192 * 1024;
-/// Rows the kernel draws at once: 11.3 KiB of 2-bit gray.
-const FRAME_ROWS: u16 = 96;
+/// Rows the kernel draws at once: 11.3 KiB of black and white. Fewer
+/// bands draw faster: each costs the screens a pass over what they show.
+const FRAME_ROWS: u16 = 192;
 /// How long the main loop rests when there is nothing to do.
 const POLL_MS: u64 = 10;
 /// How often the battery is read.
@@ -71,7 +73,9 @@ const DEVICE: DeviceInfo = DeviceInfo {
         width: display::WIDTH,
         height: display::HEIGHT,
         dpi: 220,
-        format: PixelFormat::Gray2,
+        // What the panel shows until its four grays come: drawing in gray
+        // only to send black and white costs time and memory.
+        format: PixelFormat::Mono1,
         rotation: Rotation::Deg90,
         color: None,
     },
@@ -378,9 +382,14 @@ where
         };
         let mut failed = None;
         let started = now();
+        // What is sent is kept for sending again after a fast refresh.
+        let mut sent = sent::Sent::default();
         kernel.render(&mut |top, rows| {
             if let Err(e) = display.write_rows(top, rows, planes) {
                 failed = Some(e);
+            }
+            if refresh == Refresh::Fast {
+                sent.keep(top, &rows);
             }
         });
         let drawn = now();
@@ -389,12 +398,16 @@ where
         }
         let shown = now();
         if refresh == Refresh::Fast {
-            // The frame now shown, for the next fast refresh to compare.
-            kernel.rerender(&mut |top, rows| {
+            // The frame now shown, for the next fast refresh to compare:
+            // as it was sent, or drawn anew if it was not all kept.
+            let mut again = |top: u16, rows: quireink_platform::FrameView<'_>| {
                 if let Err(e) = display.write_rows(top, rows, Planes::SHOWN) {
                     failed = Some(e);
                 }
-            });
+            };
+            if !sent.replay(&mut again) {
+                kernel.rerender(&mut again);
+            }
         }
         if let Some(e) = failed {
             warn!("display: {e:?}");

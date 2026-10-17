@@ -35,6 +35,12 @@ change the plugin SDK.
   counts while QuireInk is busy (before, the buttons did nothing while
   the reader counted a book's pages); presses wait in a queue with the
   time they came.
+- X4: a page turns in about 1.5 s instead of 4 to 6. It draws in black and
+  white, what its panel shows (its four grays are still to come), in
+  bands twice as tall; the frame sent is kept in runs of bytes and sent
+  again after a fast refresh instead of drawn anew; gray formats blend
+  glyph edges in gray, not through red, green and blue; the panel gets
+  its bytes straight from the frame, in bigger pieces.
 - X4: on USB power, sleep shows the sleep screen and keeps the USB
   connection, so a computer can still read the log and wake it.
 

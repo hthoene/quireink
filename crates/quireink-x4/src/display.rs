@@ -39,8 +39,9 @@ pub const HEIGHT: u16 = PANEL_WIDTH;
 
 /// Longest wait for the controller, e.g. a full refresh (about 2 s).
 const BUSY_TIMEOUT_MS: u32 = 30_000;
-/// Bytes sent at once.
-const CHUNK: usize = 256;
+/// Bytes sent at once: each sending has its cost, a column of a band takes
+/// 12 to 24 bytes.
+const CHUNK: usize = 2048;
 
 /// The controller's commands used here.
 mod cmd {
@@ -222,6 +223,23 @@ where
         // Whole bytes: rows past the band's end (only at its last byte)
         // are white.
         let bytes = usize::from(height.div_ceil(8));
+        // Light pixels show white, dark ones black: gray formats read
+        // straight from their bytes, others through their colour.
+        let bpp = usize::from(rows.format.bits_per_pixel());
+        let gray = rows.format.gray_levels().is_some() && bpp <= 8;
+        let max = (1u32 << bpp.min(8)) - 1;
+        let light = |x: u16, y: u16| {
+            if gray {
+                let bit = usize::from(x) * bpp;
+                let at = usize::from(y) * rows.stride + bit / 8;
+                let byte = rows.data.get(at).copied().unwrap_or(0xFF);
+                let level = u32::from(byte >> (8 - bpp - bit % 8)) & max;
+                level * 255 >= 128 * max
+            } else {
+                let c = rows.pixel(x, y);
+                u16::from(c.r) * 77 + u16::from(c.g) * 150 + u16::from(c.b) * 29 >= 128 * 256
+            }
+        };
         for (plane, write) in [
             (planes.new, cmd::WRITE_NEW),
             (planes.shown, cmd::WRITE_SHOWN),
@@ -237,11 +255,7 @@ where
                     let mut bits = 0u8;
                     for bit in 0..8u16 {
                         let y = byte as u16 * 8 + bit;
-                        let white = y >= height || {
-                            let c = rows.pixel(x, y);
-                            u16::from(c.r) * 77 + u16::from(c.g) * 150 + u16::from(c.b) * 29
-                                >= 128 * 256
-                        };
+                        let white = y >= height || light(x, y);
                         if white {
                             bits |= 0x80 >> bit;
                         }
