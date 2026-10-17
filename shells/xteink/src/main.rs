@@ -28,7 +28,7 @@ use core::cell::RefCell;
 
 use embedded_hal_bus::spi::RefCellDevice;
 use esp_backtrace as _;
-use esp_hal::analog::adc::{Adc, AdcCalCurve, AdcConfig, Attenuation};
+use esp_hal::analog::adc::{Adc, AdcCalBasic, AdcCalCurve, AdcConfig, Attenuation};
 use esp_hal::clock::CpuClock;
 use esp_hal::delay::Delay;
 use esp_hal::gpio::{Event, Input, InputConfig, Level, Output, OutputConfig, Pull, WakeupConfig};
@@ -177,8 +177,11 @@ fn main() -> ! {
 
     // Buttons and battery.
     let mut adc_config = AdcConfig::new();
-    let front = adc_config.enable_pin(p.GPIO1, Attenuation::_11dB);
-    let side = adc_config.enable_pin(p.GPIO2, Attenuation::_11dB);
+    // Calibrated for the ADC's offset: uncalibrated, readings came out
+    // some 1600 too high, and the two highest buttons of each ladder were
+    // lost above the top of the range.
+    let front = adc_config.enable_pin_with_cal::<_, AdcCalBasic<ADC1>>(p.GPIO1, Attenuation::_11dB);
+    let side = adc_config.enable_pin_with_cal::<_, AdcCalBasic<ADC1>>(p.GPIO2, Attenuation::_11dB);
     let cell = adc_config.enable_pin_with_cal::<_, AdcCalCurve<ADC1>>(p.GPIO0, Attenuation::_11dB);
     let adc = Adc::new(p.ADC1, adc_config);
     let power = Input::new(p.GPIO3, InputConfig::default().with_pull(Pull::Up));

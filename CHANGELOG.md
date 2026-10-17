@@ -66,6 +66,9 @@ change the plugin SDK.
   are dithered in whole numbers.
 - X4 remote: `--profile` shows where the time goes (the functions the
   processor was in, every 5 ms), `--trace` what is read and written.
+- X4: the buttons are read with the ADC calibrated for its offset.
+  Uncalibrated, every reading came out some 1600 too high: the lower page
+  button turned back, and the two left front buttons did nothing.
 - X4: on USB power, sleep shows the sleep screen and keeps the USB
   connection, so a computer can still read the log and wake it.
 

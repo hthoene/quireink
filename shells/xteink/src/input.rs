@@ -13,7 +13,7 @@ use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use critical_section::Mutex;
 use esp_hal::Blocking;
-use esp_hal::analog::adc::{Adc, AdcCalCurve, AdcPin};
+use esp_hal::analog::adc::{Adc, AdcCalBasic, AdcCalCurve, AdcPin};
 use esp_hal::gpio::Input;
 use esp_hal::handler;
 use esp_hal::peripherals::{ADC1, GPIO0, GPIO1, GPIO2};
@@ -36,8 +36,8 @@ pub type Change = (&'static str, bool, u64);
 pub struct Sampler {
     pub timer: PeriodicTimer<'static, Blocking>,
     pub adc: Adc<'static, ADC1<'static>, Blocking>,
-    pub front: AdcPin<GPIO1<'static>, ADC1<'static>>,
-    pub side: AdcPin<GPIO2<'static>, ADC1<'static>>,
+    pub front: AdcPin<GPIO1<'static>, ADC1<'static>, AdcCalBasic<ADC1<'static>>>,
+    pub side: AdcPin<GPIO2<'static>, ADC1<'static>, AdcCalBasic<ADC1<'static>>>,
     pub cell: AdcPin<GPIO0<'static>, ADC1<'static>, AdcCalCurve<ADC1<'static>>>,
     pub power: Input<'static>,
     debouncer: Debouncer,
@@ -75,8 +75,8 @@ impl Sampler {
     pub fn new(
         mut timer: PeriodicTimer<'static, Blocking>,
         adc: Adc<'static, ADC1<'static>, Blocking>,
-        front: AdcPin<GPIO1<'static>, ADC1<'static>>,
-        side: AdcPin<GPIO2<'static>, ADC1<'static>>,
+        front: AdcPin<GPIO1<'static>, ADC1<'static>, AdcCalBasic<ADC1<'static>>>,
+        side: AdcPin<GPIO2<'static>, ADC1<'static>, AdcCalBasic<ADC1<'static>>>,
         cell: AdcPin<GPIO0<'static>, ADC1<'static>, AdcCalCurve<ADC1<'static>>>,
         power: Input<'static>,
     ) -> Self {
